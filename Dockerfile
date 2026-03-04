@@ -14,8 +14,12 @@ RUN cargo build --release
 FROM debian:bookworm-slim
 WORKDIR /app
 
-# Installation des certificats CA
-RUN apt update && apt install -y ca-certificates libssl3 && rm -rf /var/lib/apt/lists/*
+# Installation des certificats CA, de libssl et de CURL pour le healthcheck
+RUN apt update && apt install -y \
+    ca-certificates \
+    libssl3 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copie du binaire
 COPY --from=builder /usr/src/app/target/release/message_api /app/message-api
