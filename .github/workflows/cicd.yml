@@ -1,0 +1,22 @@
+# name: API CI/CD
+
+# on:
+#   workflow_dispatch:
+#   push:
+
+# permissions:
+#   contents: read
+#   packages: write
+
+# jobs:
+#   APIs-cicd:
+#     uses: mairie360/CICD/.github/workflows/APIs_cicd.yml@main
+#     permissions:
+#           contents: write
+#           packages: write
+#           id-token: write
+#     with:
+#       postman_collection: ${{ vars.POSTMAN_{API}_API_COLLECTION_ID }} #change api name
+#       postman_environment: ${{ vars.POSTMAN_{API}_API_ENV_ID }} #change api name
+#       package_name: api-api #change api name
+#     secrets: inherit
