@@ -1,14 +1,14 @@
 volumes:
   postgres-data:
   redis-data:
-  core-target:
+  message-target:
 
 networks:
   backend:
 
 x-common-env: &common-env
   HOST: "0.0.0.0"
-  PORT: {port} #change port
+  PORT: 3003 #change port
   REDIS_URL: redis://redis:6379
   DB_TYPE: postgres
   DB_NAME: mairie_360_database
@@ -24,7 +24,7 @@ x-depends-on: &depends-on
     condition: service_healthy
 
 x-healthcheck: &healthcheck
-  test: ["CMD", "curl", "-f", "http://localhost:{port}"] #change port
+  test: ["CMD", "curl", "-f", "http://localhost:3003"] #change port
   interval: 10s
   timeout: 5s
   retries: 5
@@ -34,7 +34,7 @@ x-service: &service-template
   pull_policy: always
   restart: always
   expose:
-    - "3000"
+    - "3003"
   networks:
     - backend
   healthcheck:
@@ -44,7 +44,7 @@ services:
   postgres:
     image: ghcr.io/mairie360/database:dev-latest
     restart: always
-    container_name: mairie360-db-{api}-api #change api name
+    container_name: mairie360-db-message-api #change api name
     environment:
       POSTGRES_USER: ${DB_USER:-postgres}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-password}
@@ -63,7 +63,7 @@ services:
 
   liquibase:
     image: ghcr.io/mairie360/liquibase-migrations:dev-latest
-    container_name: mairie360-liquibase-{api}-api #change api name
+    container_name: mairie360-liquibase-message-api #change api name
     depends_on:
       postgres:
         condition: service_healthy
@@ -81,7 +81,7 @@ services:
 
   redis:
     image: redis:7.4.2-bookworm
-    container_name: mairie360-redis-{api}-api #change api name
+    container_name: mairie360-redis-message-api #change api name
     restart: always
     expose:
       - "6379"
@@ -95,8 +95,8 @@ services:
       timeout: 5s
       retries: 5
 
-  api: # change api name
-    container_name: api-developpement # change api name
+  message: # change api name
+    container_name: message-developpement # change api name
     build:
       context: .
       dockerfile: development.Dockerfile
@@ -104,17 +104,17 @@ services:
       watch:
         - action: sync
           path: ./src
-          target: /usr/src/{api}/src #change api name
+          target: /usr/src/message/src #change api name
         - action: sync
           path: ./Cargo.toml
-          target: /usr/src/{api}/Cargo.toml #change api name
+          target: /usr/src/message/Cargo.toml #change api name
         - action: sync
           path: ./Cargo.lock
-          target: /usr/src/{api}/Cargo.lock #change api name
+          target: /usr/src/message/Cargo.lock #change api name
     ports:
-      - "{port}:{port}" #change port
+      - "3003:3003" #change port
     volumes:
-      - api-target:/usr/src/api/target #change api name
+      - message-target:/usr/src/message/target #change api name
     networks:
       - backend
     dns:
@@ -122,7 +122,7 @@ services:
       - 1.1.1.1
     environment:
       <<: *common-env
-      PUBLIC_URL: http://core.development.mairie360.fr
+      PUBLIC_URL: http://message.development.mairie360.fr
       JWT_SECRET: b"secret"
       JWT_TIMEOUT: 3600
     depends_on:
@@ -131,7 +131,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://{api}:{port}/health"] # change api name and port
+      test: ["CMD", "curl", "-f", "http://message:3003/health"] # change api name and port
       interval: 10s
       timeout: 5s
       retries: 5
@@ -147,7 +147,7 @@ services:
     networks:
       - backend
     depends_on:
-      {api}: #change api name
+      message: #change api name
         condition: service_healthy
     extra_hosts:
-          - "{api}.development.mairie360.fr:127.0.0.1" # change api name
+          - "message.development.mairie360.fr:127.0.0.1" # change api name

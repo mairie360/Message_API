@@ -1,6 +1,6 @@
 use actix_web::{get, middleware, post, web, App, HttpResponse, HttpServer, Responder};
 
-use API_Template::auth_middleware::JwtMiddleware;
+use message_api::auth_middleware::JwtMiddleware;
 
 use mairie360_api_lib::database::db_interface::{get_db_interface, init_db_interface};
 use mairie360_api_lib::env_manager::get_critical_env_var;

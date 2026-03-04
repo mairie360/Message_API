@@ -10,7 +10,7 @@ RUN apt update && apt install -y --no-install-recommends \
 RUN cargo install cargo-watch
 
 # Définir le répertoire de travail
-WORKDIR /usr/src/core
+WORKDIR /usr/src/message
 
 # Copier uniquement les fichiers nécessaires
 COPY Cargo.toml .
@@ -23,7 +23,7 @@ ENV CARGO_HOME=/usr/local/cargo
 ENV PATH=$CARGO_HOME/bin:$PATH
 
 # Exposer le port
-EXPOSE 3000
+EXPOSE 3003
 
 # Copier le script d'entrée et le rendre exécutable
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh

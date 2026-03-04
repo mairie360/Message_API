@@ -18,7 +18,7 @@ WORKDIR /app
 RUN apt update && apt install -y ca-certificates libssl3 && rm -rf /var/lib/apt/lists/*
 
 # Copie du binaire
-COPY --from=builder /usr/src/app/target/release/core_api /app/core-api
+COPY --from=builder /usr/src/app/target/release/message_api /app/message-api
 
 # On lance le binaire
-CMD ["./core-api"]
+CMD ["./message-api"]
