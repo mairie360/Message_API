@@ -18,5 +18,5 @@ jobs:
     with:
       postman_collection: ${{ vars.POSTMAN_MESSAGE_API_COLLECTION_ID }} #change api name
       postman_environment: ${{ vars.POSTMAN_MESSAGE_API_ENV_ID }} #change api name
-      package_name: message-api #change api name
+      package_name: message-api #change api namfeat: add openapi gene
     secrets: inherit
