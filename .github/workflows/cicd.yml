@@ -10,13 +10,13 @@ permissions:
 
 jobs:
   APIs-cicd:
-    uses: mairie360/CICD/.github/workflows/APIs_cicd.yml@mair-56-setup-open-api-gen
+    uses: mairie360/CICD/.github/workflows/APIs_cicd.yml@v1.2.1
     permissions:
           contents: write
           packages: write
           id-token: write
     with:
-      postman_collection: ${{ vars.POSTMAN_MESSAGE_API_COLLECTION_ID }} #change api name
-      postman_environment: ${{ vars.POSTMAN_MESSAGE_API_ENV_ID }} #change api name
-      package_name: message-api #change api namfeat: add openapi gene
+      postman_collection: ${{ vars.POSTMAN_MESSAGE_API_COLLECTION_ID }}
+      postman_environment: ${{ vars.POSTMAN_MESSAGE_API_ENV_ID }}
+      package_name: message-api
     secrets: inherit
