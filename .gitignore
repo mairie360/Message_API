@@ -26,3 +26,8 @@ collection.json
 #Env file
 .env
 openapi.yaml
+package.json
+package-lock.json
+generated
+node_modules
+openapi.json
