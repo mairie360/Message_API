@@ -10,7 +10,7 @@ RUN apt update && apt install -y --no-install-recommends \
 RUN cargo install cargo-watch
 
 # Définir le répertoire de travail
-WORKDIR /usr/src/message
+WORKDIR /usr/src/message_api
 
 # Copier uniquement les fichiers nécessaires
 COPY Cargo.toml .
