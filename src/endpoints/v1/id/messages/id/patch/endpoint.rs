@@ -3,6 +3,8 @@ use actix_web::{patch, web, HttpResponse, Responder, ResponseError};
 use mairie360_api_lib::pool::AppState;
 use mairie360_api_lib::security::AuthenticatedUser;
 
+use crate::database::chats::patch_message_in_chat::query::patch_message_query;
+use crate::database::chats::patch_message_in_chat::view::PatchMessageQueryView;
 use crate::endpoints::v1::id::messages::id::patch::view::PatchMessageView;
 use crate::endpoints::v1::id::messages::id::MessagePathParams;
 
@@ -45,7 +47,6 @@ impl ResponseError for PatchMessageError {
 
 async fn trigger_patch_message(
     state: web::Data<AppState>,
-    chat_id: u64,
     message_id: u64,
     view: PatchMessageView,
 ) -> Result<(), PatchMessageError> {
@@ -54,7 +55,14 @@ async fn trigger_patch_message(
         None => return Err(PatchMessageError::DatabaseError),
     };
 
-    //query
+    let view = PatchMessageQueryView::new(message_id, view.content());
+    let result = patch_message_query(view, pool)
+        .await
+        .map_err(|_| PatchMessageError::DatabaseError)?;
+
+    if result == 0 {
+        return Err(PatchMessageError::BadRequest);
+    }
 
     // update cache
 
@@ -65,7 +73,7 @@ async fn trigger_patch_message(
     patch,
     path = "",
     responses(
-        (status = 204, description = "Message patched successfully"),
+        (status = 200, description = "Message patched successfully"),
         (status = 400, description = "Bad request"),
         (status = 500, description = "Internal server error")
     ),
@@ -85,9 +93,8 @@ pub async fn patch_message(
     params: web::Path<MessagePathParams>,
     view: web::Json<PatchMessageView>,
 ) -> Result<impl Responder, PatchMessageError> {
-    let chat_id = params.chat_id();
     let message_id = params.message_id();
     let view = view.try_into().map_err(|_| PatchMessageError::BadRequest)?;
-    trigger_patch_message(state, chat_id, message_id, view).await?;
-    Ok(HttpResponse::NoContent().finish())
+    trigger_patch_message(state, message_id, view).await?;
+    Ok(HttpResponse::Ok().finish())
 }

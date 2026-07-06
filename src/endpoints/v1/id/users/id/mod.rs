@@ -21,3 +21,9 @@ impl UsersPathParams {
         self.user_id
     }
 }
+
+pub fn config(cfg: &mut actix_web::web::ServiceConfig) {
+    cfg.service(
+        actix_web::web::scope("/{user_id}").service(delete::endpoint::remove_user_from_chat),
+    );
+}

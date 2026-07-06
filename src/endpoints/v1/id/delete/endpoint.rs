@@ -3,11 +3,14 @@ use actix_web::{delete, web, HttpResponse, Responder, ResponseError};
 use mairie360_api_lib::pool::AppState;
 use mairie360_api_lib::security::AuthenticatedUser;
 
+use crate::database::chats::delete_chat::query::delete_chat_query;
+use crate::database::chats::delete_chat::view::DeleteChatQueryView;
 use crate::endpoints::v1::id::ChatPathParams;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DeleteChatError {
     DatabaseError,
+    NothingToDelete,
     UnknownEvent,
 }
 
@@ -16,6 +19,9 @@ impl std::fmt::Display for DeleteChatError {
         match self {
             DeleteChatError::DatabaseError => {
                 write!(f, "An error occurred while accessing the database.")
+            }
+            DeleteChatError::NothingToDelete => {
+                write!(f, "Nothing to delete.")
             }
             DeleteChatError::UnknownEvent => {
                 write!(f, "Unknown event.")
@@ -28,7 +34,8 @@ impl ResponseError for DeleteChatError {
     fn status_code(&self) -> StatusCode {
         match self {
             DeleteChatError::DatabaseError => StatusCode::INTERNAL_SERVER_ERROR,
-            DeleteChatError::UnknownEvent => StatusCode::BAD_REQUEST,
+            DeleteChatError::NothingToDelete => StatusCode::OK,
+            DeleteChatError::UnknownEvent => StatusCode::NOT_FOUND,
         }
     }
 
@@ -46,7 +53,14 @@ async fn trigger_delete_chat(
         None => return Err(DeleteChatError::DatabaseError),
     };
 
-    //query
+    let view = DeleteChatQueryView::new(chat_id);
+    let result = delete_chat_query(view, pool.clone())
+        .await
+        .map_err(|_| DeleteChatError::DatabaseError)?;
+
+    if result != 1 {
+        return Err(DeleteChatError::DatabaseError);
+    }
 
     // update cache
 

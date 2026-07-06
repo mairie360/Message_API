@@ -6,13 +6,13 @@ edition = "2021"
 [dependencies]
 actix-web = "4"
 async-trait = "0.1.89"
-chrono = { version = "0.4.45", features = ["serde"] }
+chrono = { version = "0.4", features = ["serde"] }
 dashmap = "6.2.1"
 futures-util = "0.3"
-mairie360_api_lib = "0.8.3"
+mairie360_api_lib = "0.8.5"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
-sqlx = { version = "0.9.0", features = ["postgres", "ipnetwork", "uuid", "runtime-tokio-rustls"] }
+sqlx = { version = "0.8.0", features = ["postgres", "runtime-tokio", "chrono", "uuid"]}
 tokio = { version = "1.46.0", features = ["full"] }
 tokio-postgres = "0.7.16"
 tokio-stream = "0.1.18"

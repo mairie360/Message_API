@@ -3,12 +3,14 @@ use actix_web::{delete, web, HttpResponse, Responder, ResponseError};
 use mairie360_api_lib::pool::AppState;
 use mairie360_api_lib::security::AuthenticatedUser;
 
+use crate::database::chats::remove_user_from_chat::query::remove_member_from_chat_query;
+use crate::database::chats::remove_user_from_chat::view::RemoveMemberFromChatQueryView;
 use crate::endpoints::v1::id::users::id::UsersPathParams;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RemoveUserFromChatError {
     DatabaseError,
-    UnknownEvent,
+    BadRequest,
 }
 
 impl std::fmt::Display for RemoveUserFromChatError {
@@ -17,8 +19,8 @@ impl std::fmt::Display for RemoveUserFromChatError {
             RemoveUserFromChatError::DatabaseError => {
                 write!(f, "An error occurred while accessing the database.")
             }
-            RemoveUserFromChatError::UnknownEvent => {
-                write!(f, "Unknown event.")
+            RemoveUserFromChatError::BadRequest => {
+                write!(f, "Bad request.")
             }
         }
     }
@@ -28,7 +30,7 @@ impl ResponseError for RemoveUserFromChatError {
     fn status_code(&self) -> StatusCode {
         match self {
             RemoveUserFromChatError::DatabaseError => StatusCode::INTERNAL_SERVER_ERROR,
-            RemoveUserFromChatError::UnknownEvent => StatusCode::BAD_REQUEST,
+            RemoveUserFromChatError::BadRequest => StatusCode::BAD_REQUEST,
         }
     }
 
@@ -47,7 +49,14 @@ async fn trigger_remove_user_from_chat(
         None => return Err(RemoveUserFromChatError::DatabaseError),
     };
 
-    //query
+    let view = RemoveMemberFromChatQueryView::new(chat_id, user_id);
+    let result = remove_member_from_chat_query(view, pool.clone())
+        .await
+        .map_err(|_| RemoveUserFromChatError::DatabaseError)?;
+
+    if result != 1 {
+        return Err(RemoveUserFromChatError::BadRequest);
+    }
 
     // update cache
 

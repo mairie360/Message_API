@@ -3,8 +3,9 @@ use actix_web::{get, web, HttpResponse, Responder, ResponseError};
 use mairie360_api_lib::pool::AppState;
 use mairie360_api_lib::security::AuthenticatedUser;
 
-use crate::endpoints::v1::get::view::GetChatsResultView;
-use crate::endpoints::v1::id::users::get::view::GetUsersView;
+use crate::database::chats::get_chat_users::query::get_chat_members_query;
+use crate::database::chats::get_chat_users::view::GetChatMembersQueryView;
+use crate::endpoints::v1::id::users::get::view::{GetUsersView, User};
 use crate::endpoints::v1::id::ChatPathParams;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -50,11 +51,19 @@ async fn trigger_get_chat_users(
 
     // get cache
 
-    //query
+    let view = GetChatMembersQueryView::new(chat_id);
+    let result = get_chat_members_query(view, pool)
+        .await
+        .map_err(|_| GetChatUsersError::DatabaseError)?;
 
     // update cache
 
-    Ok(GetUsersView::new(vec![]))
+    Ok(GetUsersView::new(
+        result
+            .into_iter()
+            .map(|user_id| User::new(user_id as u64))
+            .collect(),
+    ))
 }
 
 #[utoipa::path(

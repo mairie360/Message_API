@@ -33,19 +33,14 @@ impl TryFrom<web::Json<CreateChatView>> for CreateChatView {
 #[derive(Debug, serde::Serialize, ToSchema)]
 pub struct CreateChatResultView {
     id: u64,
-    name: String,
 }
 
 impl CreateChatResultView {
-    pub fn new(id: u64, name: String) -> Self {
-        Self { id, name }
+    pub fn new(id: u64) -> Self {
+        Self { id }
     }
 
     pub fn id(&self) -> u64 {
         self.id
-    }
-
-    pub fn name(&self) -> &str {
-        &self.name
     }
 }

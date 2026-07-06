@@ -42,7 +42,7 @@ x-service: &service-template
 
 services:
   postgres:
-    image: ghcr.io/mairie360/database:dev-3bea6eb
+    image: ghcr.io/mairie360/database:dev-5515439
     restart: always
     container_name: mairie360-db-message-api
     environment:
@@ -62,7 +62,7 @@ services:
       retries: 5
 
   liquibase:
-    image: ghcr.io/mairie360/liquibase-migrations:dev-3bea6eb
+    image: ghcr.io/mairie360/liquibase-migrations:dev-5515439
     container_name: mairie360-liquibase-message-api
     depends_on:
       postgres:
@@ -76,6 +76,21 @@ services:
     command: >
       --changelog-file=changelog.xml
       update
+    networks:
+      - backend
+
+  seeder:
+    image: postgres:18-alpine
+    depends_on:
+      liquibase:
+        condition: service_completed_successfully
+    volumes:
+      - ./init-test.sql:/init-test.sql
+    # On se connecte directement au service 'postgres' via son nom de service
+    command: >
+      sh -c "psql -h postgres -U postgres -d mairie_360_database -f /init-test.sql"
+    environment:
+      PGPASSWORD: ${DB_PASSWORD:-password}
     networks:
       - backend
 

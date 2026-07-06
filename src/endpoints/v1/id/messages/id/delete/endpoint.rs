@@ -3,13 +3,14 @@ use actix_web::{delete, web, HttpResponse, Responder, ResponseError};
 use mairie360_api_lib::pool::AppState;
 use mairie360_api_lib::security::AuthenticatedUser;
 
+use crate::database::chats::delete_message_from_chat::query::delete_message_query;
+use crate::database::chats::delete_message_from_chat::view::DeleteMessageQueryView;
 use crate::endpoints::v1::id::messages::id::MessagePathParams;
-use crate::endpoints::v1::id::{messages, ChatPathParams};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DeleteMessageError {
     DatabaseError,
-    UnknownEvent,
+    UnknownMessage,
 }
 
 impl std::fmt::Display for DeleteMessageError {
@@ -18,8 +19,8 @@ impl std::fmt::Display for DeleteMessageError {
             DeleteMessageError::DatabaseError => {
                 write!(f, "An error occurred while accessing the database.")
             }
-            DeleteMessageError::UnknownEvent => {
-                write!(f, "Unknown event.")
+            DeleteMessageError::UnknownMessage => {
+                write!(f, "Unknown message.")
             }
         }
     }
@@ -29,7 +30,7 @@ impl ResponseError for DeleteMessageError {
     fn status_code(&self) -> StatusCode {
         match self {
             DeleteMessageError::DatabaseError => StatusCode::INTERNAL_SERVER_ERROR,
-            DeleteMessageError::UnknownEvent => StatusCode::BAD_REQUEST,
+            DeleteMessageError::UnknownMessage => StatusCode::NOT_FOUND,
         }
     }
 
@@ -40,7 +41,6 @@ impl ResponseError for DeleteMessageError {
 
 async fn trigger_delete_message(
     state: web::Data<AppState>,
-    chat_id: u64,
     message_id: u64,
 ) -> Result<(), DeleteMessageError> {
     let pool = match state.db_pool.clone() {
@@ -48,7 +48,14 @@ async fn trigger_delete_message(
         None => return Err(DeleteMessageError::DatabaseError),
     };
 
-    //query
+    let view = DeleteMessageQueryView::new(message_id);
+    let result = delete_message_query(view, pool)
+        .await
+        .map_err(|_| DeleteMessageError::DatabaseError)?;
+
+    if result != 1 {
+        return Err(DeleteMessageError::UnknownMessage);
+    }
 
     // update cache
 
@@ -61,6 +68,7 @@ async fn trigger_delete_message(
     responses(
         (status = 204, description = "Message deleted successfully"),
         (status = 400, description = "Bad request"),
+        (status = 404, description = "Message not found"),
         (status = 500, description = "Internal server error")
     ),
     params(
@@ -77,8 +85,7 @@ pub async fn delete_message(
     _: AuthenticatedUser,
     params: web::Path<MessagePathParams>,
 ) -> Result<impl Responder, DeleteMessageError> {
-    let chat_id = params.chat_id();
     let message_id = params.message_id();
-    trigger_delete_message(state, chat_id, message_id).await?;
+    trigger_delete_message(state, message_id).await?;
     Ok(HttpResponse::NoContent().finish())
 }
