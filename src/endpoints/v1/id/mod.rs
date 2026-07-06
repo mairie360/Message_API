@@ -19,3 +19,13 @@ impl ChatPathParams {
         self.chat_id
     }
 }
+
+pub fn config(cfg: &mut actix_web::web::ServiceConfig) {
+    cfg.service(
+        actix_web::web::scope("/{chat_id}")
+            .service(delete::endpoint::delete_chat)
+            .service(get::endpoint::get_chat)
+            .configure(messages::config)
+            .configure(users::config),
+    );
+}

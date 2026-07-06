@@ -3,6 +3,10 @@ use actix_web::{post, web, HttpResponse, Responder, ResponseError};
 use mairie360_api_lib::pool::AppState;
 use mairie360_api_lib::security::AuthenticatedUser;
 
+use crate::database::chats::add_users_to_chat::query::add_members_to_chat_query;
+use crate::database::chats::add_users_to_chat::view::AddMembersToChatQueryView;
+use crate::database::chats::create_chat::query::create_chat_query;
+use crate::database::chats::create_chat::view::CreateChatQueryView;
 use crate::endpoints::v1::post::view::{CreateChatResultView, CreateChatView};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -41,17 +45,27 @@ async fn trigger_create_chat(
     state: web::Data<AppState>,
     user_id: u64,
     view: CreateChatView,
-) -> Result<(), CreateChatError> {
+) -> Result<CreateChatResultView, CreateChatError> {
     let pool = match state.db_pool.clone() {
         Some(pool) => pool,
         None => return Err(CreateChatError::DatabaseError),
     };
 
-    //query
+    let query_view = CreateChatQueryView::new(view.name(), None);
+    let result = create_chat_query(query_view, pool.clone())
+        .await
+        .map_err(|_| CreateChatError::DatabaseError)? as u64;
+
+    let mut members = view.members().to_vec();
+    members.push(user_id);
+    let query_view = AddMembersToChatQueryView::new(result, members);
+    let _ = add_members_to_chat_query(query_view, pool.clone())
+        .await
+        .map_err(|_| CreateChatError::DatabaseError)?;
 
     // update cache
 
-    Ok(())
+    Ok(CreateChatResultView::new(result))
 }
 
 #[utoipa::path(

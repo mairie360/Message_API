@@ -2,21 +2,16 @@ use utoipa::ToSchema;
 
 #[derive(Debug, serde::Serialize, ToSchema)]
 pub struct User {
-    id: String,
-    name: String,
+    id: u64,
 }
 
 impl User {
-    pub fn new(id: String, name: String) -> Self {
-        Self { id, name }
+    pub fn new(id: u64) -> Self {
+        Self { id }
     }
 
-    pub fn id(&self) -> &str {
-        &self.id
-    }
-
-    pub fn name(&self) -> &str {
-        &self.name
+    pub fn id(&self) -> u64 {
+        self.id
     }
 }
 

@@ -1,4 +1,9 @@
-use crate::sse::state::AppState;
+use crate::{
+    database::chats::get_chat_users::{
+        query::get_chat_members_query, view::GetChatMembersQueryView,
+    },
+    sse::state::AppState,
+};
 use actix_web::web;
 use sqlx::PgPool;
 use std::sync::Arc;
@@ -13,13 +18,19 @@ pub async fn start_internal_event_listener(
     // Cette boucle tourne en tâche de fond à l'infini
     while let Ok(event) = rx.recv().await {
         let state_clone = state.clone();
-        let _ = db_pool.clone();
+        let db_pool = db_pool.clone();
 
         // On traite chaque événement dans une sous-tâche pour ne pas bloquer le bus
         tokio::spawn(async move {
             // 1. Le SSE va chercher en DB qui doit recevoir les messages pour ce chat
-            // //todo: récupérer les membres du chat depuis la DB
-            let members: Vec<i32> = vec![];
+            let view = GetChatMembersQueryView::new(event.chat_id);
+            let members: Vec<i32> = match get_chat_members_query(view, db_pool).await {
+                Ok(members) => members,
+                Err(e) => {
+                    eprintln!("Erreur lors de la récupération des membres du chat: {}", e);
+                    vec![]
+                }
+            };
 
             // 2. Diffusion ciblée aux agents en ligne
             for user_id in members {
