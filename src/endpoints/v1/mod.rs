@@ -4,8 +4,12 @@ pub mod id;
 pub mod post;
 pub mod stream;
 
-use actix_web::web;
-
-pub fn config(cfg: &mut web::ServiceConfig) {
-    cfg.service(web::scope("/v1"));
+pub fn config(cfg: &mut actix_web::web::ServiceConfig) {
+    cfg.service(
+        actix_web::web::scope("/v1")
+            .service(get::endpoint::get_chats)
+            .service(post::endpoint::create_chat)
+            .service(stream::endpoint::sse_stream_route)
+            .configure(id::config),
+    );
 }

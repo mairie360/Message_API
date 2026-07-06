@@ -33,26 +33,12 @@ impl TryFrom<web::Json<PostMessageView>> for PostMessageView {
 
 #[derive(Debug, serde::Serialize, ToSchema)]
 pub struct PostMessageResultView {
-    pub sitation: Option<u64>,
-    pub content: String,
-    pub id: u64,
+    id: u64,
 }
 
 impl PostMessageResultView {
-    pub fn new(sitation: Option<u64>, content: String, id: u64) -> Self {
-        Self {
-            sitation,
-            content,
-            id,
-        }
-    }
-
-    pub fn sitation(&self) -> Option<u64> {
-        self.sitation
-    }
-
-    pub fn content(&self) -> &str {
-        &self.content
+    pub fn new(id: u64) -> Self {
+        Self { id }
     }
 
     pub fn id(&self) -> u64 {

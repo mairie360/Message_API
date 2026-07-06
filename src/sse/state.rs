@@ -28,5 +28,5 @@ pub struct ChatSignal {
 
     /// L'identifiant unique du salon de discussion concerné
     #[schema(example = "123e4567-e89b-12d3-a456-426614174000")]
-    pub chat_id: String,
+    pub chat_id: u64,
 }

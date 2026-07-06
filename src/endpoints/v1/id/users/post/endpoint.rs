@@ -3,9 +3,10 @@ use actix_web::{post, web, HttpResponse, Responder, ResponseError};
 use mairie360_api_lib::pool::AppState;
 use mairie360_api_lib::security::AuthenticatedUser;
 
+use crate::database::chats::add_users_to_chat::query::add_members_to_chat_query;
+use crate::database::chats::add_users_to_chat::view::AddMembersToChatQueryView;
 use crate::endpoints::v1::id::users::post::view::AddUsersToChat;
 use crate::endpoints::v1::id::ChatPathParams;
-use crate::endpoints::v1::post::view::{CreateChatResultView, CreateChatView};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AddUsersToChatError {
@@ -49,7 +50,10 @@ async fn trigger_add_users_to_chat(
         None => return Err(AddUsersToChatError::DatabaseError),
     };
 
-    //query
+    let view = AddMembersToChatQueryView::new(chat_id, view.users_id().to_vec());
+    let _ = add_members_to_chat_query(view, pool.clone())
+        .await
+        .map_err(|_| AddUsersToChatError::DatabaseError)?;
 
     // update cache
 

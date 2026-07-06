@@ -3,6 +3,8 @@ use actix_web::{get, web, HttpResponse, Responder, ResponseError};
 use mairie360_api_lib::pool::AppState;
 use mairie360_api_lib::security::AuthenticatedUser;
 
+use crate::database::chats::get_chats::query::get_chats_query;
+use crate::database::chats::get_chats::view::GetChatsQueryView;
 use crate::endpoints::v1::get::view::GetChatsResultView;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -48,11 +50,14 @@ async fn trigger_get_chats(
 
     // get cache
 
-    //query
+    let view = GetChatsQueryView::new(user_id);
+    let result = get_chats_query(view, pool)
+        .await
+        .map_err(|_| GetChatsError::DatabaseError)?;
 
     // update cache
 
-    Ok(GetChatsResultView::new(vec![]))
+    Ok(result.into())
 }
 
 #[utoipa::path(
