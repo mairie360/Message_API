@@ -1,9 +1,10 @@
 use actix_web::http::StatusCode;
 use actix_web::{delete, web, HttpResponse, Responder, ResponseError};
-use mairie360_api_lib::pool::AppState;
+use mairie360_api_lib::database::error::DbError;
+use mairie360_api_lib::error::ApiLibError;
 use mairie360_api_lib::security::AuthenticatedUser;
+use mairie360_api_lib::state::AppState;
 
-use crate::database::chats::delete_message_from_chat::query::delete_message_query;
 use crate::database::chats::delete_message_from_chat::view::DeleteMessageQueryView;
 use crate::endpoints::v1::id::messages::id::MessagePathParams;
 
@@ -43,21 +44,15 @@ async fn trigger_delete_message(
     state: web::Data<AppState>,
     message_id: u64,
 ) -> Result<(), DeleteMessageError> {
-    let pool = match state.db_pool.clone() {
-        Some(pool) => pool,
-        None => return Err(DeleteMessageError::DatabaseError),
-    };
-
     let view = DeleteMessageQueryView::new(message_id);
-    let result = delete_message_query(view, pool)
+    state
+        .get_smart_db()
+        .fetch_scalar::<i64, _>(&view)
         .await
-        .map_err(|_| DeleteMessageError::DatabaseError)?;
-
-    if result != 1 {
-        return Err(DeleteMessageError::UnknownMessage);
-    }
-
-    // update cache
+        .map_err(|e| match e {
+            ApiLibError::Database(DbError::NotFound) => DeleteMessageError::UnknownMessage,
+            _ => DeleteMessageError::DatabaseError,
+        })?;
 
     Ok(())
 }

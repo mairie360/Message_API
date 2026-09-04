@@ -1,64 +1,54 @@
-use crate::common::get_pool; // Utilisation de ta fonction utilitaire existante
+use crate::common::get_smart_db;
 use mairie360_api_lib::test_setup::queries_setup::get_shared_db;
 use message_api::database::chats::{
-    add_users_to_chat::{query::add_members_to_chat_query, view::AddMembersToChatQueryView},
-    create_chat::{query::create_chat_query, view::CreateChatQueryView},
-    get_chats::{query::get_chats_query, view::GetChatsQueryView},
+    add_users_to_chat::view::AddMembersToChatQueryView,
+    create_chat::view::CreateChatQueryView,
+    get_chats::view::{GetChatsQueryResultView, GetChatsQueryView},
 };
+use serial_test::serial;
 
-#[sqlx::test]
+#[tokio::test]
+#[serial]
 async fn test_get_chats_success() {
     let (_container, host) = get_shared_db().await;
-    let pool = get_pool(host.to_string()).await;
+    let db = get_smart_db(host).await;
 
-    let view = CreateChatQueryView::new("Test Chat", None);
+    for _ in 0..2 {
+        let view = CreateChatQueryView::new("Test Chat", None);
+        let chat_id = db.fetch_scalar::<i32, _>(&view).await.unwrap();
 
-    let result = create_chat_query(view, pool.clone()).await;
-
-    assert!(result.is_ok());
-
-    let view = AddMembersToChatQueryView::new(result.unwrap() as u64, vec![1]);
-    let result = add_members_to_chat_query(view, pool.clone()).await;
-
-    assert!(result.is_ok());
-
-    let view = CreateChatQueryView::new("Test Chat", None);
-
-    let result = create_chat_query(view, pool.clone()).await;
-
-    assert!(result.is_ok());
-
-    let view = AddMembersToChatQueryView::new(result.unwrap() as u64, vec![1]);
-    let result = add_members_to_chat_query(view, pool.clone()).await;
-
-    assert!(result.is_ok());
+        let view = AddMembersToChatQueryView::new(chat_id as u64, vec![1]);
+        assert!(db.execute(view).await.is_ok());
+    }
 
     let view = GetChatsQueryView::new(1);
-    let result = get_chats_query(view, pool).await;
+    let result = db.fetch_all::<GetChatsQueryResultView, _>(&view).await;
 
     assert!(result.is_ok());
-    assert!(result.unwrap().len() > 0);
+    assert!(!result.unwrap().is_empty());
 }
 
-#[sqlx::test]
+#[tokio::test]
+#[serial]
 async fn test_get_chats_no_chat() {
     let (_container, host) = get_shared_db().await;
-    let pool = get_pool(host.to_string()).await;
+    let db = get_smart_db(host).await;
 
     let view = GetChatsQueryView::new(2);
-    let result = get_chats_query(view, pool).await;
+    let result = db.fetch_all::<GetChatsQueryResultView, _>(&view).await;
 
     assert!(result.is_ok());
     assert_eq!(result.unwrap().len(), 0);
 }
 
-#[sqlx::test]
+#[tokio::test]
+#[serial]
 async fn test_get_chats_unknown_user() {
     let (_container, host) = get_shared_db().await;
-    let pool = get_pool(host.to_string()).await;
+    let db = get_smart_db(host).await;
 
     let view = GetChatsQueryView::new(999);
-    let result = get_chats_query(view, pool).await;
+    let result = db.fetch_all::<GetChatsQueryResultView, _>(&view).await;
 
     assert!(result.is_ok());
     assert_eq!(result.unwrap().len(), 0);

@@ -1,9 +1,10 @@
 use actix_web::http::StatusCode;
 use actix_web::{delete, web, HttpResponse, Responder, ResponseError};
-use mairie360_api_lib::pool::AppState;
+use mairie360_api_lib::database::error::DbError;
+use mairie360_api_lib::error::ApiLibError;
 use mairie360_api_lib::security::AuthenticatedUser;
+use mairie360_api_lib::state::AppState;
 
-use crate::database::chats::remove_user_from_chat::query::remove_member_from_chat_query;
 use crate::database::chats::remove_user_from_chat::view::RemoveMemberFromChatQueryView;
 use crate::endpoints::v1::id::users::id::UsersPathParams;
 
@@ -44,21 +45,15 @@ async fn trigger_remove_user_from_chat(
     chat_id: u64,
     user_id: u64,
 ) -> Result<(), RemoveUserFromChatError> {
-    let pool = match state.db_pool.clone() {
-        Some(pool) => pool,
-        None => return Err(RemoveUserFromChatError::DatabaseError),
-    };
-
     let view = RemoveMemberFromChatQueryView::new(chat_id, user_id);
-    let result = remove_member_from_chat_query(view, pool.clone())
+    state
+        .get_smart_db()
+        .fetch_scalar::<i32, _>(&view)
         .await
-        .map_err(|_| RemoveUserFromChatError::DatabaseError)?;
-
-    if result != 1 {
-        return Err(RemoveUserFromChatError::BadRequest);
-    }
-
-    // update cache
+        .map_err(|e| match e {
+            ApiLibError::Database(DbError::NotFound) => RemoveUserFromChatError::BadRequest,
+            _ => RemoveUserFromChatError::DatabaseError,
+        })?;
 
     Ok(())
 }

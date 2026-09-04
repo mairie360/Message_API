@@ -1,9 +1,10 @@
 use actix_web::http::StatusCode;
 use actix_web::{patch, web, HttpResponse, Responder, ResponseError};
-use mairie360_api_lib::pool::AppState;
+use mairie360_api_lib::database::error::DbError;
+use mairie360_api_lib::error::ApiLibError;
 use mairie360_api_lib::security::AuthenticatedUser;
+use mairie360_api_lib::state::AppState;
 
-use crate::database::chats::patch_message_in_chat::query::patch_message_query;
 use crate::database::chats::patch_message_in_chat::view::PatchMessageQueryView;
 use crate::endpoints::v1::id::messages::id::patch::view::PatchMessageView;
 use crate::endpoints::v1::id::messages::id::MessagePathParams;
@@ -50,21 +51,15 @@ async fn trigger_patch_message(
     message_id: u64,
     view: PatchMessageView,
 ) -> Result<(), PatchMessageError> {
-    let pool = match state.db_pool.clone() {
-        Some(pool) => pool,
-        None => return Err(PatchMessageError::DatabaseError),
-    };
-
     let view = PatchMessageQueryView::new(message_id, view.content());
-    let result = patch_message_query(view, pool)
+    state
+        .get_smart_db()
+        .fetch_scalar::<i64, _>(&view)
         .await
-        .map_err(|_| PatchMessageError::DatabaseError)?;
-
-    if result == 0 {
-        return Err(PatchMessageError::BadRequest);
-    }
-
-    // update cache
+        .map_err(|e| match e {
+            ApiLibError::Database(DbError::NotFound) => PatchMessageError::UnknownEvent,
+            _ => PatchMessageError::DatabaseError,
+        })?;
 
     Ok(())
 }
