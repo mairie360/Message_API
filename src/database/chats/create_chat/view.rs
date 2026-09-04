@@ -1,26 +1,28 @@
 use std::fmt::Display;
 
-use mairie360_api_lib::database::db_interface::DatabaseQueryView;
+use mairie360_api_lib::database::db_interface::{ApiRequestDto, QueryParam};
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CreateChatQueryView {
-    title: String,
-    group_id: Option<i32>,
+    params: Vec<QueryParam>,
 }
 
 impl CreateChatQueryView {
     pub fn new(title: &str, group_id: Option<i32>) -> Self {
         Self {
-            title: title.to_string(),
-            group_id,
+            params: vec![
+                QueryParam::Text(title.to_string()),
+                QueryParam::OptionI32(group_id),
+            ],
         }
     }
 
     pub fn title(&self) -> &str {
-        &self.title
+        self.params[0].as_text()
     }
 
     pub fn group_id(&self) -> Option<i32> {
-        self.group_id
+        self.params[1].as_option_i32()
     }
 }
 
@@ -29,14 +31,18 @@ impl Display for CreateChatQueryView {
         write!(
             f,
             "CreateChatQueryView: title={} group_id={}",
-            self.title,
-            self.group_id.unwrap_or_default()
+            self.title(),
+            self.group_id().unwrap_or_default()
         )
     }
 }
 
-impl DatabaseQueryView for CreateChatQueryView {
-    fn get_request(&self) -> String {
-        "INSERT INTO conversations (title, group_id) VALUES ($1, $2) RETURNING id".to_string()
+impl ApiRequestDto for CreateChatQueryView {
+    fn query_sql(&self) -> &'static str {
+        "INSERT INTO conversations (title, group_id) VALUES ($1, $2) RETURNING id"
+    }
+
+    fn query_params(&self) -> &[QueryParam] {
+        &self.params
     }
 }

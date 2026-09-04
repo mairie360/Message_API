@@ -36,11 +36,11 @@ async fn sse_stream_route(
     let (tx, rx) = mpsc::channel::<Result<actix_web::web::Bytes, String>>(10);
 
     // 3. Enregistrement du Sender (le tuyau) dans la DashMap de l'état global
-    state.online_agents.insert(user_id.clone(), tx.clone());
+    state.online_agents.insert(user_id, tx.clone());
 
     // 4. Lancement d'un ping (keep-alive) en tâche de fond toutes les 15 secondes
     let state_clone = state.clone();
-    let user_id_clone = user_id.clone();
+    let user_id_clone = user_id;
 
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(15));

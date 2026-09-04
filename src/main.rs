@@ -7,8 +7,8 @@ use message_api::endpoints::swagger::ApiDoc;
 use message_api::endpoints::{config, health, hello};
 
 use mairie360_api_lib::env_manager::get_critical_env_var;
-use mairie360_api_lib::pool::AppState;
 use mairie360_api_lib::security::JwtMiddleware;
+use mairie360_api_lib::state::AppState;
 
 use message_api::sse::event_manager::start_internal_event_listener;
 use utoipa::OpenApi;
@@ -44,7 +44,7 @@ async fn main() -> std::io::Result<()> {
     // 2. On lance l'écouteur SSE en tâche de fond parallèlement à Actix
     tokio::spawn(start_internal_event_listener(
         app_state.clone(),
-        state.db_pool.clone().unwrap().clone(),
+        state.get_smart_db().clone(),
     ));
     let data = web::Data::new(state);
 

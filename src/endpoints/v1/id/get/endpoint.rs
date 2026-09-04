@@ -1,11 +1,9 @@
 use actix_web::http::StatusCode;
 use actix_web::{get, web, HttpResponse, Responder, ResponseError};
-use mairie360_api_lib::pool::AppState;
 use mairie360_api_lib::security::AuthenticatedUser;
+use mairie360_api_lib::state::AppState;
 
-use crate::database::chats::get_chat::query::get_chat_query;
-use crate::database::chats::get_chat::view::GetChatQueryView;
-use crate::database::chats::reset_unread_count::query::reset_unread_count_query;
+use crate::database::chats::get_chat::view::{GetChatQueryView, Message};
 use crate::database::chats::reset_unread_count::view::ResetUnreadCountQueryView;
 use crate::endpoints::v1::id::get::view::GetChatResultView;
 use crate::endpoints::v1::id::ChatPathParams;
@@ -47,24 +45,18 @@ async fn trigger_get_chat(
     chat_id: u64,
     user_id: u64,
 ) -> Result<GetChatResultView, GetChatError> {
-    let pool = match state.db_pool.clone() {
-        Some(pool) => pool,
-        None => return Err(GetChatError::DatabaseError),
-    };
-
-    //get chat from cache
+    let db = state.get_smart_db();
 
     let view = GetChatQueryView::new(chat_id);
-    let result = get_chat_query(view, pool.clone())
+    let result: Vec<Message> = db
+        .fetch_all(&view)
         .await
         .map_err(|_| GetChatError::DatabaseError)?;
 
     let view = ResetUnreadCountQueryView::new(chat_id, user_id);
-    let _ = reset_unread_count_query(view, pool)
+    db.execute(view)
         .await
         .map_err(|_| GetChatError::DatabaseError)?;
-
-    // update cache
 
     Ok(result.into())
 }

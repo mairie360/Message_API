@@ -3,7 +3,7 @@ pub mod add_user_to_chat;
 pub mod create_chat;
 pub mod delete_chat;
 pub mod delete_message_from_chat;
-// pub mod get_chat;
+pub mod get_chat;
 pub mod get_chat_users;
 pub mod get_chats;
 pub mod patch_message_in_chat;
