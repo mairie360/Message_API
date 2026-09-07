@@ -1,2 +1,2 @@
-mod get_pool;
-pub use get_pool::get_pool;
+mod smart_db;
+pub use smart_db::get_smart_db;

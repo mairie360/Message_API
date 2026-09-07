@@ -1,9 +1,8 @@
 use actix_web::http::StatusCode;
 use actix_web::{post, web, HttpResponse, Responder, ResponseError};
-use mairie360_api_lib::pool::AppState;
 use mairie360_api_lib::security::AuthenticatedUser;
+use mairie360_api_lib::state::AppState;
 
-use crate::database::chats::add_message_to_chat::query::post_message_in_chat_query;
 use crate::database::chats::add_message_to_chat::view::PostMessageInChatQueryView;
 use crate::endpoints::v1::id::messages::post::view::{PostMessageResultView, PostMessageView};
 use crate::endpoints::v1::id::ChatPathParams;
@@ -48,24 +47,19 @@ async fn trigger_post_message(
     view: PostMessageView,
     chat_id: u64,
 ) -> Result<PostMessageResultView, PosteMessageError> {
-    let pool = match state.db_pool.clone() {
-        Some(pool) => pool,
-        None => return Err(PosteMessageError::DatabaseError),
-    };
-
     let view = PostMessageInChatQueryView::new(chat_id, user_id, view.content());
     let chat_event = ChatEvent {
         chat_id,
         sender_id: user_id,
         message: view.message().to_string(),
     };
-    let result = post_message_in_chat_query(view, pool)
+    let result = state
+        .get_smart_db()
+        .fetch_scalar::<i64, _>(&view)
         .await
         .map_err(|_| PosteMessageError::DatabaseError)?;
 
     let _ = sse_state.internal_bus.send(chat_event);
-
-    // update cache
 
     Ok(PostMessageResultView::new(result as u64))
 }
