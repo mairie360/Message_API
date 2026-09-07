@@ -1,9 +1,8 @@
 use actix_web::http::StatusCode;
 use actix_web::{post, web, HttpResponse, Responder, ResponseError};
-use mairie360_api_lib::pool::AppState;
 use mairie360_api_lib::security::AuthenticatedUser;
+use mairie360_api_lib::state::AppState;
 
-use crate::database::chats::add_users_to_chat::query::add_members_to_chat_query;
 use crate::database::chats::add_users_to_chat::view::AddMembersToChatQueryView;
 use crate::endpoints::v1::id::users::post::view::AddUsersToChat;
 use crate::endpoints::v1::id::ChatPathParams;
@@ -45,17 +44,16 @@ async fn trigger_add_users_to_chat(
     chat_id: u64,
     view: AddUsersToChat,
 ) -> Result<(), AddUsersToChatError> {
-    let pool = match state.db_pool.clone() {
-        Some(pool) => pool,
-        None => return Err(AddUsersToChatError::DatabaseError),
-    };
-
     let view = AddMembersToChatQueryView::new(chat_id, view.users_id().to_vec());
-    let _ = add_members_to_chat_query(view, pool.clone())
+    if view.is_empty() {
+        return Ok(());
+    }
+
+    state
+        .get_smart_db()
+        .execute(view)
         .await
         .map_err(|_| AddUsersToChatError::DatabaseError)?;
-
-    // update cache
 
     Ok(())
 }
@@ -85,6 +83,6 @@ pub async fn add_users_to_chat(
     let view = view
         .try_into()
         .map_err(|_| AddUsersToChatError::BadRequest)?;
-    let result = trigger_add_users_to_chat(state, params.chat_id, view).await?;
-    Ok(HttpResponse::Ok().json(result))
+    trigger_add_users_to_chat(state, params.chat_id, view).await?;
+    Ok(HttpResponse::Ok().finish())
 }
