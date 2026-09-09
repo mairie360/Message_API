@@ -19,5 +19,5 @@ jobs:
       postman_collection: ${{ vars.POSTMAN_MESSAGE_API_COLLECTION_ID }}
       postman_environment: ${{ vars.POSTMAN_MESSAGE_API_ENV_ID }}
       package_name: message-api
-      cicd_version: v1.13.2
+      cicd_version: v1.13.3
     secrets: inherit
