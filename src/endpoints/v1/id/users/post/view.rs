@@ -25,3 +25,15 @@ impl TryFrom<web::Json<AddUsersToChat>> for AddUsersToChat {
         Ok(params.into_inner())
     }
 }
+
+#[derive(Debug, serde::Serialize, ToSchema)]
+pub struct AddUsersToChatResultView {
+    chat_id: u64,
+    added: Vec<u64>,
+}
+
+impl AddUsersToChatResultView {
+    pub fn new(chat_id: u64, added: Vec<u64>) -> Self {
+        Self { chat_id, added }
+    }
+}

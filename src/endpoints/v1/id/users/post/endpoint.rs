@@ -4,7 +4,7 @@ use mairie360_api_lib::security::AuthenticatedUser;
 use mairie360_api_lib::state::AppState;
 
 use crate::database::chats::add_users_to_chat::view::AddMembersToChatQueryView;
-use crate::endpoints::v1::id::users::post::view::AddUsersToChat;
+use crate::endpoints::v1::id::users::post::view::{AddUsersToChat, AddUsersToChatResultView};
 use crate::endpoints::v1::id::ChatPathParams;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -43,10 +43,11 @@ async fn trigger_add_users_to_chat(
     state: web::Data<AppState>,
     chat_id: u64,
     view: AddUsersToChat,
-) -> Result<(), AddUsersToChatError> {
-    let view = AddMembersToChatQueryView::new(chat_id, view.users_id().to_vec());
+) -> Result<AddUsersToChatResultView, AddUsersToChatError> {
+    let added = view.users_id().to_vec();
+    let view = AddMembersToChatQueryView::new(chat_id, added.clone());
     if view.is_empty() {
-        return Ok(());
+        return Ok(AddUsersToChatResultView::new(chat_id, Vec::new()));
     }
 
     state
@@ -55,7 +56,7 @@ async fn trigger_add_users_to_chat(
         .await
         .map_err(|_| AddUsersToChatError::DatabaseError)?;
 
-    Ok(())
+    Ok(AddUsersToChatResultView::new(chat_id, added))
 }
 
 #[utoipa::path(
@@ -63,7 +64,7 @@ async fn trigger_add_users_to_chat(
     params(ChatPathParams),
     path = "",
     responses(
-        (status = 200, description = "Users added to chat successfully"),
+        (status = 200, description = "Users added to chat successfully", body = AddUsersToChatResultView),
         (status = 400, description = "Bad request"),
         (status = 500, description = "Internal server error")
     ),
@@ -83,6 +84,6 @@ pub async fn add_users_to_chat(
     let view = view
         .try_into()
         .map_err(|_| AddUsersToChatError::BadRequest)?;
-    trigger_add_users_to_chat(state, params.chat_id, view).await?;
-    Ok(HttpResponse::Ok().finish())
+    let result = trigger_add_users_to_chat(state, params.chat_id, view).await?;
+    Ok(HttpResponse::Ok().json(result))
 }
