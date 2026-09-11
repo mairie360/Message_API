@@ -33,6 +33,7 @@ Cargo aliases are defined in `.cargo/config.toml`:
 | Format fix | `cargo lint_fix` |
 | Clippy (CI gate, warnings = errors) | `cargo check_code` (`clippy --all-targets --all-features -- -D warnings`) |
 | Regenerate OpenAPI spec | `cargo open_api > openapi.json` |
+| Coverage (60% line threshold, excludes `endpoints`/`main.rs`/`lib.rs`) | `cargo cov_test` (or `cargo cov` for a `codecov.json` report) |
 | Regenerate the TS client | `npx orval` (reads `openapi.json` → `generated/`) |
 | Run locally | needs all env vars set (see below), then `cargo run` |
 | Full dev stack + hot reload | `docker compose up --watch` |
