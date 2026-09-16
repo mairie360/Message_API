@@ -4,8 +4,15 @@ use crate::database::chats::get_chats::view::GetChatsQueryResultView;
 
 #[derive(Debug, serde::Serialize, ToSchema)]
 pub struct ChatView {
+    /// Identifiant de la conversation, à réutiliser dans `/api/v1/{chat_id}/`.
+    #[schema(example = 5)]
     id: u64,
+    /// Titre de la conversation. Chaîne vide si elle n'en a pas — jamais `null`.
+    #[schema(example = "Service urbanisme")]
     name: String,
+    /// Messages non lus par l'utilisateur connecté. Remis à zéro dès qu'il ouvre la
+    /// conversation via `GET /api/v1/{chat_id}/`.
+    #[schema(example = 3)]
     unread_count: i32,
 }
 
@@ -43,6 +50,7 @@ impl From<GetChatsQueryResultView> for ChatView {
 
 #[derive(Debug, serde::Serialize, ToSchema)]
 pub struct GetChatsResultView {
+    /// Conversations dont l'utilisateur connecté est participant.
     chats: Vec<ChatView>,
 }
 

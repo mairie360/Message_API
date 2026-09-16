@@ -5,6 +5,8 @@ use crate::endpoints::v1::id::users::post::endpoint::AddUsersToChatError;
 
 #[derive(Debug, serde::Deserialize, ToSchema)]
 pub struct AddUsersToChat {
+    /// Identifiants Core API des utilisateurs à rattacher, en une seule requête.
+    #[schema(example = json!([42, 51]))]
     pub users_id: Vec<u64>,
 }
 
@@ -28,7 +30,12 @@ impl TryFrom<web::Json<AddUsersToChat>> for AddUsersToChat {
 
 #[derive(Debug, serde::Serialize, ToSchema)]
 pub struct AddUsersToChatResultView {
+    /// Conversation concernée.
+    #[schema(example = 5)]
     chat_id: u64,
+    /// Identifiants effectivement rattachés. Les comparer à `users_id` pour repérer ceux qui
+    /// étaient déjà participants ou qui n'existent pas.
+    #[schema(example = json!([42, 51]))]
     added: Vec<u64>,
 }
 

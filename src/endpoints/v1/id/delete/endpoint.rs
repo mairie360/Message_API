@@ -65,10 +65,44 @@ async fn trigger_delete_chat(
 #[utoipa::path(
     delete,
     path = "",
+    summary = "Supprimer une conversation",
+    description = "Supprime définitivement une conversation, ses messages et ses rattachements de \
+                   participants.\n\n\
+                   Aucun contrôle d'appartenance : tout utilisateur authentifié peut appeler cette route sur \
+                   n'importe quelle conversation dont il connaît l'identifiant.",
     responses(
-        (status = 204, description = "chat deleted successfully"),
-        (status = 400, description = "Bad request"),
-        (status = 500, description = "Internal server error")
+        (
+            status = 204,
+            description = "Conversation supprimée. Corps vide.",
+        ),
+        (
+            status = 400,
+            description = "Un segment de l'URL n'est pas un entier, ou le corps JSON est malformé.",
+            body = String,
+            content_type = "text/plain",
+            example = json!("Path deserialize error: can not parse `abc` to a u64")
+        ),
+        (
+            status = 401,
+            description = "En-tête `Authorization` absent, JWT invalide ou expiré, ou session révoquée.",
+            body = String,
+            content_type = "text/plain",
+            example = json!("Jeton expiré")
+        ),
+        (
+            status = 404,
+            description = "Aucune conversation ne porte cet identifiant.",
+            body = String,
+            content_type = "text/plain",
+            example = json!("Unknown event.")
+        ),
+        (
+            status = 500,
+            description = "Erreur de base de données.",
+            body = String,
+            content_type = "text/plain",
+            example = json!("An error occurred while accessing the database.")
+        ),
     ),
     params(
         ChatPathParams

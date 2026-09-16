@@ -61,10 +61,39 @@ async fn trigger_remove_user_from_chat(
 #[utoipa::path(
     delete,
     path = "",
+    summary = "Retirer un participant d'une conversation",
+    description = "Détache un utilisateur d'une conversation, qui cesse d'apparaître dans son \
+                   `GET /api/v1/`. Ses messages déjà publiés sont conservés.\n\n\
+                   Opération idempotente : retirer quelqu'un qui n'est pas participant répond \
+                   également `204`.\n\n\
+                   Aucun contrôle d'appartenance : tout utilisateur authentifié peut appeler cette route sur \
+                   n'importe quelle conversation dont il connaît l'identifiant.",
     responses(
-        (status = 204, description = "User removed successfully"),
-        (status = 400, description = "Bad request"),
-        (status = 500, description = "Internal server error")
+        (
+            status = 204,
+            description = "Participant retiré, ou déjà absent. Corps vide.",
+        ),
+        (
+            status = 400,
+            description = "Un segment de l'URL n'est pas un entier, ou le corps JSON est malformé.",
+            body = String,
+            content_type = "text/plain",
+            example = json!("Path deserialize error: can not parse `abc` to a u64")
+        ),
+        (
+            status = 401,
+            description = "En-tête `Authorization` absent, JWT invalide ou expiré, ou session révoquée.",
+            body = String,
+            content_type = "text/plain",
+            example = json!("Jeton expiré")
+        ),
+        (
+            status = 500,
+            description = "Erreur de base de données.",
+            body = String,
+            content_type = "text/plain",
+            example = json!("An error occurred while accessing the database.")
+        ),
     ),
     params(
         UsersPathParams

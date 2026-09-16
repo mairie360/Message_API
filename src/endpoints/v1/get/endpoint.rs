@@ -55,10 +55,46 @@ async fn trigger_get_chats(
 #[utoipa::path(
     get,
     path = "",
+    summary = "Lister ses conversations",
+    description = "Renvoie les conversations dont l'utilisateur porté par le JWT est \
+                   participant, avec son nombre de messages non lus sur chacune. C'est la seule \
+                   route de cette API filtrée sur l'appelant.\n\n\
+                   `unread_count` est remis à zéro dès que l'appelant ouvre la conversation via \
+                   `GET /api/v1/{chat_id}/`.\n\n\
+                   Une conversation sans titre renvoie une chaîne vide, jamais `null`.",
     responses(
-        (status = 200, description = "Chats retrieved successfully", body = GetChatsResultView),
-        (status = 400, description = "Bad request"),
-        (status = 500, description = "Internal server error")
+        (
+            status = 200,
+            description = "Conversations de l'utilisateur connecté.",
+            body = GetChatsResultView,
+            example = json!({
+                "chats": [
+                    { "id": 5, "name": "Service urbanisme", "unread_count": 3 },
+                    { "id": 8, "name": "Astreinte week-end", "unread_count": 0 }
+                ]
+            })
+        ),
+        (
+            status = 400,
+            description = "Échec de la lecture en base. Ce endpoint renvoie `400` là où les autres renverraient `500`.",
+            body = String,
+            content_type = "text/plain",
+            example = json!("Bad request.")
+        ),
+        (
+            status = 401,
+            description = "En-tête `Authorization` absent, JWT invalide ou expiré, ou session révoquée.",
+            body = String,
+            content_type = "text/plain",
+            example = json!("Jeton expiré")
+        ),
+        (
+            status = 500,
+            description = "Erreur de base de données.",
+            body = String,
+            content_type = "text/plain",
+            example = json!("An error occurred while accessing the database.")
+        ),
     ),
     security(
         ("jwt" = [])

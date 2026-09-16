@@ -64,10 +64,41 @@ async fn trigger_get_chat_users(
         ChatPathParams,
     ),
     path = "",
+    summary = "Lister les participants d'une conversation",
+    description = "Renvoie les identifiants Core API des participants. Seuls les identifiants sont \
+                   renvoyés : pour obtenir leurs noms, les repasser à \
+                   `GET /api/v1/user/?ids=1,2,3` de Core API.\n\n\
+                   Un `chat_id` inconnu renvoie une liste vide, pas une erreur.\n\n\
+                   Aucun contrôle d'appartenance : tout utilisateur authentifié peut appeler cette route sur \
+                   n'importe quelle conversation dont il connaît l'identifiant.",
     responses(
-        (status = 200, description = "Chat users retrieved successfully", body = GetUsersView),
-        (status = 400, description = "Bad request"),
-        (status = 500, description = "Internal server error")
+        (
+            status = 200,
+            description = "Participants de la conversation.",
+            body = GetUsersView,
+            example = json!({ "users": [{ "id": 42 }, { "id": 51 }] })
+        ),
+        (
+            status = 400,
+            description = "Un segment de l'URL n'est pas un entier, ou le corps JSON est malformé.",
+            body = String,
+            content_type = "text/plain",
+            example = json!("Path deserialize error: can not parse `abc` to a u64")
+        ),
+        (
+            status = 401,
+            description = "En-tête `Authorization` absent, JWT invalide ou expiré, ou session révoquée.",
+            body = String,
+            content_type = "text/plain",
+            example = json!("Jeton expiré")
+        ),
+        (
+            status = 500,
+            description = "Erreur de base de données.",
+            body = String,
+            content_type = "text/plain",
+            example = json!("An error occurred while accessing the database.")
+        ),
     ),
     security(
         ("jwt" = [])

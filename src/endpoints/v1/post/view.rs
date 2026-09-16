@@ -4,7 +4,12 @@ use utoipa::ToSchema;
 
 #[derive(Debug, serde::Deserialize, ToSchema)]
 pub struct CreateChatView {
+    /// Identifiants Core API des participants. L'appelant n'est pas ajouté automatiquement :
+    /// inclure son propre identifiant pour qu'il voie la conversation.
+    #[schema(example = json!([42, 51]))]
     members: Vec<u64>,
+    /// Titre de la conversation.
+    #[schema(example = "Service urbanisme")]
     name: String,
 }
 
@@ -32,6 +37,8 @@ impl TryFrom<web::Json<CreateChatView>> for CreateChatView {
 
 #[derive(Debug, serde::Serialize, ToSchema)]
 pub struct CreateChatResultView {
+    /// Identifiant attribué à la conversation créée.
+    #[schema(example = 5)]
     id: u64,
 }
 

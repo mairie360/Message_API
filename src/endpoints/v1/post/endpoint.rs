@@ -65,12 +65,50 @@ async fn trigger_create_chat(
 #[utoipa::path(
     post,
     path = "",
+    summary = "Créer une conversation",
+    description = "Crée une conversation et y rattache les participants listés dans `members`.\n\n\
+                   L'appelant n'est **pas** ajouté automatiquement : inclure son propre \
+                   identifiant dans `members` pour qu'elle apparaisse dans son \
+                   `GET /api/v1/`.\n\n\
+                   Les identifiants attendus sont ceux des comptes dans Core API. La réponse ne \
+                   contient que l'identifiant attribué.",
     responses(
-        (status = 200, description = "Chat created successfully", body = CreateChatResultView),
-        (status = 400, description = "Bad request"),
-        (status = 500, description = "Internal server error")
+        (
+            status = 200,
+            description = "Conversation créée. Le corps contient l'identifiant attribué.",
+            body = CreateChatResultView,
+            example = json!({ "id": 5 })
+        ),
+        (
+            status = 400,
+            description = "Corps JSON malformé, champ obligatoire absent, ou échec de l'insertion en base.",
+            body = String,
+            content_type = "text/plain",
+            example = json!("Bad request.")
+        ),
+        (
+            status = 401,
+            description = "En-tête `Authorization` absent, JWT invalide ou expiré, ou session révoquée.",
+            body = String,
+            content_type = "text/plain",
+            example = json!("Jeton expiré")
+        ),
+        (
+            status = 500,
+            description = "Erreur de base de données.",
+            body = String,
+            content_type = "text/plain",
+            example = json!("An error occurred while accessing the database.")
+        ),
     ),
-    request_body = CreateChatView,
+    request_body(
+        content = CreateChatView,
+        description = "Titre de la conversation et identifiants Core API de ses participants.",
+        example = json!({
+            "name": "Service urbanisme",
+            "members": [42, 51]
+        })
+    ),
     security(
         ("jwt" = [])
     ),

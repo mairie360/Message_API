@@ -4,6 +4,8 @@ use crate::endpoints::v1::id::messages::id::patch::endpoint::PatchMessageError;
 
 #[derive(Debug, serde::Deserialize, utoipa::ToSchema)]
 pub struct PatchMessageView {
+    /// Nouveau contenu, qui remplace intégralement l'ancien. Obligatoire.
+    #[schema(example = "La réunion est finalement décalée à 16h.")]
     content: String,
 }
 

@@ -39,7 +39,10 @@ impl Display for CreateChatQueryView {
 
 impl ApiRequestDto for CreateChatQueryView {
     fn query_sql(&self) -> &'static str {
-        "INSERT INTO conversations (title, group_id) VALUES ($1, $2) RETURNING id"
+        // `kind` est obligatoire depuis Database 1.2.0 : conversation de groupe si group_id est fourni.
+        "INSERT INTO conversations (title, group_id, kind) \
+         VALUES ($1, $2::int, CASE WHEN $2::int IS NULL THEN 'direct' ELSE 'group' END) \
+         RETURNING id"
     }
 
     fn query_params(&self) -> &[QueryParam] {

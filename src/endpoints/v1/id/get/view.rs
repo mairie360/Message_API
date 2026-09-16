@@ -5,11 +5,20 @@ use crate::database::chats::get_chat::view::Message;
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, ToSchema)]
 pub struct MessageView {
+    /// Identifiant du message.
+    #[schema(example = 101)]
     id: u64,
+    /// Contenu du message.
+    #[schema(example = "La réunion est décalée à 15h.")]
     content: String,
+    /// Identifiant Core API de l'auteur du message.
+    #[schema(example = 42)]
     sender_id: u64,
-    #[schema(value_type = String, format = DateTime)]
+    /// Date de publication.
+    #[schema(value_type = String, format = DateTime, example = "2026-09-16T09:12:00Z")]
     created_at: DateTime<Utc>,
+    /// Message auquel celui-ci répond. **Toujours `null` en lecture** : la valeur envoyée à la
+    /// publication n'est pas encore relue depuis la base.
     sitation: Option<u64>, // message sitation
 }
 
@@ -65,6 +74,8 @@ impl From<Message> for MessageView {
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, ToSchema)]
 pub struct GetChatResultView {
+    /// Tous les messages de la conversation, sans pagination. Vide si la conversation n'existe
+    /// pas ou ne contient aucun message.
     messages: Vec<MessageView>,
 }
 
