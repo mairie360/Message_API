@@ -3,6 +3,7 @@ use utoipa::ToSchema;
 
 use crate::endpoints::v1::id::users::post::endpoint::AddUsersToChatError;
 
+/// Utilisateurs à rattacher à la conversation du chemin.
 #[derive(Debug, serde::Deserialize, ToSchema)]
 pub struct AddUsersToChat {
     /// Identifiants Core API des utilisateurs à rattacher, en une seule requête.
@@ -28,6 +29,7 @@ impl TryFrom<web::Json<AddUsersToChat>> for AddUsersToChat {
     }
 }
 
+/// Résultat du rattachement : utilisateurs effectivement ajoutés.
 #[derive(Debug, serde::Serialize, ToSchema)]
 pub struct AddUsersToChatResultView {
     /// Conversation concernée.

@@ -20,6 +20,7 @@ pub struct AppState {
     pub internal_bus: broadcast::Sender<ChatEvent>,
 }
 
+/// Signal poussé sur le flux SSE quand une conversation change.
 #[derive(Serialize, ToSchema)]
 pub struct ChatSignal {
     /// Le type d'événement (ex: "NEW_MSG"). Indique qu'il s'est passé quelque chose dans la

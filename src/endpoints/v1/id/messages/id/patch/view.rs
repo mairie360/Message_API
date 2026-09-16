@@ -2,6 +2,7 @@ use actix_web::web;
 
 use crate::endpoints::v1::id::messages::id::patch::endpoint::PatchMessageError;
 
+/// Nouveau contenu d'un message, qui remplace entièrement l'ancien.
 #[derive(Debug, serde::Deserialize, utoipa::ToSchema)]
 pub struct PatchMessageView {
     /// Nouveau contenu, qui remplace intégralement l'ancien. Obligatoire.

@@ -3,6 +3,7 @@ use utoipa::ToSchema;
 
 use crate::database::chats::get_chat::view::Message;
 
+/// Message d'une conversation.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, ToSchema)]
 pub struct MessageView {
     /// Identifiant du message.
@@ -72,6 +73,7 @@ impl From<Message> for MessageView {
     }
 }
 
+/// Messages d'une conversation.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, ToSchema)]
 pub struct GetChatResultView {
     /// Tous les messages de la conversation, sans pagination. Vide si la conversation n'existe

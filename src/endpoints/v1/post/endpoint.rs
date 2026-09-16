@@ -66,10 +66,11 @@ async fn trigger_create_chat(
     post,
     path = "",
     summary = "Créer une conversation",
-    description = "Crée une conversation et y rattache les participants listés dans `members`.\n\n\
-                   L'appelant n'est **pas** ajouté automatiquement : inclure son propre \
-                   identifiant dans `members` pour qu'elle apparaisse dans son \
-                   `GET /api/v1/`.\n\n\
+    description = "Crée une conversation et y rattache l'appelant ainsi que les participants \
+                   listés dans `members`.\n\n\
+                   L'appelant est ajouté automatiquement : **ne pas** inclure son propre \
+                   identifiant dans `members`. Sinon le rattachement échoue en `500` alors que la \
+                   conversation a déjà été créée, sans aucun participant.\n\n\
                    Les identifiants attendus sont ceux des comptes dans Core API. La réponse ne \
                    contient que l'identifiant attribué.",
     responses(
@@ -95,7 +96,7 @@ async fn trigger_create_chat(
         ),
         (
             status = 500,
-            description = "Erreur de base de données.",
+            description = "Erreur de base de données, notamment si `members` contient l'appelant ou un doublon. La conversation peut alors avoir été créée sans participant.",
             body = String,
             content_type = "text/plain",
             example = json!("An error occurred while accessing the database.")
