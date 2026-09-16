@@ -11,8 +11,8 @@ real-time message notifications. It was bootstrapped from a "Rust API Template" 
 `docker-compose.yml` and `nginx.conf` are template residue, not TODOs for a fresh rename.
 
 Most cross-cutting behavior (DB + cache access, auth, env access, query trait, test harness)
-lives in the external crate **`mairie360_api_lib`** (crates.io, `1.2.0`, pinned in
-`Cargo.lock`). Read its source under `~/.cargo/registry/src/*/mairie360_api_lib-1.2.0/`
+lives in the external crate **`mairie360_api_lib`** (crates.io, `1.2.2`, pinned in
+`Cargo.lock`). Read its source under `~/.cargo/registry/src/*/mairie360_api_lib-1.2.2/`
 when in doubt — the API surface used here is: `state::AppState`
 (`get_smart_db()` / `get_redis()`), `smart_db::SmartDatabase`
 (`fetch_one` / `fetch_all` / `fetch_scalar` / `execute`),
@@ -43,8 +43,8 @@ Cargo aliases are defined in `.cargo/config.toml`:
 Integration tests live in `tests/` (there is no meaningful unit-test suite in `src/`).
 They are plain `#[tokio::test]` + `#[serial]` (`serial_test`) and use `mairie360_api_lib`'s
 `get_shared_db()`, which spins up **real Docker containers via testcontainers** —
-`ghcr.io/mairie360/database:1.0.0` plus a Liquibase migration container, in `--network host`
-mode (binds `127.0.0.1:5432`, so nothing else may hold that port, and tests must stay
+`ghcr.io/mairie360/database:1.2.1` (lib default, `TEST_DB_VERSION` overrides it) plus a Liquibase
+migration container, with Postgres published on a random host port (tests must still stay
 `#[serial]`). A running Docker daemon and pull access to `ghcr.io/mairie360/*` are required.
 
 `tests/common::get_smart_db(db_url)` builds a `SmartDatabase` over that Postgres. It also
