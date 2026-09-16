@@ -63,12 +63,48 @@ async fn trigger_add_users_to_chat(
     post,
     params(ChatPathParams),
     path = "",
+    summary = "Ajouter des participants à une conversation",
+    description = "Rattache un ou plusieurs utilisateurs à une conversation en un seul appel. La \
+                   conversation apparaît ensuite dans leur `GET /api/v1/`.\n\n\
+                   Le champ `added` de la réponse liste les identifiants effectivement rattachés : \
+                   le comparer à `users_id` pour repérer ceux qui étaient déjà participants ou qui \
+                   n'existent pas.\n\n\
+                   Aucun contrôle d'appartenance : tout utilisateur authentifié peut appeler cette route sur \
+                   n'importe quelle conversation dont il connaît l'identifiant.",
     responses(
-        (status = 200, description = "Users added to chat successfully", body = AddUsersToChatResultView),
-        (status = 400, description = "Bad request"),
-        (status = 500, description = "Internal server error")
+        (
+            status = 200,
+            description = "Participants ajoutés. `added` liste ceux qui l'ont effectivement été.",
+            body = AddUsersToChatResultView,
+            example = json!({ "chat_id": 5, "added": [42, 51] })
+        ),
+        (
+            status = 400,
+            description = "Corps JSON malformé, `chat_id` non entier, ou champ `users_id` absent.",
+            body = String,
+            content_type = "text/plain",
+            example = json!("Bad request.")
+        ),
+        (
+            status = 401,
+            description = "En-tête `Authorization` absent, JWT invalide ou expiré, ou session révoquée.",
+            body = String,
+            content_type = "text/plain",
+            example = json!("Jeton expiré")
+        ),
+        (
+            status = 500,
+            description = "Erreur de base de données.",
+            body = String,
+            content_type = "text/plain",
+            example = json!("An error occurred while accessing the database.")
+        ),
     ),
-    request_body = AddUsersToChat,
+    request_body(
+        content = AddUsersToChat,
+        description = "Identifiants Core API des utilisateurs à rattacher.",
+        example = json!({ "users_id": [42, 51] })
+    ),
     security(
         ("jwt" = [])
     ),

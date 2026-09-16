@@ -5,7 +5,11 @@ use crate::endpoints::v1::id::messages::post::endpoint::PosteMessageError;
 
 #[derive(Debug, serde::Deserialize, ToSchema)]
 pub struct PostMessageView {
+    /// Identifiant du message auquel celui-ci répond. Facultatif.
+    #[schema(example = 100)]
     sitation: Option<u64>, // message sitation
+    /// Contenu du message.
+    #[schema(example = "La réunion est décalée à 15h.")]
     content: String,
 }
 
@@ -33,6 +37,8 @@ impl TryFrom<web::Json<PostMessageView>> for PostMessageView {
 
 #[derive(Debug, serde::Serialize, ToSchema)]
 pub struct PostMessageResultView {
+    /// Identifiant attribué au message publié.
+    #[schema(example = 101)]
     id: u64,
 }
 

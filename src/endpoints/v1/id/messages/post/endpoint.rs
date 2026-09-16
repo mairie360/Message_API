@@ -68,12 +68,49 @@ async fn trigger_post_message(
     post,
     params(ChatPathParams),
     path = "",
+    summary = "Publier un message",
+    description = "Ajoute un message à une conversation et pousse un `ChatSignal` sur le flux SSE \
+                   de chaque participant connecté. L'auteur est déduit du JWT, jamais du corps.\n\n\
+                   `sitation` est facultatif : il porte l'identifiant du message auquel celui-ci \
+                   répond. Attention, le champ est renvoyé systématiquement à `null` par la \
+                   lecture `GET /api/v1/{chat_id}/`, qui ne le relit pas encore depuis la base.\n\n\
+                   La réponse ne contient que l'identifiant attribué au message.\n\n\
+                   Aucun contrôle d'appartenance : tout utilisateur authentifié peut appeler cette route sur \
+                   n'importe quelle conversation dont il connaît l'identifiant.",
     responses(
-        (status = 200, description = "Message posted successfully", body = PostMessageResultView),
-        (status = 400, description = "Bad request"),
-        (status = 500, description = "Internal server error")
+        (
+            status = 200,
+            description = "Message publié. Le corps contient l'identifiant attribué.",
+            body = PostMessageResultView,
+            example = json!({ "id": 101 })
+        ),
+        (
+            status = 400,
+            description = "Corps JSON malformé, `chat_id` non entier, ou champ `content` absent.",
+            body = String,
+            content_type = "text/plain",
+            example = json!("Bad request.")
+        ),
+        (
+            status = 401,
+            description = "En-tête `Authorization` absent, JWT invalide ou expiré, ou session révoquée.",
+            body = String,
+            content_type = "text/plain",
+            example = json!("Jeton expiré")
+        ),
+        (
+            status = 500,
+            description = "Erreur de base de données.",
+            body = String,
+            content_type = "text/plain",
+            example = json!("An error occurred while accessing the database.")
+        ),
     ),
-    request_body = PostMessageView,
+    request_body(
+        content = PostMessageView,
+        description = "Contenu du message et, éventuellement, le message auquel il répond.",
+        example = json!({ "content": "La réunion est décalée à 15h.", "sitation": null })
+    ),
     security(
         ("jwt" = [])
     ),

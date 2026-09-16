@@ -67,15 +67,49 @@ async fn trigger_patch_message(
 #[utoipa::path(
     patch,
     path = "",
+    summary = "Modifier un message",
+    description = "Remplace le contenu d'un message. `content` est obligatoire : ce `PATCH` \
+                   n'est pas une modification partielle, il écrase le texte.\n\n\
+                   Contrairement à la publication, aucun `ChatSignal` n'est poussé sur le flux \
+                   SSE : les autres participants ne voient la correction qu'à leur prochain \
+                   rechargement de la conversation.\n\n\
+                   Aucun contrôle d'auteur ni d'appartenance : tout utilisateur authentifié peut \
+                   modifier n'importe quel message. La réponse a un corps vide.",
     responses(
-        (status = 200, description = "Message patched successfully"),
-        (status = 400, description = "Bad request"),
-        (status = 500, description = "Internal server error")
+        (
+            status = 200,
+            description = "Message modifié. Corps vide.",
+        ),
+        (
+            status = 400,
+            description = "Corps JSON malformé, segment d'URL non entier, champ `content` absent, ou message inexistant.",
+            body = String,
+            content_type = "text/plain",
+            example = json!("Unknown event.")
+        ),
+        (
+            status = 401,
+            description = "En-tête `Authorization` absent, JWT invalide ou expiré, ou session révoquée.",
+            body = String,
+            content_type = "text/plain",
+            example = json!("Jeton expiré")
+        ),
+        (
+            status = 500,
+            description = "Erreur de base de données.",
+            body = String,
+            content_type = "text/plain",
+            example = json!("An error occurred while accessing the database.")
+        ),
     ),
     params(
         MessagePathParams
     ),
-    request_body = PatchMessageView,
+    request_body(
+        content = PatchMessageView,
+        description = "Nouveau contenu du message, qui remplace intégralement l'ancien.",
+        example = json!({ "content": "La réunion est finalement décalée à 16h." })
+    ),
     security(
         ("jwt" = [])
     ),

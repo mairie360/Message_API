@@ -2,6 +2,9 @@ use utoipa::ToSchema;
 
 #[derive(Debug, serde::Serialize, ToSchema)]
 pub struct User {
+    /// Identifiant Core API du participant, à repasser à `GET /api/v1/user/?ids=…` de Core API
+    /// pour obtenir sa fiche.
+    #[schema(example = 42)]
     id: u64,
 }
 
@@ -17,6 +20,7 @@ impl User {
 
 #[derive(Debug, serde::Serialize, ToSchema)]
 pub struct GetUsersView {
+    /// Participants de la conversation. Vide si la conversation n'existe pas.
     users: Vec<User>,
 }
 

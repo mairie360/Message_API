@@ -9,15 +9,35 @@ use tokio_stream::StreamExt;
 #[utoipa::path(
     get,
     path = "",
-    summary = "SSE notification stream",
-    description = "Ouvre un canal HTTP persistant. Chaque ligne `data:` renvoie un objet JSON `ChatSignal`.",
+    summary = "Ouvrir le flux de notifications temps réel",
+    description = "Ouvre un canal **SSE** (`text/event-stream`) que le client garde ouvert pour \
+                   être averti de l'activité de ses conversations, sans interroger l'API en \
+                   boucle.\n\n\
+                   Chaque ligne `data:` porte un objet `ChatSignal` indiquant *qu'il s'est passé \
+                   quelque chose* dans une conversation — le contenu du message n'y est pas : le \
+                   client recharge alors `GET /api/v1/{chat_id}/`.\n\n\
+                   Un commentaire `: ping` est émis toutes les 15 secondes pour tenir la connexion \
+                   ouverte à travers les proxys ; les clients SSE l'ignorent d'eux-mêmes. Le flux \
+                   ne se termine pas de lui-même : c'est au client de se reconnecter s'il est \
+                   coupé.\n\n\
+                   Un seul flux est retenu par utilisateur : rouvrir ce endpoint remplace le \
+                   précédent, qui cesse alors d'être alimenté. Le `body` documenté ci-dessous \
+                   décrit la charge utile d'**un** événement, pas la réponse entière.",
     responses(
         (
             status = 200,
-            description = "Flux SSE établi avec succès",
+            description = "Flux SSE établi. La connexion reste ouverte ; chaque ligne `data:` porte un `ChatSignal`.",
             content_type = "text/event-stream",
-            body = ChatSignal
-        )
+            body = ChatSignal,
+            example = json!({ "type": "NEW_MSG", "chat_id": 5 })
+        ),
+        (
+            status = 401,
+            description = "En-tête `Authorization` absent, JWT invalide ou expiré, ou session révoquée.",
+            body = String,
+            content_type = "text/plain",
+            example = json!("Jeton expiré")
+        ),
     ),
     security(
         ("jwt" = [])

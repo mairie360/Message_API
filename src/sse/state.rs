@@ -22,11 +22,12 @@ pub struct AppState {
 
 #[derive(Serialize, ToSchema)]
 pub struct ChatSignal {
-    /// Le type d'événement (ex: "NEW_MSG")
+    /// Le type d'événement (ex: "NEW_MSG"). Indique qu'il s'est passé quelque chose dans la
+    /// conversation, sans porter le contenu : au client de recharger `GET /api/v1/{chat_id}/`.
     #[schema(example = "NEW_MSG")]
     pub r#type: String,
 
-    /// L'identifiant unique du salon de discussion concerné
-    #[schema(example = "123e4567-e89b-12d3-a456-426614174000")]
+    /// L'identifiant du salon de discussion concerné, à recharger via `GET /api/v1/{chat_id}/`.
+    #[schema(example = 5)]
     pub chat_id: u64,
 }
