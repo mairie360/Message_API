@@ -2,10 +2,11 @@ use crate::endpoints::v1::post::endpoint::CreateChatError;
 use actix_web::web;
 use utoipa::ToSchema;
 
+/// Conversation à créer, avec ses participants initiaux.
 #[derive(Debug, serde::Deserialize, ToSchema)]
 pub struct CreateChatView {
-    /// Identifiants Core API des participants. L'appelant n'est pas ajouté automatiquement :
-    /// inclure son propre identifiant pour qu'il voie la conversation.
+    /// Identifiants Core API des autres participants. L'appelant est ajouté automatiquement :
+    /// ne pas inclure son propre identifiant, ni de doublon.
     #[schema(example = json!([42, 51]))]
     members: Vec<u64>,
     /// Titre de la conversation.
@@ -35,6 +36,7 @@ impl TryFrom<web::Json<CreateChatView>> for CreateChatView {
     }
 }
 
+/// Conversation créée.
 #[derive(Debug, serde::Serialize, ToSchema)]
 pub struct CreateChatResultView {
     /// Identifiant attribué à la conversation créée.

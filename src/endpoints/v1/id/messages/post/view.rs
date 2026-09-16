@@ -3,6 +3,7 @@ use utoipa::ToSchema;
 
 use crate::endpoints::v1::id::messages::post::endpoint::PosteMessageError;
 
+/// Message à publier dans la conversation du chemin.
 #[derive(Debug, serde::Deserialize, ToSchema)]
 pub struct PostMessageView {
     /// Identifiant du message auquel celui-ci répond. Facultatif.
@@ -35,6 +36,7 @@ impl TryFrom<web::Json<PostMessageView>> for PostMessageView {
     }
 }
 
+/// Message publié.
 #[derive(Debug, serde::Serialize, ToSchema)]
 pub struct PostMessageResultView {
     /// Identifiant attribué au message publié.

@@ -2,6 +2,7 @@ use utoipa::ToSchema;
 
 use crate::database::chats::get_chats::view::GetChatsQueryResultView;
 
+/// Conversation de l'utilisateur connecté, avec son nombre de messages non lus.
 #[derive(Debug, serde::Serialize, ToSchema)]
 pub struct ChatView {
     /// Identifiant de la conversation, à réutiliser dans `/api/v1/{chat_id}/`.
@@ -48,6 +49,7 @@ impl From<GetChatsQueryResultView> for ChatView {
     }
 }
 
+/// Conversations dont l'utilisateur connecté est participant.
 #[derive(Debug, serde::Serialize, ToSchema)]
 pub struct GetChatsResultView {
     /// Conversations dont l'utilisateur connecté est participant.
