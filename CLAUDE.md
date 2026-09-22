@@ -140,7 +140,9 @@ the container tests.
 ### Config (env vars, all "critical" → process panics if unset)
 
 `REDIS_URL`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT`, `DB_NAME`, `HOST`, `PORT`,
-`JWT_SECRET`, `JWT_TIMEOUT`. `docker-compose.yml` supplies them for the dev stack (app on
+`JWT_SECRET`, `JWT_TIMEOUT`. The Postgres URL is assembled by `database::pg_url::build_pg_url`,
+which percent-encodes user, password and database name, so `DB_PASSWORD` may contain any
+character. `docker-compose.yml` supplies them for the dev stack (app on
 `:3003`, Postgres via `ghcr.io/mairie360/database`, Liquibase migrations, a `seeder` running
 `init-test.sql`, Redis, and an nginx front). `.env` is gitignored.
 
