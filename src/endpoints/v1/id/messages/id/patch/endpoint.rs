@@ -5,6 +5,10 @@ use mairie360_api_lib::error::ApiLibError;
 use mairie360_api_lib::security::AuthenticatedUser;
 use mairie360_api_lib::state::AppState;
 
+use crate::endpoints::v1::id::access::{
+    require_chat_access, require_message_author, AccessDenied, MessageDenied,
+};
+
 use crate::database::chats::patch_message_in_chat::view::PatchMessageQueryView;
 use crate::endpoints::v1::id::messages::id::patch::view::PatchMessageView;
 use crate::endpoints::v1::id::messages::id::MessagePathParams;
@@ -14,11 +18,15 @@ use crate::endpoints::validation::ValidatedJson;
 pub enum PatchMessageError {
     DatabaseError,
     UnknownEvent,
+    UnknownChat,
+    Forbidden,
 }
 
 impl std::fmt::Display for PatchMessageError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            PatchMessageError::Forbidden => write!(f, "Only the author of a message can edit it."),
+            PatchMessageError::UnknownChat => write!(f, "Unknown chat."),
             PatchMessageError::DatabaseError => {
                 write!(f, "An error occurred while accessing the database.")
             }
@@ -32,6 +40,8 @@ impl std::fmt::Display for PatchMessageError {
 impl ResponseError for PatchMessageError {
     fn status_code(&self) -> StatusCode {
         match self {
+            PatchMessageError::Forbidden => StatusCode::FORBIDDEN,
+            PatchMessageError::UnknownChat => StatusCode::NOT_FOUND,
             PatchMessageError::DatabaseError => StatusCode::INTERNAL_SERVER_ERROR,
             PatchMessageError::UnknownEvent => StatusCode::BAD_REQUEST,
         }
@@ -63,14 +73,14 @@ async fn trigger_patch_message(
 #[utoipa::path(
     patch,
     path = "",
-    summary = "Modifier un message",
-    description = "Remplace le contenu d'un message. `content` est obligatoire : ce `PATCH` \
-                   n'est pas une modification partielle, il écrase le texte.\n\n\
-                   Contrairement à la publication, aucun `ChatSignal` n'est poussé sur le flux \
-                   SSE : les autres participants ne voient la correction qu'à leur prochain \
-                   rechargement de la conversation.\n\n\
-                   Aucun contrôle d'auteur ni d'appartenance : tout utilisateur authentifié peut \
-                   modifier n'importe quel message. La réponse a un corps vide.",
+    summary = "Edit a message",
+    description = "Replaces the content of a message. `content` is required: this `PATCH` is not a partial update, \
+                   it overwrites the text.\n\n \
+                   Unlike posting, no `ChatSignal` is pushed on the SSE stream: the other members only see the edit \
+                   when they reload the chat.\n\n \
+                   Only the author of the message may edit it (`403` for another member); administrators bypass \
+                   the check. A caller who is not a member of the chat gets the same `404` as for an unknown chat. \
+                   The response has an empty body.",
     responses(
         (
             status = 200,
@@ -89,6 +99,20 @@ async fn trigger_patch_message(
             body = String,
             content_type = "text/plain",
             example = json!("Jeton expiré")
+        ),
+        (
+            status = 403,
+            description = "The message was written by another member.",
+            body = String,
+            content_type = "text/plain",
+            example = json!("Only the author of a message can edit it.")
+        ),
+        (
+            status = 404,
+            description = "No chat matches `chat_id`, or the caller is neither one of its members nor an administrator (both cases are deliberately indistinguishable).",
+            body = String,
+            content_type = "text/plain",
+            example = json!("Unknown chat.")
         ),
         (
             status = 500,
@@ -114,12 +138,33 @@ async fn trigger_patch_message(
 #[patch("/")]
 pub async fn patch_message(
     state: web::Data<AppState>,
-    _: AuthenticatedUser,
+    auth_user: AuthenticatedUser,
     params: web::Path<MessagePathParams>,
     view: ValidatedJson<PatchMessageView>,
 ) -> Result<impl Responder, PatchMessageError> {
     let message_id = params.message_id();
+    let is_admin = require_chat_access(&state, params.chat_id(), auth_user.id).await?;
+    require_message_author(&state, params.chat_id(), message_id, auth_user.id, is_admin).await?;
     let view = view.into_inner();
     trigger_patch_message(state, message_id, view).await?;
     Ok(HttpResponse::Ok().finish())
+}
+
+impl From<AccessDenied> for PatchMessageError {
+    fn from(denied: AccessDenied) -> Self {
+        match denied {
+            AccessDenied::NotFound => PatchMessageError::UnknownChat,
+            AccessDenied::DatabaseError => PatchMessageError::DatabaseError,
+        }
+    }
+}
+
+impl From<MessageDenied> for PatchMessageError {
+    fn from(denied: MessageDenied) -> Self {
+        match denied {
+            MessageDenied::NotFound => PatchMessageError::UnknownEvent,
+            MessageDenied::Forbidden => PatchMessageError::Forbidden,
+            MessageDenied::DatabaseError => PatchMessageError::DatabaseError,
+        }
+    }
 }

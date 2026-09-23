@@ -3,6 +3,8 @@ use actix_web::{get, web, HttpResponse, Responder, ResponseError};
 use mairie360_api_lib::security::AuthenticatedUser;
 use mairie360_api_lib::state::AppState;
 
+use crate::endpoints::v1::id::access::{require_chat_access, AccessDenied};
+
 use crate::database::chats::get_chat::view::{GetChatQueryView, Message};
 use crate::endpoints::v1::id::get::view::GetChatResultView;
 use crate::endpoints::v1::id::ChatPathParams;
@@ -11,11 +13,13 @@ use crate::endpoints::v1::id::ChatPathParams;
 pub enum GetChatError {
     DatabaseError,
     UnknownChat,
+    NotFound,
 }
 
 impl std::fmt::Display for GetChatError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            GetChatError::NotFound => write!(f, "Unknown chat."),
             GetChatError::DatabaseError => {
                 write!(f, "An error occurred while accessing the database.")
             }
@@ -29,6 +33,7 @@ impl std::fmt::Display for GetChatError {
 impl ResponseError for GetChatError {
     fn status_code(&self) -> StatusCode {
         match self {
+            GetChatError::NotFound => StatusCode::NOT_FOUND,
             GetChatError::DatabaseError => StatusCode::INTERNAL_SERVER_ERROR,
             GetChatError::UnknownChat => StatusCode::BAD_REQUEST,
         }
@@ -57,14 +62,11 @@ async fn trigger_get_chat(
 #[utoipa::path(
     get,
     path = "",
-    summary = "Lire les messages d'une conversation",
-    description = "Renvoie les messages d'une conversation **sans modifier** le compteur de \
-                   non-lus de l'appelant. Un acquittement explicite sera fourni par une route \
-                   d'écriture distincte.\n\n\
-                   Il n'y a pas de pagination : tous les messages sont renvoyés.\n\n\
-                   Un `chat_id` inconnu renvoie une liste vide, pas une erreur.\n\n\
-                   Aucun contrôle d'appartenance : tout utilisateur authentifié peut appeler cette route sur \
-                   n'importe quelle conversation dont il connaît l'identifiant.",
+    summary = "Read the messages of a chat",
+    description = "Returns the messages of a chat **without modifying** the caller's unread counter. An explicit \
+                   acknowledgement will be provided by a separate write route.\n\n\
+                   There is no pagination: every message is returned.\n\n\
+                   Only the members of the chat may call this route; administrators bypass the check. A caller who is not a member gets the same `404` as for an unknown chat.",
     responses(
         (
             status = 200,
@@ -97,6 +99,13 @@ async fn trigger_get_chat(
             example = json!("Jeton expiré")
         ),
         (
+            status = 404,
+            description = "No chat matches `chat_id`, or the caller is neither one of its members nor an administrator (both cases are deliberately indistinguishable).",
+            body = String,
+            content_type = "text/plain",
+            example = json!("Unknown chat.")
+        ),
+        (
             status = 500,
             description = "Erreur de base de données.",
             body = String,
@@ -115,10 +124,20 @@ async fn trigger_get_chat(
 #[get("/")]
 pub async fn get_chat(
     state: web::Data<AppState>,
-    _user: AuthenticatedUser,
+    user: AuthenticatedUser,
     params: web::Path<ChatPathParams>,
 ) -> Result<impl Responder, GetChatError> {
     let chat_id = params.chat_id;
+    require_chat_access(&state, chat_id, user.id).await?;
     let result = trigger_get_chat(state, chat_id).await?;
     Ok(HttpResponse::Ok().json(result))
+}
+
+impl From<AccessDenied> for GetChatError {
+    fn from(denied: AccessDenied) -> Self {
+        match denied {
+            AccessDenied::NotFound => GetChatError::NotFound,
+            AccessDenied::DatabaseError => GetChatError::DatabaseError,
+        }
+    }
 }

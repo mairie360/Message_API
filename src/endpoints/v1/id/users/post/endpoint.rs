@@ -5,6 +5,8 @@ use mairie360_api_lib::error::ApiLibError;
 use mairie360_api_lib::security::AuthenticatedUser;
 use mairie360_api_lib::state::AppState;
 
+use crate::endpoints::v1::id::access::{require_chat_access, AccessDenied};
+
 use crate::database::chats::add_users_to_chat::view::AddMembersToChatQueryView;
 use crate::endpoints::v1::id::users::post::view::{AddUsersToChat, AddUsersToChatResultView};
 use crate::endpoints::v1::id::ChatPathParams;
@@ -85,14 +87,9 @@ async fn trigger_add_users_to_chat(
     post,
     params(ChatPathParams),
     path = "",
-    summary = "Ajouter des participants à une conversation",
-    description = "Rattache un ou plusieurs utilisateurs à une conversation en un seul appel. La \
-                   conversation apparaît ensuite dans leur `GET /api/v1/`.\n\n\
-                   Le champ `added` de la réponse liste les identifiants effectivement rattachés : \
-                   le comparer à `users_id` pour repérer ceux qui étaient déjà participants ou qui \
-                   n'existent pas.\n\n\
-                   Aucun contrôle d'appartenance : tout utilisateur authentifié peut appeler cette route sur \
-                   n'importe quelle conversation dont il connaît l'identifiant.",
+    summary = "Add members to a chat",
+    description = "Adds one or more users to a chat in a single call; the chat then shows up in their \
+                   `GET /api/v1/`. Any member of the chat may add users.\n\nOnly the members of the chat may call this route; administrators bypass the check. A caller who is not a member gets the same `404` as for an unknown chat.",
     responses(
         (
             status = 200,
@@ -116,7 +113,7 @@ async fn trigger_add_users_to_chat(
         ),
         (
             status = 404,
-            description = "No chat matches `chat_id`.",
+            description = "No chat matches `chat_id`, or the caller is neither one of its members nor an administrator (both cases are deliberately indistinguishable).",
             body = String,
             content_type = "text/plain",
             example = json!("Unknown chat.")
@@ -149,11 +146,21 @@ async fn trigger_add_users_to_chat(
 #[post("/")]
 pub async fn add_users_to_chat(
     state: web::Data<AppState>,
-    _: AuthenticatedUser,
+    auth_user: AuthenticatedUser,
     view: web::Json<AddUsersToChat>,
     params: web::Path<ChatPathParams>,
 ) -> Result<impl Responder, AddUsersToChatError> {
     let view = view.into_inner();
+    require_chat_access(&state, params.chat_id, auth_user.id).await?;
     let result = trigger_add_users_to_chat(state, params.chat_id, view).await?;
     Ok(HttpResponse::Ok().json(result))
+}
+
+impl From<AccessDenied> for AddUsersToChatError {
+    fn from(denied: AccessDenied) -> Self {
+        match denied {
+            AccessDenied::NotFound => AddUsersToChatError::UnknownChat,
+            AccessDenied::DatabaseError => AddUsersToChatError::DatabaseError,
+        }
+    }
 }

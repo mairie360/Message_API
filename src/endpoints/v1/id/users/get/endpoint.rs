@@ -3,6 +3,8 @@ use actix_web::{get, web, HttpResponse, Responder, ResponseError};
 use mairie360_api_lib::security::AuthenticatedUser;
 use mairie360_api_lib::state::AppState;
 
+use crate::endpoints::v1::id::access::{require_chat_access, AccessDenied};
+
 use crate::database::chats::get_chat_users::view::GetChatMembersQueryView;
 use crate::endpoints::v1::id::users::get::view::{GetUsersView, User};
 use crate::endpoints::v1::id::ChatPathParams;
@@ -11,11 +13,13 @@ use crate::endpoints::v1::id::ChatPathParams;
 pub enum GetChatUsersError {
     BadRequest,
     DatabaseError,
+    NotFound,
 }
 
 impl std::fmt::Display for GetChatUsersError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            GetChatUsersError::NotFound => write!(f, "Unknown chat."),
             GetChatUsersError::DatabaseError => {
                 write!(f, "An error occurred while accessing the database.")
             }
@@ -29,6 +33,7 @@ impl std::fmt::Display for GetChatUsersError {
 impl ResponseError for GetChatUsersError {
     fn status_code(&self) -> StatusCode {
         match self {
+            GetChatUsersError::NotFound => StatusCode::NOT_FOUND,
             GetChatUsersError::DatabaseError => StatusCode::INTERNAL_SERVER_ERROR,
             GetChatUsersError::BadRequest => StatusCode::BAD_REQUEST,
         }
@@ -64,13 +69,9 @@ async fn trigger_get_chat_users(
         ChatPathParams,
     ),
     path = "",
-    summary = "Lister les participants d'une conversation",
-    description = "Renvoie les identifiants Core API des participants. Seuls les identifiants sont \
-                   renvoyés : pour obtenir leurs noms, les repasser à \
-                   `GET /api/v1/user/?ids=1,2,3` de Core API.\n\n\
-                   Un `chat_id` inconnu renvoie une liste vide, pas une erreur.\n\n\
-                   Aucun contrôle d'appartenance : tout utilisateur authentifié peut appeler cette route sur \
-                   n'importe quelle conversation dont il connaît l'identifiant.",
+    summary = "List the members of a chat",
+    description = "Returns the Core API ids of the members. Only ids are returned: pass them to \
+                   `GET /api/v1/user/?ids=1,2,3` of Core API to get their names.\n\nOnly the members of the chat may call this route; administrators bypass the check. A caller who is not a member gets the same `404` as for an unknown chat.",
     responses(
         (
             status = 200,
@@ -93,6 +94,13 @@ async fn trigger_get_chat_users(
             example = json!("Jeton expiré")
         ),
         (
+            status = 404,
+            description = "No chat matches `chat_id`, or the caller is neither one of its members nor an administrator (both cases are deliberately indistinguishable).",
+            body = String,
+            content_type = "text/plain",
+            example = json!("Unknown chat.")
+        ),
+        (
             status = 500,
             description = "Erreur de base de données.",
             body = String,
@@ -108,10 +116,20 @@ async fn trigger_get_chat_users(
 #[get("/")]
 pub async fn get_chat_users(
     state: web::Data<AppState>,
-    _: AuthenticatedUser,
+    auth_user: AuthenticatedUser,
     params: web::Path<ChatPathParams>,
 ) -> Result<impl Responder, GetChatUsersError> {
     let chat_id = params.chat_id;
+    require_chat_access(&state, chat_id, auth_user.id).await?;
     let result = trigger_get_chat_users(state, chat_id).await?;
     Ok(HttpResponse::Ok().json(result))
+}
+
+impl From<AccessDenied> for GetChatUsersError {
+    fn from(denied: AccessDenied) -> Self {
+        match denied {
+            AccessDenied::NotFound => GetChatUsersError::NotFound,
+            AccessDenied::DatabaseError => GetChatUsersError::DatabaseError,
+        }
+    }
 }

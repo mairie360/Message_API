@@ -1,3 +1,4 @@
+pub mod access;
 pub mod accessors;
 pub mod add_message_to_chat;
 pub mod add_user_to_chat;

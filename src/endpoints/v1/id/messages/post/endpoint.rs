@@ -5,6 +5,8 @@ use mairie360_api_lib::error::ApiLibError;
 use mairie360_api_lib::security::AuthenticatedUser;
 use mairie360_api_lib::state::AppState;
 
+use crate::endpoints::v1::id::access::{require_chat_access, AccessDenied};
+
 use crate::database::chats::add_message_to_chat::view::PostMessageInChatQueryView;
 use crate::endpoints::v1::id::messages::post::view::{PostMessageResultView, PostMessageView};
 use crate::endpoints::v1::id::ChatPathParams;
@@ -74,15 +76,12 @@ async fn trigger_post_message(
     post,
     params(ChatPathParams),
     path = "",
-    summary = "Publier un message",
-    description = "Ajoute un message à une conversation et pousse un `ChatSignal` sur le flux SSE \
-                   de chaque participant connecté. L'auteur est déduit du JWT, jamais du corps.\n\n\
-                   `sitation` est facultatif : il porte l'identifiant du message auquel celui-ci \
-                   répond. Attention, le champ est renvoyé systématiquement à `null` par la \
-                   lecture `GET /api/v1/{chat_id}/`, qui ne le relit pas encore depuis la base.\n\n\
-                   La réponse ne contient que l'identifiant attribué au message.\n\n\
-                   Aucun contrôle d'appartenance : tout utilisateur authentifié peut appeler cette route sur \
-                   n'importe quelle conversation dont il connaît l'identifiant.",
+    summary = "Post a message",
+    description = "Adds a message to a chat and pushes a `ChatSignal` on the SSE stream of every connected member. \
+                   The author is taken from the JWT, never from the body.\n\n \
+                   `sitation` is optional: it holds the id of the message this one answers. It is always read back \
+                   as `null` by `GET /api/v1/{chat_id}/`, which does not load it from the database yet.\n\n \
+                   The response only holds the id given to the message.\n\nOnly the members of the chat may call this route; administrators bypass the check. A caller who is not a member gets the same `404` as for an unknown chat.",
     responses(
         (
             status = 200,
@@ -106,7 +105,7 @@ async fn trigger_post_message(
         ),
         (
             status = 404,
-            description = "No chat matches `chat_id`.",
+            description = "No chat matches `chat_id`, or the caller is neither one of its members nor an administrator (both cases are deliberately indistinguishable).",
             body = String,
             content_type = "text/plain",
             example = json!("Unknown chat.")
@@ -139,6 +138,16 @@ pub async fn post_message(
 ) -> Result<impl Responder, PosteMessageError> {
     let view = view.into_inner();
     let chat_id = params.chat_id;
+    require_chat_access(&state, chat_id, auth_user.id).await?;
     let result = trigger_post_message(state, sse_state, auth_user.id, view, chat_id).await?;
     Ok(HttpResponse::Ok().json(result))
+}
+
+impl From<AccessDenied> for PosteMessageError {
+    fn from(denied: AccessDenied) -> Self {
+        match denied {
+            AccessDenied::NotFound => PosteMessageError::UnknownChat,
+            AccessDenied::DatabaseError => PosteMessageError::DatabaseError,
+        }
+    }
 }

@@ -5,6 +5,9 @@ use mairie360_api_lib::error::ApiLibError;
 use mairie360_api_lib::security::AuthenticatedUser;
 use mairie360_api_lib::state::AppState;
 
+use crate::endpoints::v1::id::access::{require_chat_access, AccessDenied};
+
+use crate::database::chats::delete_empty_chat::view::DeleteEmptyChatQueryView;
 use crate::database::chats::remove_user_from_chat::view::RemoveMemberFromChatQueryView;
 use crate::endpoints::v1::id::users::id::UsersPathParams;
 
@@ -12,11 +15,13 @@ use crate::endpoints::v1::id::users::id::UsersPathParams;
 pub enum RemoveUserFromChatError {
     DatabaseError,
     BadRequest,
+    NotFound,
 }
 
 impl std::fmt::Display for RemoveUserFromChatError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            RemoveUserFromChatError::NotFound => write!(f, "Unknown chat."),
             RemoveUserFromChatError::DatabaseError => {
                 write!(f, "An error occurred while accessing the database.")
             }
@@ -30,6 +35,7 @@ impl std::fmt::Display for RemoveUserFromChatError {
 impl ResponseError for RemoveUserFromChatError {
     fn status_code(&self) -> StatusCode {
         match self {
+            RemoveUserFromChatError::NotFound => StatusCode::NOT_FOUND,
             RemoveUserFromChatError::DatabaseError => StatusCode::INTERNAL_SERVER_ERROR,
             RemoveUserFromChatError::BadRequest => StatusCode::BAD_REQUEST,
         }
@@ -55,19 +61,23 @@ async fn trigger_remove_user_from_chat(
             _ => RemoveUserFromChatError::DatabaseError,
         })?;
 
+    // A chat lives as long as it has members: the last one leaving deletes it.
+    state
+        .get_smart_db()
+        .execute(DeleteEmptyChatQueryView::new(chat_id))
+        .await
+        .map_err(|_| RemoveUserFromChatError::DatabaseError)?;
     Ok(())
 }
 
 #[utoipa::path(
     delete,
     path = "",
-    summary = "Retirer un participant d'une conversation",
-    description = "Détache un utilisateur d'une conversation, qui cesse d'apparaître dans son \
-                   `GET /api/v1/`. Ses messages déjà publiés sont conservés.\n\n\
-                   Opération idempotente : retirer quelqu'un qui n'est pas participant répond \
-                   également `204`.\n\n\
-                   Aucun contrôle d'appartenance : tout utilisateur authentifié peut appeler cette route sur \
-                   n'importe quelle conversation dont il connaît l'identifiant.",
+    summary = "Remove a member from a chat",
+    description = "Removes a user from a chat, which leaves their `GET /api/v1/`; their messages are kept. Any \
+                   member may remove any member, themselves included (leaving the chat).\n\n \
+                   **The chat is deleted, with its messages, when its last member is removed.**\n\n \
+                   Removing a user who is not a member answers `400`.\n\nOnly the members of the chat may call this route; administrators bypass the check. A caller who is not a member gets the same `404` as for an unknown chat.",
     responses(
         (
             status = 204,
@@ -88,6 +98,13 @@ async fn trigger_remove_user_from_chat(
             example = json!("Jeton expiré")
         ),
         (
+            status = 404,
+            description = "No chat matches `chat_id`, or the caller is neither one of its members nor an administrator (both cases are deliberately indistinguishable).",
+            body = String,
+            content_type = "text/plain",
+            example = json!("Unknown chat.")
+        ),
+        (
             status = 500,
             description = "Erreur de base de données.",
             body = String,
@@ -106,11 +123,21 @@ async fn trigger_remove_user_from_chat(
 #[delete("/")]
 pub async fn remove_user_from_chat(
     state: web::Data<AppState>,
-    _: AuthenticatedUser,
+    auth_user: AuthenticatedUser,
     params: web::Path<UsersPathParams>,
 ) -> Result<impl Responder, RemoveUserFromChatError> {
     let chat_id = params.chat_id();
     let user_id = params.user_id();
+    require_chat_access(&state, chat_id, auth_user.id).await?;
     trigger_remove_user_from_chat(state, chat_id, user_id).await?;
     Ok(HttpResponse::NoContent().finish())
+}
+
+impl From<AccessDenied> for RemoveUserFromChatError {
+    fn from(denied: AccessDenied) -> Self {
+        match denied {
+            AccessDenied::NotFound => RemoveUserFromChatError::NotFound,
+            AccessDenied::DatabaseError => RemoveUserFromChatError::DatabaseError,
+        }
+    }
 }

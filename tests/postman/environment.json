@@ -14,6 +14,8 @@
     { "key": "jwt_expired", "value": "", "type": "default", "enabled": true },
     { "key": "chat_id", "value": "", "type": "default", "enabled": true },
     { "key": "message_id", "value": "", "type": "default", "enabled": true },
-    { "key": "reply_id", "value": "", "type": "default", "enabled": true }
+    { "key": "reply_id", "value": "", "type": "default", "enabled": true },
+    { "key": "agent_message_id", "value": "", "type": "default", "enabled": true },
+    { "key": "solo_chat_id", "value": "", "type": "default", "enabled": true }
   ]
 }
