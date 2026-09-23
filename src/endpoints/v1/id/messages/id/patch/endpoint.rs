@@ -8,10 +8,10 @@ use mairie360_api_lib::state::AppState;
 use crate::database::chats::patch_message_in_chat::view::PatchMessageQueryView;
 use crate::endpoints::v1::id::messages::id::patch::view::PatchMessageView;
 use crate::endpoints::v1::id::messages::id::MessagePathParams;
+use crate::endpoints::validation::ValidatedJson;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PatchMessageError {
-    BadRequest,
     DatabaseError,
     UnknownEvent,
 }
@@ -19,9 +19,6 @@ pub enum PatchMessageError {
 impl std::fmt::Display for PatchMessageError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            PatchMessageError::BadRequest => {
-                write!(f, "Bad request.")
-            }
             PatchMessageError::DatabaseError => {
                 write!(f, "An error occurred while accessing the database.")
             }
@@ -35,7 +32,6 @@ impl std::fmt::Display for PatchMessageError {
 impl ResponseError for PatchMessageError {
     fn status_code(&self) -> StatusCode {
         match self {
-            PatchMessageError::BadRequest => StatusCode::BAD_REQUEST,
             PatchMessageError::DatabaseError => StatusCode::INTERNAL_SERVER_ERROR,
             PatchMessageError::UnknownEvent => StatusCode::BAD_REQUEST,
         }
@@ -82,7 +78,7 @@ async fn trigger_patch_message(
         ),
         (
             status = 400,
-            description = "Corps JSON malformé, segment d'URL non entier, champ `content` absent, ou message inexistant.",
+            description = "Malformed JSON body, URL segment not an integer, `content` breaking its rules (`content` not blank, at most 5000 characters, no `<` / `>`, no control character other than line breaks and tabs), or unknown message (`Unknown event.`).",
             body = String,
             content_type = "text/plain",
             example = json!("Unknown event.")
@@ -120,10 +116,10 @@ pub async fn patch_message(
     state: web::Data<AppState>,
     _: AuthenticatedUser,
     params: web::Path<MessagePathParams>,
-    view: web::Json<PatchMessageView>,
+    view: ValidatedJson<PatchMessageView>,
 ) -> Result<impl Responder, PatchMessageError> {
     let message_id = params.message_id();
-    let view = view.try_into().map_err(|_| PatchMessageError::BadRequest)?;
+    let view = view.into_inner();
     trigger_patch_message(state, message_id, view).await?;
     Ok(HttpResponse::Ok().finish())
 }

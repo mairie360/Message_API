@@ -1,16 +1,20 @@
 use actix_web::http::StatusCode;
 use actix_web::{post, web, HttpResponse, Responder, ResponseError};
+use mairie360_api_lib::database::error::DbError;
+use mairie360_api_lib::error::ApiLibError;
 use mairie360_api_lib::security::AuthenticatedUser;
 use mairie360_api_lib::state::AppState;
 
 use crate::database::chats::add_users_to_chat::view::AddMembersToChatQueryView;
 use crate::database::chats::create_chat::view::CreateChatQueryView;
+use crate::database::chats::delete_chat::view::DeleteChatQueryView;
 use crate::endpoints::v1::post::view::{CreateChatResultView, CreateChatView};
+use crate::endpoints::validation::ValidatedJson;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum CreateChatError {
     DatabaseError,
-    BadRequest,
+    UnknownMember,
 }
 
 impl std::fmt::Display for CreateChatError {
@@ -19,8 +23,8 @@ impl std::fmt::Display for CreateChatError {
             CreateChatError::DatabaseError => {
                 write!(f, "An error occurred while accessing the database.")
             }
-            CreateChatError::BadRequest => {
-                write!(f, "Bad request.")
+            CreateChatError::UnknownMember => {
+                write!(f, "`members` contains an unknown user.")
             }
         }
     }
@@ -30,7 +34,7 @@ impl ResponseError for CreateChatError {
     fn status_code(&self) -> StatusCode {
         match self {
             CreateChatError::DatabaseError => StatusCode::INTERNAL_SERVER_ERROR,
-            CreateChatError::BadRequest => StatusCode::BAD_REQUEST,
+            CreateChatError::UnknownMember => StatusCode::BAD_REQUEST,
         }
     }
 
@@ -54,10 +58,22 @@ async fn trigger_create_chat(
 
     let mut members = view.members().to_vec();
     members.push(user_id);
+    // The creator may also be listed: a duplicate would break the (conversation, user) key.
+    members.sort_unstable();
+    members.dedup();
     let query_view = AddMembersToChatQueryView::new(result, members);
-    db.execute(query_view)
-        .await
-        .map_err(|_| CreateChatError::DatabaseError)?;
+    if let Err(error) = db.execute(query_view).await {
+        // Do not leave a conversation without its members behind.
+        let _ = db
+            .fetch_scalar::<i32, _>(&DeleteChatQueryView::new(result))
+            .await;
+        return Err(match error {
+            ApiLibError::Database(DbError::ForeignKeyViolation(_)) => {
+                CreateChatError::UnknownMember
+            }
+            _ => CreateChatError::DatabaseError,
+        });
+    }
 
     Ok(CreateChatResultView::new(result))
 }
@@ -82,10 +98,10 @@ async fn trigger_create_chat(
         ),
         (
             status = 400,
-            description = "Corps JSON malformé, champ obligatoire absent, ou échec de l'insertion en base.",
+            description = "Malformed JSON body, missing field, `name` empty (direct conversation) or 1 to 150 characters without control characters nor `<` / `>`, or `members` containing an unknown user (`` `members` contains an unknown user.``; no conversation is created).",
             body = String,
             content_type = "text/plain",
-            example = json!("Bad request.")
+            example = json!("`members` contains an unknown user.")
         ),
         (
             status = 401,
@@ -119,9 +135,9 @@ async fn trigger_create_chat(
 pub async fn create_chat(
     state: web::Data<AppState>,
     auth_user: AuthenticatedUser,
-    view: web::Json<CreateChatView>,
+    view: ValidatedJson<CreateChatView>,
 ) -> Result<impl Responder, CreateChatError> {
-    let view = view.try_into().map_err(|_| CreateChatError::BadRequest)?;
+    let view = view.into_inner();
     let result = trigger_create_chat(state, auth_user.id, view).await?;
     Ok(HttpResponse::Ok().json(result))
 }

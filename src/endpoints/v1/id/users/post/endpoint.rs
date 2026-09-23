@@ -1,5 +1,7 @@
 use actix_web::http::StatusCode;
 use actix_web::{post, web, HttpResponse, Responder, ResponseError};
+use mairie360_api_lib::database::error::DbError;
+use mairie360_api_lib::error::ApiLibError;
 use mairie360_api_lib::security::AuthenticatedUser;
 use mairie360_api_lib::state::AppState;
 
@@ -10,7 +12,9 @@ use crate::endpoints::v1::id::ChatPathParams;
 #[derive(Debug, Clone, PartialEq)]
 pub enum AddUsersToChatError {
     DatabaseError,
-    BadRequest,
+    UnknownChat,
+    UnknownUser,
+    AlreadyMember,
 }
 
 impl std::fmt::Display for AddUsersToChatError {
@@ -19,8 +23,10 @@ impl std::fmt::Display for AddUsersToChatError {
             AddUsersToChatError::DatabaseError => {
                 write!(f, "An error occurred while accessing the database.")
             }
-            AddUsersToChatError::BadRequest => {
-                write!(f, "Bad request.")
+            AddUsersToChatError::UnknownChat => write!(f, "Unknown chat."),
+            AddUsersToChatError::UnknownUser => write!(f, "`users_id` contains an unknown user."),
+            AddUsersToChatError::AlreadyMember => {
+                write!(f, "A user of `users_id` is already a member of this chat.")
             }
         }
     }
@@ -30,7 +36,9 @@ impl ResponseError for AddUsersToChatError {
     fn status_code(&self) -> StatusCode {
         match self {
             AddUsersToChatError::DatabaseError => StatusCode::INTERNAL_SERVER_ERROR,
-            AddUsersToChatError::BadRequest => StatusCode::BAD_REQUEST,
+            AddUsersToChatError::UnknownChat => StatusCode::NOT_FOUND,
+            AddUsersToChatError::UnknownUser => StatusCode::BAD_REQUEST,
+            AddUsersToChatError::AlreadyMember => StatusCode::CONFLICT,
         }
     }
 
@@ -54,7 +62,21 @@ async fn trigger_add_users_to_chat(
         .get_smart_db()
         .execute(view)
         .await
-        .map_err(|_| AddUsersToChatError::DatabaseError)?;
+        .map_err(|e| match e {
+            // Both foreign keys of conversation_members: tell the missing chat from the missing user.
+            ApiLibError::Database(DbError::ForeignKeyViolation(message))
+                if message.contains("conversation_id") =>
+            {
+                AddUsersToChatError::UnknownChat
+            }
+            ApiLibError::Database(DbError::ForeignKeyViolation(_)) => {
+                AddUsersToChatError::UnknownUser
+            }
+            ApiLibError::Database(DbError::UniqueViolation(_)) => {
+                AddUsersToChatError::AlreadyMember
+            }
+            _ => AddUsersToChatError::DatabaseError,
+        })?;
 
     Ok(AddUsersToChatResultView::new(chat_id, added))
 }
@@ -80,10 +102,10 @@ async fn trigger_add_users_to_chat(
         ),
         (
             status = 400,
-            description = "Corps JSON malformé, `chat_id` non entier, ou champ `users_id` absent.",
+            description = "Malformed JSON body, `chat_id` not an integer, missing `users_id`, or `users_id` containing an unknown user.",
             body = String,
             content_type = "text/plain",
-            example = json!("Bad request.")
+            example = json!("`users_id` contains an unknown user.")
         ),
         (
             status = 401,
@@ -91,6 +113,20 @@ async fn trigger_add_users_to_chat(
             body = String,
             content_type = "text/plain",
             example = json!("Jeton expiré")
+        ),
+        (
+            status = 404,
+            description = "No chat matches `chat_id`.",
+            body = String,
+            content_type = "text/plain",
+            example = json!("Unknown chat.")
+        ),
+        (
+            status = 409,
+            description = "A user of `users_id` is already a member of the chat; nobody is added.",
+            body = String,
+            content_type = "text/plain",
+            example = json!("A user of `users_id` is already a member of this chat.")
         ),
         (
             status = 500,
@@ -117,9 +153,7 @@ pub async fn add_users_to_chat(
     view: web::Json<AddUsersToChat>,
     params: web::Path<ChatPathParams>,
 ) -> Result<impl Responder, AddUsersToChatError> {
-    let view = view
-        .try_into()
-        .map_err(|_| AddUsersToChatError::BadRequest)?;
+    let view = view.into_inner();
     let result = trigger_add_users_to_chat(state, params.chat_id, view).await?;
     Ok(HttpResponse::Ok().json(result))
 }
