@@ -16,8 +16,6 @@ jobs:
           packages: write
           id-token: write
     with:
-      postman_collection: ${{ vars.POSTMAN_MESSAGE_API_COLLECTION_ID }}
-      postman_environment: ${{ vars.POSTMAN_MESSAGE_API_ENV_ID }}
       package_name: message-api
       cicd_version: v3.0.0
     secrets: inherit
