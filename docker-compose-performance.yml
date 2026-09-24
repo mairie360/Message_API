@@ -1,6 +1,7 @@
 volumes:
   postgres-data:
   redis-data:
+  openapi-spec:
 
 networks:
   backend:
@@ -84,10 +85,10 @@ services:
       liquibase:
         condition: service_completed_successfully
     volumes:
-      - ./init-test.sql:/init-test.sql
-    # On se connecte directement au service 'postgres' via son nom de service
+      - ./init-test.sql:/init-test.sql:ro
+    # ON_ERROR_STOP: a failing fixture must fail the stack, not leave k6 running without its users.
     command: >
-      sh -c "psql -h postgres -U postgres -d mairie_360_database -f /init-test.sql"
+      psql -h postgres -U postgres -d mairie_360_database -v ON_ERROR_STOP=1 -f /init-test.sql
     environment:
       PGPASSWORD: ${DB_PASSWORD:-password}
     networks:
@@ -136,14 +137,22 @@ services:
   # The published image is distroless (no shell, no curl), so the API cannot carry its own
   # healthcheck: this sidecar polls /health and the services that need the API wait for it to
   # complete instead.
+  # It also saves the spec served by the image under test into the `openapi-spec` volume: that
+  # is the coverage reference of load-test.js (openapi.json is gitignored, so the CI checkout has
+  # none, and the served spec is the one of the exact image being tested).
   message-ready:
     image: curlimages/curl:latest
+    # Root, to write into the freshly created `openapi-spec` volume.
+    user: "0"
     depends_on:
       message:
         condition: service_started
+    volumes:
+      - openapi-spec:/spec
     command: >
       sh -c 'until curl -fsS http://message:3003/health >/dev/null; do
-      echo "waiting for message..."; sleep 2; done; echo "message ready"'
+      echo "waiting for message..."; sleep 2; done;
+      curl -fsS -o /spec/openapi.json http://message:3003/api-docs/openapi.json && echo "message ready"'
     networks:
       - backend
 
@@ -151,11 +160,20 @@ services:
     image: grafana/k6:latest
     networks:
       - backend
+    # load-test.js declares one handler per operation of the spec through the shared OpenAPI
+    # coverage module (MAIR-194, mairie360/CICD tests/k6, see performance_test.sh): k6 aborts at
+    # init when an operation has no handler, and fails its thresholds when one is not exercised.
     volumes:
-      - ./load-test.js:/load-test.js
+      - ./load-test.js:/load-test.js:ro
+      - ./cicd-repo/tests/k6/coverage.js:/coverage.js:ro
+      - openapi-spec:/spec:ro
     command: ["run", "/load-test.js"]
     environment:
-      - BASE_URL=http://message:3003 # change port
+      - BASE_URL=http://message:3003
+      - OPENAPI_SPEC=/spec/openapi.json
     depends_on:
       message-ready:
+        condition: service_completed_successfully
+      # The fixtures load-test.js relies on (init-test.sql).
+      seeder:
         condition: service_completed_successfully
