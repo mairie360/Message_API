@@ -68,6 +68,11 @@ End-to-end tests (what CI runs on `main` after the dev release, needs Docker + G
 ./performance_test.sh    # docker-compose-performance.yml: full stack + k6 (load-test.js)
 ```
 
+The service under test in these three stacks is `image: ${IMAGE_REF}` (no `build:` block). CI sets `IMAGE_REF` to the
+published `ghcr.io/mairie360/message-api:dev-<sha>` image; when it is empty the scripts build `message-api:local` from
+`development.Dockerfile` first. That image is distroless (no shell, no curl), so readiness is a `message-ready` sidecar
+polling `/health`, and dependent services wait for it with `service_completed_successfully`.
+
 The ZAP scan is authenticated: `security-scan` injects a static admin JWT (`sub=1`, signed with
 `JWT_SECRET=b"secret"`, see the comment in `docker-compose-security.yml`) on every request, waits for the `seeder`
 service (`init-test.sql`: plain `User` accounts 2 and 3, user 1 is the Admin created by liquibase) and fails on any
@@ -184,7 +189,7 @@ character. `docker-compose.yml` supplies them for the dev stack (app on
 ### CI/CD & releases
 
 `.github/workflows/cicd.yml` just calls the reusable `mairie360/CICD` workflow (runs
-fmt/clippy/tests, newman integration tests via `./integration_test.sh`, builds & publishes the image as `message-api`).
+fmt/clippy/tests, the three `*_test.sh` stacks run against the published `dev-<sha>` image through `IMAGE_REF`, builds & publishes the image as `message-api`).
 Releases use **semantic-release with Angular commit conventions** (`.releaserc.json` /
 `release.config.js`): `feat:` → minor, `fix:`/`chore:`/`perf:` → patch, breaking → major.
 

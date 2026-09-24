@@ -1,7 +1,6 @@
 volumes:
   postgres-data:
   redis-data:
-  message-target:
 
 networks:
   backend:
@@ -112,24 +111,12 @@ services:
 
   message: # change api name
     container_name: message_api-developpement # change api name
-    build:
-      context: .
-      dockerfile: development.Dockerfile
-    develop:
-      watch:
-        - action: sync
-          path: ./src
-          target: /usr/src/message/src #change api name
-        - action: sync
-          path: ./Cargo.toml
-          target: /usr/src/message/Cargo.toml #change api name
-        - action: sync
-          path: ./Cargo.lock
-          target: /usr/src/message/Cargo.lock #change api name
+    # The API under test: the published ghcr.io/mairie360/message-api:dev-<sha> image in CI, or
+    # message-api:local built by the *_test.sh script from development.Dockerfile. No build: block,
+    # so CI tests the artifact that gets promoted instead of recompiling the sources.
+    image: ${IMAGE_REF:?IMAGE_REF must name the API image under test, run the matching *_test.sh script}
     ports:
       - "3003:3003" #change port
-    volumes:
-      - message-target:/usr/src/message/target #change api name
     networks:
       - backend
     dns:
@@ -145,20 +132,28 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://message:3003/health"] # change api name and port
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 90s
+
+  # The published image is distroless (no shell, no curl), so the API cannot carry its own
+  # healthcheck: this sidecar polls /health and the services that need the API wait for it to
+  # complete instead.
+  message-ready:
+    image: curlimages/curl:latest
+    depends_on:
+      message:
+        condition: service_started
+    command: >
+      sh -c 'until curl -fsS http://message:3003/health >/dev/null; do
+      echo "waiting for message..."; sleep 2; done; echo "message ready"'
+    networks:
+      - backend
 
   security-scan:
     image: zaproxy/zap-stable
     networks:
       - backend
     depends_on:
-      message:
-        condition: service_healthy
+      message-ready:
+        condition: service_completed_successfully
       seeder:
         condition: service_completed_successfully
     volumes:
