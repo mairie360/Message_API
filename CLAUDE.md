@@ -150,3 +150,7 @@ the container tests.
 fmt/clippy/tests, a Postman collection, builds & publishes the image as `message-api`).
 Releases use **semantic-release with Angular commit conventions** (`.releaserc.json` /
 `release.config.js`): `feat:` → minor, `fix:`/`chore:`/`perf:` → patch, breaking → major.
+
+## Pull request reviewers
+
+Every PR requests a review from the whole team, minus its author: `CarolinHugo`, `LAURETbenjamin`, `MathTek` and `Quentintnrl` (`gh pr create … --reviewer CarolinHugo,LAURETbenjamin,MathTek`). `.github/CODEOWNERS` makes GitHub request them automatically as well.
