@@ -4,7 +4,6 @@ use mairie360_api_lib::security::AuthenticatedUser;
 use mairie360_api_lib::state::AppState;
 
 use crate::database::chats::get_chat::view::{GetChatQueryView, Message};
-use crate::database::chats::reset_unread_count::view::ResetUnreadCountQueryView;
 use crate::endpoints::v1::id::get::view::GetChatResultView;
 use crate::endpoints::v1::id::ChatPathParams;
 
@@ -43,18 +42,12 @@ impl ResponseError for GetChatError {
 async fn trigger_get_chat(
     state: web::Data<AppState>,
     chat_id: u64,
-    user_id: u64,
 ) -> Result<GetChatResultView, GetChatError> {
     let db = state.get_smart_db();
 
     let view = GetChatQueryView::new(chat_id);
     let result: Vec<Message> = db
         .fetch_all(&view)
-        .await
-        .map_err(|_| GetChatError::DatabaseError)?;
-
-    let view = ResetUnreadCountQueryView::new(chat_id, user_id);
-    db.execute(view)
         .await
         .map_err(|_| GetChatError::DatabaseError)?;
 
@@ -65,9 +58,9 @@ async fn trigger_get_chat(
     get,
     path = "",
     summary = "Lire les messages d'une conversation",
-    description = "Renvoie les messages d'une conversation et, dans le même appel, **remet à zéro \
-                   le compteur de non-lus** de l'appelant sur cette conversation. Ce `GET` n'est \
-                   donc pas sans effet de bord : l'appeler marque la conversation comme lue.\n\n\
+    description = "Renvoie les messages d'une conversation **sans modifier** le compteur de \
+                   non-lus de l'appelant. Un acquittement explicite sera fourni par une route \
+                   d'écriture distincte.\n\n\
                    Il n'y a pas de pagination : tous les messages sont renvoyés.\n\n\
                    Un `chat_id` inconnu renvoie une liste vide, pas une erreur.\n\n\
                    Aucun contrôle d'appartenance : tout utilisateur authentifié peut appeler cette route sur \
@@ -122,10 +115,10 @@ async fn trigger_get_chat(
 #[get("/")]
 pub async fn get_chat(
     state: web::Data<AppState>,
-    user: AuthenticatedUser,
+    _user: AuthenticatedUser,
     params: web::Path<ChatPathParams>,
 ) -> Result<impl Responder, GetChatError> {
     let chat_id = params.chat_id;
-    let result = trigger_get_chat(state, chat_id, user.id).await?;
+    let result = trigger_get_chat(state, chat_id).await?;
     Ok(HttpResponse::Ok().json(result))
 }

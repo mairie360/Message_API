@@ -59,8 +59,8 @@ async fn trigger_get_chats(
     description = "Renvoie les conversations dont l'utilisateur porté par le JWT est \
                    participant, avec son nombre de messages non lus sur chacune. C'est la seule \
                    route de cette API filtrée sur l'appelant.\n\n\
-                   `unread_count` est remis à zéro dès que l'appelant ouvre la conversation via \
-                   `GET /api/v1/{chat_id}/`.\n\n\
+                   La lecture de `GET /api/v1/{chat_id}/` ne modifie pas \
+                   `unread_count` : seul un acquittement explicite pourra le faire.\n\n\
                    Une conversation sans titre renvoie une chaîne vide, jamais `null`.",
     responses(
         (
