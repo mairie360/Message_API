@@ -81,6 +81,20 @@ spec's `servers` are unreachable from the ZAP container. `rules.tsv` is the one 
 `100001` (unexpected content type) scope also covers `/api/v1/stream` (`text/event-stream`): ZAP keeps a single
 `OUTOFSCOPE` regex per rule id, so both paths live in one alternation.
 
+Both the ZAP and k6 stacks carry the OpenAPI coverage gate (MAIR-194) from mairie360/CICD `tests/`, available as
+`cicd-repo/` (checked out by CI, cloned by the scripts at the pinned `cicd_version` otherwise, override with
+`CICD_VERSION`; gitignored). ZAP runs with `--hook zap_hooks.py` and fails when an operation of the served spec was
+never reached, or when an operation declaring `security(("jwt" = []))` only got 401/403. `load-test.js` is built on
+`coverage.js` and covers every operation (MAIR-195) as the Admin: GET handlers run in the `reads` scenario (20 VUs)
+against a chat created in `setup()`, the other methods in the `writes` scenario (2 VUs), each handler creating and
+deleting its own chat or message so they are order-independent. `GET /api/v1/stream` has its own 1-VU `stream`
+scenario: the SSE response never ends, so k6 cuts it after 1 s (error 1050), a timeout marked expected with
+`responseCallback: http.expectedStatuses(0, 200)` so it stays out of `http_req_failed`. One `p(95)` threshold per
+`op` tag (200 ms reads, 500 ms writes, 1.5 s stream) and `http_req_failed < 1%`. The spec k6 reads is the one served
+by the image under test, saved into the `openapi-spec` volume by `message-ready`. **Adding an endpoint = adding its
+handler in `load-test.js`** (k6 aborts at init otherwise), nothing to do for ZAP. `init-test.sql` also seeds the
+rows of the spec's path examples (chat 5 with message 118, user 42) so ZAP reaches real rows.
+
 Every `/api/v1/{chat_id}/**` handler starts with `endpoints::v1::id::access::require_chat_access` (one query:
 chat exists, caller is a non-excluded member, caller `is_admin`): non-members get the same `404` as an unknown
 chat, administrators bypass it. Message edits and deletions also go through `require_message_author` (author only,
