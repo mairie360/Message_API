@@ -2346,11 +2346,13 @@ dependencies = [
  "futures-util",
  "mairie360_api_lib",
  "once_cell",
+ "percent-encoding",
  "serde",
  "serde_json",
  "serial_test",
  "tokio",
  "tokio-stream",
+ "url",
  "utoipa",
  "utoipa-swagger-ui",
 ]

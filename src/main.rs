@@ -3,6 +3,7 @@ use std::sync::Arc;
 use actix_web::{middleware, web, App, HttpServer};
 
 use dashmap::DashMap;
+use message_api::database::pg_url::build_pg_url;
 use message_api::endpoints::swagger::ApiDoc;
 use message_api::endpoints::{config, health, hello};
 
@@ -24,10 +25,7 @@ async fn main() -> std::io::Result<()> {
     let db_host = get_critical_env_var("DB_HOST");
     let db_port = get_critical_env_var("DB_PORT");
     let db_name = get_critical_env_var("DB_NAME");
-    let pg_url = format!(
-        "postgres://{}:{}@{}:{}/{}",
-        db_user, db_password, db_host, db_port, db_name
-    );
+    let pg_url = build_pg_url(&db_user, &db_password, &db_host, &db_port, &db_name);
     let state = AppState::new(redis_url, pg_url).await;
     let host = get_critical_env_var("HOST");
     let port = get_critical_env_var("PORT");
