@@ -1,5 +1,4 @@
-use crate::endpoints::v1::post::endpoint::CreateChatError;
-use actix_web::web;
+use crate::endpoints::validation::{check_label, Validate, ValidationError, MAX_TITLE_LENGTH};
 use utoipa::ToSchema;
 
 /// Conversation à créer, avec ses participants initiaux.
@@ -10,7 +9,7 @@ pub struct CreateChatView {
     #[schema(example = json!([42, 51]))]
     members: Vec<u64>,
     /// Titre de la conversation.
-    #[schema(example = "Service urbanisme")]
+    #[schema(max_length = 150, example = "Service urbanisme")]
     name: String,
 }
 
@@ -25,14 +24,6 @@ impl CreateChatView {
 
     pub fn name(&self) -> &str {
         &self.name
-    }
-}
-
-impl TryFrom<web::Json<CreateChatView>> for CreateChatView {
-    type Error = CreateChatError;
-
-    fn try_from(params: web::Json<CreateChatView>) -> Result<CreateChatView, Self::Error> {
-        Ok(params.into_inner())
     }
 }
 
@@ -51,5 +42,15 @@ impl CreateChatResultView {
 
     pub fn id(&self) -> u64 {
         self.id
+    }
+}
+
+impl Validate for CreateChatView {
+    fn validate(&self) -> Result<(), ValidationError> {
+        // An empty title is allowed (direct conversation); a non-empty one is a displayed label.
+        if self.name.is_empty() {
+            return Ok(());
+        }
+        check_label("name", &self.name, MAX_TITLE_LENGTH)
     }
 }

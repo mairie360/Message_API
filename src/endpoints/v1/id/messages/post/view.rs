@@ -1,7 +1,7 @@
-use actix_web::web;
+use crate::endpoints::validation::{
+    check_description, Validate, ValidationError, MAX_MESSAGE_LENGTH,
+};
 use utoipa::ToSchema;
-
-use crate::endpoints::v1::id::messages::post::endpoint::PosteMessageError;
 
 /// Message à publier dans la conversation du chemin.
 #[derive(Debug, serde::Deserialize, ToSchema)]
@@ -10,7 +10,11 @@ pub struct PostMessageView {
     #[schema(example = 100)]
     sitation: Option<u64>, // message sitation
     /// Contenu du message.
-    #[schema(example = "La réunion est décalée à 15h.")]
+    #[schema(
+        min_length = 1,
+        max_length = 5000,
+        example = "La réunion est décalée à 15h."
+    )]
     content: String,
 }
 
@@ -25,14 +29,6 @@ impl PostMessageView {
 
     pub fn content(&self) -> &str {
         &self.content
-    }
-}
-
-impl TryFrom<web::Json<PostMessageView>> for PostMessageView {
-    type Error = PosteMessageError;
-
-    fn try_from(params: web::Json<PostMessageView>) -> Result<PostMessageView, Self::Error> {
-        Ok(params.into_inner())
     }
 }
 
@@ -51,5 +47,14 @@ impl PostMessageResultView {
 
     pub fn id(&self) -> u64 {
         self.id
+    }
+}
+
+impl Validate for PostMessageView {
+    fn validate(&self) -> Result<(), ValidationError> {
+        if self.content.trim().is_empty() {
+            return Err(ValidationError::new("content", "must not be empty"));
+        }
+        check_description("content", &self.content, MAX_MESSAGE_LENGTH)
     }
 }

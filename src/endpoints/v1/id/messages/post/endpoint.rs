@@ -1,17 +1,20 @@
 use actix_web::http::StatusCode;
 use actix_web::{post, web, HttpResponse, Responder, ResponseError};
+use mairie360_api_lib::database::error::DbError;
+use mairie360_api_lib::error::ApiLibError;
 use mairie360_api_lib::security::AuthenticatedUser;
 use mairie360_api_lib::state::AppState;
 
 use crate::database::chats::add_message_to_chat::view::PostMessageInChatQueryView;
 use crate::endpoints::v1::id::messages::post::view::{PostMessageResultView, PostMessageView};
 use crate::endpoints::v1::id::ChatPathParams;
+use crate::endpoints::validation::ValidatedJson;
 use crate::sse::state::ChatEvent;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PosteMessageError {
     DatabaseError,
-    BadRequest,
+    UnknownChat,
 }
 
 impl std::fmt::Display for PosteMessageError {
@@ -20,9 +23,7 @@ impl std::fmt::Display for PosteMessageError {
             PosteMessageError::DatabaseError => {
                 write!(f, "An error occurred while accessing the database.")
             }
-            PosteMessageError::BadRequest => {
-                write!(f, "Bad request.")
-            }
+            PosteMessageError::UnknownChat => write!(f, "Unknown chat."),
         }
     }
 }
@@ -31,7 +32,7 @@ impl ResponseError for PosteMessageError {
     fn status_code(&self) -> StatusCode {
         match self {
             PosteMessageError::DatabaseError => StatusCode::INTERNAL_SERVER_ERROR,
-            PosteMessageError::BadRequest => StatusCode::BAD_REQUEST,
+            PosteMessageError::UnknownChat => StatusCode::NOT_FOUND,
         }
     }
 
@@ -57,7 +58,12 @@ async fn trigger_post_message(
         .get_smart_db()
         .fetch_scalar::<i64, _>(&view)
         .await
-        .map_err(|_| PosteMessageError::DatabaseError)?;
+        .map_err(|e| match e {
+            ApiLibError::Database(DbError::ForeignKeyViolation(_)) => {
+                PosteMessageError::UnknownChat
+            }
+            _ => PosteMessageError::DatabaseError,
+        })?;
 
     let _ = sse_state.internal_bus.send(chat_event);
 
@@ -86,10 +92,10 @@ async fn trigger_post_message(
         ),
         (
             status = 400,
-            description = "Corps JSON malformé, `chat_id` non entier, ou champ `content` absent.",
+            description = "Malformed JSON body, `chat_id` not an integer, or `content` breaking its rules: `content` not blank, at most 5000 characters, no `<` / `>`, no control character other than line breaks and tabs.",
             body = String,
             content_type = "text/plain",
-            example = json!("Bad request.")
+            example = json!("Invalid `content`: must not contain `<` or `>`")
         ),
         (
             status = 401,
@@ -97,6 +103,13 @@ async fn trigger_post_message(
             body = String,
             content_type = "text/plain",
             example = json!("Jeton expiré")
+        ),
+        (
+            status = 404,
+            description = "No chat matches `chat_id`.",
+            body = String,
+            content_type = "text/plain",
+            example = json!("Unknown chat.")
         ),
         (
             status = 500,
@@ -121,10 +134,10 @@ pub async fn post_message(
     state: web::Data<AppState>,
     sse_state: web::Data<crate::sse::state::AppState>,
     auth_user: AuthenticatedUser,
-    view: web::Json<PostMessageView>,
+    view: ValidatedJson<PostMessageView>,
     params: web::Path<ChatPathParams>,
 ) -> Result<impl Responder, PosteMessageError> {
-    let view = view.try_into().map_err(|_| PosteMessageError::BadRequest)?;
+    let view = view.into_inner();
     let chat_id = params.chat_id;
     let result = trigger_post_message(state, sse_state, auth_user.id, view, chat_id).await?;
     Ok(HttpResponse::Ok().json(result))
