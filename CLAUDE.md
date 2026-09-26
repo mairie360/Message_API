@@ -60,6 +60,22 @@ cargo test test_create_chat_success        # a single test by name
 The shared container/seed data is initialized once per run (`OnceCell`), so tests share
 one DB and must not depend on a pristine schema.
 
+End-to-end tests (what CI runs on `main` after the dev release, needs Docker + GHCR pull access):
+
+```bash
+./integration_test.sh    # docker-compose-integration.yml: full stack + newman replaying tests/postman/collection.json
+./security_test.sh       # docker-compose-security.yml: full stack + ZAP scan
+./performance_test.sh    # docker-compose-performance.yml: full stack + k6 (load-test.js)
+```
+
+`tests/postman/collection.json` is a Postman v2.1 collection (importable in the app) and
+`tests/postman/environment.json` its variables; the compose file overrides `baseUrl` with `--env-var` so the
+committed default (`http://localhost:3003`) stays usable from a host shell. There is no login route here, so the
+collection pre-request script forges the HS256 JWTs itself (claims `sub`/`role`/`exp`, signed with the stack's
+`JWT_SECRET`) for the seeded Admin (user 1) and a plain user (user 2, from `init-test.sql`). The scenario creates
+its own chat and deletes it at the end, so it is replayable against a persistent database. `GET /api/v1/stream`
+is only checked unauthenticated (401): newman cannot consume an open SSE stream.
+
 ## Architecture
 
 ### Routing mirrors the URL tree on the filesystem
@@ -149,7 +165,7 @@ character. `docker-compose.yml` supplies them for the dev stack (app on
 ### CI/CD & releases
 
 `.github/workflows/cicd.yml` just calls the reusable `mairie360/CICD` workflow (runs
-fmt/clippy/tests, a Postman collection, builds & publishes the image as `message-api`).
+fmt/clippy/tests, newman integration tests via `./integration_test.sh`, builds & publishes the image as `message-api`).
 Releases use **semantic-release with Angular commit conventions** (`.releaserc.json` /
 `release.config.js`): `feat:` → minor, `fix:`/`chore:`/`perf:` → patch, breaking → major.
 
