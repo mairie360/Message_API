@@ -4,7 +4,6 @@
 volumes:
   postgres-data:
   redis-data:
-  message-target:
 
 networks:
   backend:
@@ -93,14 +92,13 @@ services:
 
   message:
     container_name: message-api-integration
-    build:
-      context: .
-      dockerfile: development.Dockerfile
+    # The API under test: the published ghcr.io/mairie360/message-api:dev-<sha> image in CI, or
+    # message-api:local built by the *_test.sh script from development.Dockerfile. No build: block,
+    # so CI tests the artifact that gets promoted instead of recompiling the sources.
+    image: ${IMAGE_REF:?IMAGE_REF must name the API image under test, run the matching *_test.sh script}
     restart: always
     expose:
       - "3003"
-    volumes:
-      - message-target:/usr/src/message/target
     networks:
       - backend
     dns:
@@ -116,13 +114,20 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://message:3003/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      # `cargo run` compiles the crate at container start: leave room for a cold CI runner.
-      start_period: 300s
+
+  # The published image is distroless (no shell, no curl), so the API cannot carry its own
+  # healthcheck: this sidecar polls /health and the services that need the API wait for it to
+  # complete instead.
+  message-ready:
+    image: curlimages/curl:latest
+    depends_on:
+      message:
+        condition: service_started
+    command: >
+      sh -c 'until curl -fsS http://message:3003/health >/dev/null; do
+      echo "waiting for message..."; sleep 2; done; echo "message ready"'
+    networks:
+      - backend
 
   # Replays tests/postman/collection.json against the `message` service. `baseUrl` is injected
   # here so the committed environment stays usable from a host shell (http://localhost:3003).
@@ -135,8 +140,8 @@ services:
     volumes:
       - ./tests/postman:/etc/newman:ro
     depends_on:
-      message:
-        condition: service_healthy
+      message-ready:
+        condition: service_completed_successfully
     command: >
       run /etc/newman/collection.json
       --environment /etc/newman/environment.json
