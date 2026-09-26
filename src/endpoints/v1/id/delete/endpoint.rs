@@ -5,6 +5,8 @@ use mairie360_api_lib::error::ApiLibError;
 use mairie360_api_lib::security::AuthenticatedUser;
 use mairie360_api_lib::state::AppState;
 
+use crate::endpoints::v1::id::access::{require_chat_access, AccessDenied};
+
 use crate::database::chats::delete_chat::view::DeleteChatQueryView;
 use crate::endpoints::v1::id::ChatPathParams;
 
@@ -13,11 +15,16 @@ pub enum DeleteChatError {
     DatabaseError,
     NothingToDelete,
     UnknownEvent,
+    Forbidden,
 }
 
 impl std::fmt::Display for DeleteChatError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            DeleteChatError::Forbidden => write!(
+                f,
+                "Only an administrator can delete a chat: it is deleted with its last member."
+            ),
             DeleteChatError::DatabaseError => {
                 write!(f, "An error occurred while accessing the database.")
             }
@@ -34,6 +41,7 @@ impl std::fmt::Display for DeleteChatError {
 impl ResponseError for DeleteChatError {
     fn status_code(&self) -> StatusCode {
         match self {
+            DeleteChatError::Forbidden => StatusCode::FORBIDDEN,
             DeleteChatError::DatabaseError => StatusCode::INTERNAL_SERVER_ERROR,
             DeleteChatError::NothingToDelete => StatusCode::OK,
             DeleteChatError::UnknownEvent => StatusCode::NOT_FOUND,
@@ -65,11 +73,11 @@ async fn trigger_delete_chat(
 #[utoipa::path(
     delete,
     path = "",
-    summary = "Supprimer une conversation",
-    description = "Supprime définitivement une conversation, ses messages et ses rattachements de \
-                   participants.\n\n\
-                   Aucun contrôle d'appartenance : tout utilisateur authentifié peut appeler cette route sur \
-                   n'importe quelle conversation dont il connaît l'identifiant.",
+    summary = "Delete a chat (administration)",
+    description = "Permanently deletes a chat, its messages and its members. **Administrators only**: members never \
+                   delete a chat, it is deleted with its last member (`DELETE /api/v1/{chat_id}/users/{user_id}/`).\n\n \
+                   A member who is not an administrator gets `403`; any other non-administrator gets the same `404` \
+                   as for an unknown chat.",
     responses(
         (
             status = 204,
@@ -90,8 +98,15 @@ async fn trigger_delete_chat(
             example = json!("Jeton expiré")
         ),
         (
+            status = 403,
+            description = "The caller is a member of the chat but not an administrator.",
+            body = String,
+            content_type = "text/plain",
+            example = json!("Only an administrator can delete a chat: it is deleted with its last member.")
+        ),
+        (
             status = 404,
-            description = "Aucune conversation ne porte cet identifiant.",
+            description = "No chat matches `chat_id`, or the caller is neither one of its members nor an administrator (both cases are deliberately indistinguishable).",
             body = String,
             content_type = "text/plain",
             example = json!("Unknown event.")
@@ -115,10 +130,22 @@ async fn trigger_delete_chat(
 #[delete("/")]
 pub async fn delete_chat(
     state: web::Data<AppState>,
-    _: AuthenticatedUser,
+    auth_user: AuthenticatedUser,
     params: web::Path<ChatPathParams>,
 ) -> Result<impl Responder, DeleteChatError> {
     let chat_id = params.chat_id;
+    if !require_chat_access(&state, chat_id, auth_user.id).await? {
+        return Err(DeleteChatError::Forbidden);
+    }
     trigger_delete_chat(state, chat_id).await?;
     Ok(HttpResponse::NoContent().finish())
+}
+
+impl From<AccessDenied> for DeleteChatError {
+    fn from(denied: AccessDenied) -> Self {
+        match denied {
+            AccessDenied::NotFound => DeleteChatError::UnknownEvent,
+            AccessDenied::DatabaseError => DeleteChatError::DatabaseError,
+        }
+    }
 }

@@ -5,6 +5,10 @@ use mairie360_api_lib::error::ApiLibError;
 use mairie360_api_lib::security::AuthenticatedUser;
 use mairie360_api_lib::state::AppState;
 
+use crate::endpoints::v1::id::access::{
+    require_chat_access, require_message_author, AccessDenied, MessageDenied,
+};
+
 use crate::database::chats::delete_message_from_chat::view::DeleteMessageQueryView;
 use crate::endpoints::v1::id::messages::id::MessagePathParams;
 
@@ -12,11 +16,15 @@ use crate::endpoints::v1::id::messages::id::MessagePathParams;
 pub enum DeleteMessageError {
     DatabaseError,
     UnknownMessage,
+    Forbidden,
 }
 
 impl std::fmt::Display for DeleteMessageError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            DeleteMessageError::Forbidden => {
+                write!(f, "Only the author of a message can delete it.")
+            }
             DeleteMessageError::DatabaseError => {
                 write!(f, "An error occurred while accessing the database.")
             }
@@ -30,6 +38,7 @@ impl std::fmt::Display for DeleteMessageError {
 impl ResponseError for DeleteMessageError {
     fn status_code(&self) -> StatusCode {
         match self {
+            DeleteMessageError::Forbidden => StatusCode::FORBIDDEN,
             DeleteMessageError::DatabaseError => StatusCode::INTERNAL_SERVER_ERROR,
             DeleteMessageError::UnknownMessage => StatusCode::NOT_FOUND,
         }
@@ -60,12 +69,12 @@ async fn trigger_delete_message(
 #[utoipa::path(
     delete,
     path = "",
-    summary = "Supprimer un message",
-    description = "Supprime définitivement un message d'une conversation.\n\n\
-                   Aucun `ChatSignal` n'est poussé sur le flux SSE : les autres participants \
-                   voient encore le message jusqu'à leur prochain rechargement.\n\n\
-                   Aucun contrôle d'auteur ni d'appartenance : tout utilisateur authentifié peut \
-                   supprimer n'importe quel message.",
+    summary = "Delete a message",
+    description = "Permanently deletes a message of a chat.\n\n \
+                   No `ChatSignal` is pushed on the SSE stream: the other members still see the message until they \
+                   reload the chat.\n\n \
+                   Only the author of the message may delete it (`403` for another member); administrators bypass \
+                   the check.",
     responses(
         (
             status = 204,
@@ -86,8 +95,15 @@ async fn trigger_delete_message(
             example = json!("Jeton expiré")
         ),
         (
+            status = 403,
+            description = "The message was written by another member.",
+            body = String,
+            content_type = "text/plain",
+            example = json!("Only the author of a message can delete it.")
+        ),
+        (
             status = 404,
-            description = "Aucun message ne porte cet identifiant.",
+            description = "No message `message_id` in this chat, or the caller is neither a member of the chat nor an administrator.",
             body = String,
             content_type = "text/plain",
             example = json!("Unknown message.")
@@ -111,10 +127,31 @@ async fn trigger_delete_message(
 #[delete("/")]
 pub async fn delete_message(
     state: web::Data<AppState>,
-    _: AuthenticatedUser,
+    auth_user: AuthenticatedUser,
     params: web::Path<MessagePathParams>,
 ) -> Result<impl Responder, DeleteMessageError> {
     let message_id = params.message_id();
+    let is_admin = require_chat_access(&state, params.chat_id(), auth_user.id).await?;
+    require_message_author(&state, params.chat_id(), message_id, auth_user.id, is_admin).await?;
     trigger_delete_message(state, message_id).await?;
     Ok(HttpResponse::NoContent().finish())
+}
+
+impl From<AccessDenied> for DeleteMessageError {
+    fn from(denied: AccessDenied) -> Self {
+        match denied {
+            AccessDenied::NotFound => DeleteMessageError::UnknownMessage,
+            AccessDenied::DatabaseError => DeleteMessageError::DatabaseError,
+        }
+    }
+}
+
+impl From<MessageDenied> for DeleteMessageError {
+    fn from(denied: MessageDenied) -> Self {
+        match denied {
+            MessageDenied::NotFound => DeleteMessageError::UnknownMessage,
+            MessageDenied::Forbidden => DeleteMessageError::Forbidden,
+            MessageDenied::DatabaseError => DeleteMessageError::DatabaseError,
+        }
+    }
 }

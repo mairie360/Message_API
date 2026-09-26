@@ -76,6 +76,12 @@ spec's `servers` are unreachable from the ZAP container. `rules.tsv` is the one 
 `100001` (unexpected content type) scope also covers `/api/v1/stream` (`text/event-stream`): ZAP keeps a single
 `OUTOFSCOPE` regex per rule id, so both paths live in one alternation.
 
+Every `/api/v1/{chat_id}/**` handler starts with `endpoints::v1::id::access::require_chat_access` (one query:
+chat exists, caller is a non-excluded member, caller `is_admin`): non-members get the same `404` as an unknown
+chat, administrators bypass it. Message edits and deletions also go through `require_message_author` (author only,
+`403` otherwise; admins bypass). Members never delete a chat: `DELETE /{chat_id}/` is admin-only and a chat is
+deleted with its last member (`DeleteEmptyChatQueryView` after each member removal).
+
 Request bodies with text fields are extracted with `endpoints::validation::ValidatedJson` instead of `web::Json`:
 the view implements `Validate` (length matching the Postgres column, no control character, no `<` / `>`) and an
 invalid value answers `400` naming the field. Map the lib's `DbError` constraint violations (`ForeignKeyViolation`,
