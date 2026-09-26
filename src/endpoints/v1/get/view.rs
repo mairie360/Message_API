@@ -11,8 +11,8 @@ pub struct ChatView {
     /// Titre de la conversation. Chaîne vide si elle n'en a pas — jamais `null`.
     #[schema(example = "Service urbanisme")]
     name: String,
-    /// Messages non lus par l'utilisateur connecté. Remis à zéro dès qu'il ouvre la
-    /// conversation via `GET /api/v1/{chat_id}/`.
+    /// Messages non lus par l'utilisateur connecté. La consultation via
+    /// `GET /api/v1/{chat_id}/` ne modifie pas ce compteur.
     #[schema(example = 3)]
     unread_count: i32,
 }
