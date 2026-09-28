@@ -43,7 +43,7 @@ Cargo aliases are defined in `.cargo/config.toml`:
 Integration tests live in `tests/` (there is no meaningful unit-test suite in `src/`).
 They are plain `#[tokio::test]` + `#[serial]` (`serial_test`) and use `mairie360_api_lib`'s
 `get_shared_db()`, which spins up **real Docker containers via testcontainers** —
-`ghcr.io/mairie360/database:1.2.1` (lib default, `TEST_DB_VERSION` overrides it) plus a Liquibase
+`ghcr.io/mairie360/database:dev-ea0c424` (pinned in `.cargo/config.toml` through `TEST_DB_VERSION`, which overrides the lib default) plus a Liquibase
 migration container, with Postgres published on a random host port (tests must still stay
 `#[serial]`). A running Docker daemon and pull access to `ghcr.io/mairie360/*` are required.
 
@@ -108,10 +108,10 @@ which lives in `Devops/Database` (`releases/v1.5.0` + `repeatable/messages/`): i
 (`conversation_read_cursors`) forward only, recounts the messages after it, and answers "no row" (→ `404 Unknown message.`)
 when the id belongs to another chat. Sends and acknowledgements of one conversation are serialized by a transaction advisory
 lock taken by a `BEFORE INSERT` trigger on `messages`, which also draws the message id after the lock so a single cursor is
-sound. **This API needs a Database image that ships that release**: the compose files and the lib's testcontainers default
-(`DEFAULT_DB_VERSION`) must reach it, and until then the tests run with a locally built image
-(`docker build -t ghcr.io/mairie360/database:<tag> …` and `…/liquibase-migrations:<tag>` from `Devops/Database`, then
-`TEST_DB_VERSION=<tag> cargo test`).
+sound. **This API needs a Database image that ships that release** (`dev-ea0c424` or later): the compose files and
+`TEST_DB_VERSION` in `.cargo/config.toml` pin it, and both have to be bumped together when a newer Database image is
+needed. To try an unmerged Database branch, build `ghcr.io/mairie360/database:<tag>` and `…/liquibase-migrations:<tag>`
+from `Devops/Database` and run `TEST_DB_VERSION=<tag> cargo test`.
 
 Request bodies with text fields are extracted with `endpoints::validation::ValidatedJson` instead of `web::Json`:
 the view implements `Validate` (length matching the Postgres column, no control character, no `<` / `>`) and an
