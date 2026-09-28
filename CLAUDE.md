@@ -101,6 +101,18 @@ chat, administrators bypass it. Message edits and deletions also go through `req
 `403` otherwise; admins bypass). Members never delete a chat: `DELETE /{chat_id}/` is admin-only and a chat is
 deleted with its last member (`DeleteEmptyChatQueryView` after each member removal).
 
+Unread counters are only lowered by the explicit `POST /api/v1/{chat_id}/read/` (`{ "readUntilMessageId": n }`, answers
+`{ "unread_count": k }`); `GET /api/v1/{chat_id}/` and `GET /api/v1/` never touch them, so polling is safe. The route is
+`endpoints::v1::id::read` and one call to the Postgres function `fn_acknowledge_read` (`database::chats::acknowledge_read`),
+which lives in `Devops/Database` (`releases/v1.5.0` + `repeatable/messages/`): it moves a per-agent cursor
+(`conversation_read_cursors`) forward only, recounts the messages after it, and answers "no row" (→ `404 Unknown message.`)
+when the id belongs to another chat. Sends and acknowledgements of one conversation are serialized by a transaction advisory
+lock taken by a `BEFORE INSERT` trigger on `messages`, which also draws the message id after the lock so a single cursor is
+sound. **This API needs a Database image that ships that release**: the compose files and the lib's testcontainers default
+(`DEFAULT_DB_VERSION`) must reach it, and until then the tests run with a locally built image
+(`docker build -t ghcr.io/mairie360/database:<tag> …` and `…/liquibase-migrations:<tag>` from `Devops/Database`, then
+`TEST_DB_VERSION=<tag> cargo test`).
+
 Request bodies with text fields are extracted with `endpoints::validation::ValidatedJson` instead of `web::Json`:
 the view implements `Validate` (length matching the Postgres column, no control character, no `<` / `>`) and an
 invalid value answers `400` naming the field. Map the lib's `DbError` constraint violations (`ForeignKeyViolation`,

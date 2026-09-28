@@ -4,13 +4,13 @@
 
 use mairie360_api_lib::database::db_interface::ApiRequestDto;
 use message_api::database::chats::{
+    acknowledge_read::view::AcknowledgeReadQueryView,
     add_message_to_chat::view::PostMessageInChatQueryView,
     add_users_to_chat::view::AddMembersToChatQueryView, create_chat::view::CreateChatQueryView,
     delete_chat::view::DeleteChatQueryView, delete_message_from_chat::view::DeleteMessageQueryView,
     get_chat::view::GetChatQueryView, get_chat_users::view::GetChatMembersQueryView,
     get_chats::view::GetChatsQueryView, patch_message_in_chat::view::PatchMessageQueryView,
     remove_user_from_chat::view::RemoveMemberFromChatQueryView,
-    reset_unread_count::view::ResetUnreadCountQueryView,
 };
 
 #[test]
@@ -135,12 +135,13 @@ fn test_remove_member_from_chat_view_accessors() {
 }
 
 #[test]
-fn test_reset_unread_count_view_accessors() {
-    let view = ResetUnreadCountQueryView::new(7, 42);
+fn test_acknowledge_read_view_accessors() {
+    let view = AcknowledgeReadQueryView::new(7, 42, 118);
 
     assert_eq!(view.chat_id(), 7);
     assert_eq!(view.user_id(), 42);
-    assert!(format!("{view}").contains("chat_id=7 user_id=42"));
-    assert!(view.query_sql().contains("UPDATE unread_counters"));
-    assert_eq!(view.query_params().len(), 2);
+    assert_eq!(view.message_id(), 118);
+    assert!(format!("{view}").contains("chat_id=7 user_id=42 message_id=118"));
+    assert!(view.query_sql().contains("fn_acknowledge_read"));
+    assert_eq!(view.query_params().len(), 3);
 }

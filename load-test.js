@@ -156,6 +156,20 @@ const writeHandlers = {
     });
   },
 
+  // Read acknowledgement, on a chat of its own: the Admin posts a message and acknowledges it.
+  'POST /api/v1/{chat_id}/read/': ({ request }) => {
+    const chatId = createChat('k6 acknowledge read', [MEMBER_ID]);
+    const messageId = postMessage(chatId, 'k6 message to acknowledge');
+    check(
+      request({ path: { chat_id: chatId }, body: { readUntilMessageId: messageId } }),
+      {
+        'acknowledge read 200': (r) => r.status === 200,
+        'own message is never unread': (r) => r.json('unread_count') === 0,
+      },
+    );
+    deleteChat(chatId);
+  },
+
   // Members, on a chat of their own: two VUs adding the same user to a shared chat would
   // answer 409.
   'POST /api/v1/{chat_id}/users/': ({ request }) => {

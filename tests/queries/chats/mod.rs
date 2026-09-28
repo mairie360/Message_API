@@ -1,5 +1,6 @@
 pub mod access;
 pub mod accessors;
+pub mod acknowledge_read;
 pub mod add_message_to_chat;
 pub mod add_user_to_chat;
 pub mod create_chat;
@@ -10,4 +11,3 @@ pub mod get_chat_users;
 pub mod get_chats;
 pub mod patch_message_in_chat;
 pub mod remove_user_from_chat;
-pub mod reset_unread_count;
