@@ -3,6 +3,7 @@ pub mod delete;
 pub mod doc;
 pub mod get;
 pub mod messages;
+pub mod read;
 pub mod users;
 
 /// Paramètres de chemin des routes d'une conversation.
@@ -31,6 +32,7 @@ pub fn config(cfg: &mut actix_web::web::ServiceConfig) {
             .service(delete::endpoint::delete_chat)
             .service(get::endpoint::get_chat)
             .configure(messages::config)
+            .configure(read::config)
             .configure(users::config),
     );
 }

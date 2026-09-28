@@ -1,6 +1,7 @@
 use crate::endpoints::v1::id::delete::endpoint::__path_delete_chat;
 use crate::endpoints::v1::id::get::endpoint::__path_get_chat;
 use crate::endpoints::v1::id::messages::doc::MessagesDoc;
+use crate::endpoints::v1::id::read::doc::ReadDoc;
 use crate::endpoints::v1::id::users::doc::UsersDoc;
 use crate::endpoints::v1::id::ChatPathParams;
 use utoipa::OpenApi;
@@ -13,6 +14,7 @@ struct Doc;
 #[openapi(nest(
     (path = "/", api = Doc),
     (path = "/messages", api = MessagesDoc),
+    (path = "/read", api = ReadDoc),
     (path = "/users", api = UsersDoc)
 ))]
 pub struct IdDoc;

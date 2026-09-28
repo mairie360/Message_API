@@ -63,8 +63,9 @@ async fn trigger_get_chat(
     get,
     path = "",
     summary = "Read the messages of a chat",
-    description = "Returns the messages of a chat **without modifying** the caller's unread counter. An explicit \
-                   acknowledgement will be provided by a separate write route.\n\n\
+    description = "Returns the messages of a chat **without modifying** the caller's unread counter. Only the explicit \
+                   acknowledgement `POST /api/v1/{chat_id}/read/` lowers it, so polling this route never marks \
+                   messages as read.\n\n\
                    There is no pagination: every message is returned.\n\n\
                    Only the members of the chat may call this route; administrators bypass the check. A caller who is not a member gets the same `404` as for an unknown chat.",
     responses(

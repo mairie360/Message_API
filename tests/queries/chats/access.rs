@@ -1,5 +1,4 @@
-use crate::common::get_smart_db;
-use mairie360_api_lib::database::db_interface::{ApiRequestDto, QueryParam};
+use crate::common::{get_smart_db, plain_user};
 use mairie360_api_lib::database::error::DbError;
 use mairie360_api_lib::error::ApiLibError;
 use mairie360_api_lib::smart_db::SmartDatabase;
@@ -14,35 +13,6 @@ use message_api::database::chats::{
     remove_user_from_chat::view::RemoveMemberFromChatQueryView,
 };
 use serial_test::serial;
-use std::fmt::Display;
-
-/// Inserts a fresh user without any role: the seeded fixtures include administrators.
-#[derive(serde::Serialize, serde::Deserialize)]
-struct CreatePlainUser;
-
-impl Display for CreatePlainUser {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "CreatePlainUser")
-    }
-}
-
-impl ApiRequestDto for CreatePlainUser {
-    fn query_sql(&self) -> &'static str {
-        "INSERT INTO users (first_name, last_name, email, password, status) \
-         VALUES ('Chat', 'Member', 'chat.member.' || gen_random_uuid() || '@mairie360.test', \
-                 '$argon2id$v=19$m=19456,t=2,p=1$/iKF9PbiDRDs4EKPjlIIhg$UKx9vfwwps250mEP/bYp63CXbEnQGULeUAhDq+az9Aw', \
-                 'active') \
-         RETURNING id"
-    }
-
-    fn query_params(&self) -> &[QueryParam] {
-        &[]
-    }
-}
-
-async fn plain_user(db: &SmartDatabase) -> u64 {
-    db.fetch_scalar::<i32, _>(&CreatePlainUser).await.unwrap() as u64
-}
 
 async fn chat_with(db: &SmartDatabase, members: Vec<u64>) -> u64 {
     let chat_id = db
