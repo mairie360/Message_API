@@ -621,7 +621,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"sitation\": null\n}",
+              "raw": "{\n  \"citation\": null\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -675,7 +675,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"content\": \"La réunion est décalée à 15h.\",\n  \"sitation\": null\n}",
+              "raw": "{\n  \"content\": \"La réunion est décalée à 15h.\",\n  \"citation\": null\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -734,7 +734,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"content\": \"Bien noté, je préviens le service.\",\n  \"sitation\": \"{{message_id}}\"\n}",
+              "raw": "{\n  \"content\": \"Bien noté, je préviens le service.\",\n  \"citation\": \"{{message_id}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -749,7 +749,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "// ids must be JSON numbers, not strings.",
-                  "pm.request.body.raw = JSON.stringify({ content: 'Bien noté, je préviens le service.', sitation: Number(pm.environment.get('message_id')) });"
+                  "pm.request.body.raw = JSON.stringify({ content: 'Bien noté, je préviens le service.', citation: Number(pm.environment.get('message_id')) });"
                 ]
               }
             },
@@ -812,9 +812,9 @@
                   "    pm.expect(reply, 'reply').to.exist;",
                   "    pm.expect(first.content).to.eql(\"La réunion est décalée à 15h.\");",
                   "    pm.expect(first.sender_id).to.eql(Number(pm.environment.get(\"admin_user_id\")));",
-                  "    pm.expect(first.sitation).to.be.null;",
+                  "    pm.expect(first.citation).to.be.null;",
                   "    pm.expect(reply.sender_id).to.eql(Number(pm.environment.get(\"agent_user_id\")));",
-                  "    // `sitation` is accepted by POST but not persisted yet (the INSERT ignores it), so it is not asserted on the reply.",
+                  "    // `citation` is accepted by POST but not persisted yet (the INSERT ignores it), so it is not asserted on the reply.",
                   "    messages.forEach(m => pm.expect(new Date(m.created_at).toString()).to.not.eql(\"Invalid Date\"));",
                   "});"
                 ]
@@ -1455,7 +1455,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"content\": \"Point d'étape à 17h.\",\n  \"sitation\": null\n}",
+              "raw": "{\n  \"content\": \"Point d'étape à 17h.\",\n  \"citation\": null\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2285,7 +2285,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"content\": \"Je ne suis pas membre.\",\n  \"sitation\": null\n}",
+              "raw": "{\n  \"content\": \"Je ne suis pas membre.\",\n  \"citation\": null\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2531,7 +2531,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"content\": \"Message à modérer.\",\n  \"sitation\": null\n}",
+              "raw": "{\n  \"content\": \"Message à modérer.\",\n  \"citation\": null\n}",
               "options": {
                 "raw": {
                   "language": "json"

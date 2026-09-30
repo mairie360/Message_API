@@ -192,16 +192,18 @@ the container tests.
 
 ### Real-time SSE (`src/sse/`)
 
-- `state.rs`: `AppState { online_agents: DashMap<u64 /*user id*/, mpsc::Sender<...>>,
+- `state.rs`: `AppState { online_agents: DashMap<u64 /*user id*/, Vec<(ConnectionId, mpsc::Sender<...>)>>,
   internal_bus: broadcast::Sender<ChatEvent> }`.
 - `main.rs` creates a `tokio::sync::broadcast` channel and `tokio::spawn`s
   `event_manager::start_internal_event_listener`, handing it a cloned `SmartDatabase`.
 - Write endpoints (e.g. `v1/id/messages/post`) do their DB write, then
   `sse_state.internal_bus.send(ChatEvent { chat_id, sender_id, message })`.
-- The listener, per event, queries chat members (`get_chat_users`) and pushes
-  `data: {...}\n\n` frames to each online member's `mpsc` sender (skipping the sender).
-- `GET /api/v1/stream` registers the caller's `mpsc::Sender` in `online_agents` and runs a
-  15s keep-alive ping task that also cleans up the entry on disconnect.
+- The listener, per event, queries chat members (`get_chat_users`) and pushes a serde-serialized
+  `ChatSignal` frame (`data: {...}\n\n`) to every connection of each online member (skipping the
+  sender). A `Lagged` bus error is logged and the loop resumes; only closed senders are removed.
+- `GET /api/v1/stream` registers a new connection for the caller (several tabs allowed, via
+  `AppState::register_connection`) and runs a 15s keep-alive ping task that removes only that
+  connection once it is closed.
 
 ### Config (env vars, all "critical" → process panics if unset)
 

@@ -8,7 +8,7 @@ use utoipa::ToSchema;
 pub struct PostMessageView {
     /// Identifiant du message auquel celui-ci répond. Facultatif.
     #[schema(example = 100)]
-    sitation: Option<u64>, // message sitation
+    citation: Option<u64>, // message citation
     /// Contenu du message.
     #[schema(
         min_length = 1,
@@ -19,12 +19,12 @@ pub struct PostMessageView {
 }
 
 impl PostMessageView {
-    pub fn new(sitation: Option<u64>, content: String) -> Self {
-        Self { sitation, content }
+    pub fn new(citation: Option<u64>, content: String) -> Self {
+        Self { citation, content }
     }
 
-    pub fn sitation(&self) -> Option<u64> {
-        self.sitation
+    pub fn citation(&self) -> Option<u64> {
+        self.citation
     }
 
     pub fn content(&self) -> &str {
