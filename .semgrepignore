@@ -1,0 +1,21 @@
+# Semgrep ignores every file matching these patterns.
+# Defining this file replaces Semgrep's built-in defaults, so they are repeated below.
+:include .gitignore
+
+# Semgrep defaults
+.git/
+node_modules/
+vendor/
+test/
+tests/
+*_test.*
+*.min.js
+*.min.css
+
+# Known findings accepted for now (MAIR-233 discussion)
+# - github-actions-mutable-action-tag
+.github/workflows/auto-approve.yml
+# - secrets-inherit
+.github/workflows/cicd.yml
+# - missing-user (dev image only, the production Dockerfile already runs as 65532)
+development.Dockerfile
