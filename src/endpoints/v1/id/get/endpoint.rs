@@ -80,7 +80,7 @@ async fn trigger_get_chat(
                         "content": "La réunion est décalée à 15h.",
                         "sender_id": 42,
                         "created_at": "2026-09-16T09:12:00Z",
-                        "sitation": null
+                        "citation": null
                     }
                 ]
             })

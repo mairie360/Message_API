@@ -3,7 +3,7 @@ use std::time::Duration;
 use crate::sse::state::{AppState, ChatSignal};
 use actix_web::{get, web, HttpResponse, Responder};
 use mairie360_api_lib::security::AuthenticatedUser;
-use tokio::sync::mpsc;
+use tokio::sync::mpsc::{self, error::TrySendError};
 use tokio_stream::StreamExt;
 
 #[utoipa::path(
@@ -20,8 +20,9 @@ use tokio_stream::StreamExt;
                    ouverte à travers les proxys ; les clients SSE l'ignorent d'eux-mêmes. Le flux \
                    ne se termine pas de lui-même : c'est au client de se reconnecter s'il est \
                    coupé.\n\n\
-                   Un seul flux est retenu par utilisateur : rouvrir ce endpoint remplace le \
-                   précédent, qui cesse alors d'être alimenté. Le `body` documenté ci-dessous \
+                   Plusieurs flux peuvent être ouverts en parallèle pour un même utilisateur (onglets, \
+                   appareils) : chacun reçoit les signaux, et la fermeture de l'un n'affecte pas les \
+                   autres. Le `body` documenté ci-dessous \
                    décrit la charge utile d'**un** événement, pas la réponse entière.",
     responses(
         (
@@ -52,33 +53,35 @@ async fn sse_stream_route(
     // 1. Récupération de l'ID de l'agent connecté
     let user_id = auth_user.id;
 
-    // 2. Création d'un canal mpsc aligné avec le type de votre AppState
+    // 2. One channel per connection: a user may have several streams open at once.
     let (tx, rx) = mpsc::channel::<Result<actix_web::web::Bytes, String>>(10);
 
-    // 3. Enregistrement du Sender (le tuyau) dans la DashMap de l'état global
-    state.online_agents.insert(user_id, tx.clone());
+    // 3. Register this connection without replacing the user's other ones.
+    let connection_id = state.register_connection(user_id, tx.clone());
 
-    // 4. Lancement d'un ping (keep-alive) en tâche de fond toutes les 15 secondes
+    // 4. Keep-alive ping every 15 seconds; removes only this connection once it is dead.
     let state_clone = state.clone();
-    let user_id_clone = user_id;
 
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(15));
 
-        // Le premier tick d'interval arrive immédiatement, on le consomme
+        // The first tick fires immediately, consume it.
         interval.tick().await;
 
         loop {
-            interval.tick().await;
-
-            let ping_bytes = actix_web::web::Bytes::from(": ping\n\n");
-
-            // On envoie Ok(ping_bytes) car le canal attend un Result
-            if tx.try_send(Ok(ping_bytes)).is_err() {
-                state_clone.online_agents.remove(&user_id_clone);
-                break;
+            tokio::select! {
+                _ = tx.closed() => break,
+                _ = interval.tick() => {
+                    let ping_bytes = actix_web::web::Bytes::from(": ping\n\n");
+                    // A full buffer is not a dead client: only a closed channel ends the stream.
+                    if let Err(TrySendError::Closed(_)) = tx.try_send(Ok(ping_bytes)) {
+                        break;
+                    }
+                }
             }
         }
+
+        state_clone.remove_connection(user_id, connection_id);
     });
 
     // 5. Transformation du Receiver de Tokio en Stream Actix-web

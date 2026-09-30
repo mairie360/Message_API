@@ -79,7 +79,7 @@ async fn trigger_post_message(
     summary = "Post a message",
     description = "Adds a message to a chat and pushes a `ChatSignal` on the SSE stream of every connected member. \
                    The author is taken from the JWT, never from the body.\n\n \
-                   `sitation` is optional: it holds the id of the message this one answers. It is always read back \
+                   `citation` is optional: it holds the id of the message this one answers. It is always read back \
                    as `null` by `GET /api/v1/{chat_id}/`, which does not load it from the database yet.\n\n \
                    The response only holds the id given to the message.\n\nOnly the members of the chat may call this route; administrators bypass the check. A caller who is not a member gets the same `404` as for an unknown chat.",
     responses(
@@ -121,7 +121,7 @@ async fn trigger_post_message(
     request_body(
         content = PostMessageView,
         description = "Contenu du message et, éventuellement, le message auquel il répond.",
-        example = json!({ "content": "La réunion est décalée à 15h.", "sitation": null })
+        example = json!({ "content": "La réunion est décalée à 15h.", "citation": null })
     ),
     security(
         ("jwt" = [])

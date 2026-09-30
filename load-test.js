@@ -84,7 +84,7 @@ function deleteChat(chatId) {
 }
 
 function postMessage(chatId, content) {
-  return fixture('POST', `/api/v1/${chatId}/messages/`, { content, sitation: null }).json('id');
+  return fixture('POST', `/api/v1/${chatId}/messages/`, { content, citation: null }).json('id');
 }
 
 function deleteMessage(chatId, messageId) {
@@ -133,7 +133,7 @@ const writeHandlers = {
   'POST /api/v1/{chat_id}/messages/': ({ request, data }) => {
     const res = request({
       path: { chat_id: data.writeChatId },
-      body: { content: 'La réunion est décalée à 15h.', sitation: null },
+      body: { content: 'La réunion est décalée à 15h.', citation: null },
     });
     check(res, { 'post message 200': (r) => r.status === 200 });
     if (res.status === 200) deleteMessage(data.writeChatId, res.json('id'));

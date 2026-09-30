@@ -20,7 +20,7 @@ pub struct MessageView {
     created_at: DateTime<Utc>,
     /// Message auquel celui-ci répond. **Toujours `null` en lecture** : la valeur envoyée à la
     /// publication n'est pas encore relue depuis la base.
-    sitation: Option<u64>, // message sitation
+    citation: Option<u64>, // message citation
 }
 
 impl MessageView {
@@ -29,14 +29,14 @@ impl MessageView {
         content: &str,
         sender_id: u64,
         created_at: DateTime<Utc>,
-        sitation: Option<u64>,
+        citation: Option<u64>,
     ) -> Self {
         Self {
             id,
             content: content.to_string(),
             sender_id,
             created_at,
-            sitation,
+            citation,
         }
     }
 
@@ -56,8 +56,8 @@ impl MessageView {
         &self.created_at
     }
 
-    pub fn sitation(&self) -> Option<u64> {
-        self.sitation
+    pub fn citation(&self) -> Option<u64> {
+        self.citation
     }
 }
 
