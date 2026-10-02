@@ -117,8 +117,6 @@ const streamHandlers = {
 };
 
 const writeHandlers = {
-  'POST /': ({ request }) => check(request(), { 'hello 200': (r) => r.status === 200 }),
-
   // Chats: create → delete.
   'POST /api/v1/': ({ request }) => {
     const res = request({ body: { name: 'k6 create chat', members: [MEMBER_ID] } });
