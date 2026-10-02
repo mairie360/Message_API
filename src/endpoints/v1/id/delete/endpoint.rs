@@ -56,15 +56,20 @@ impl ResponseError for DeleteChatError {
 async fn trigger_delete_chat(
     state: web::Data<AppState>,
     chat_id: u64,
+    performed_by: u64,
 ) -> Result<(), DeleteChatError> {
-    let view = DeleteChatQueryView::new(chat_id);
+    // Logged in messaging_moderation_log by the same statement.
+    let view = DeleteChatQueryView::new(chat_id, performed_by);
     state
         .get_smart_db()
         .fetch_scalar::<i32, _>(&view)
         .await
         .map_err(|e| match e {
             ApiLibError::Database(DbError::NotFound) => DeleteChatError::UnknownEvent,
-            _ => DeleteChatError::DatabaseError,
+            e => {
+                eprintln!("Delete chat error: {e}");
+                DeleteChatError::DatabaseError
+            }
         })?;
 
     Ok(())
@@ -75,24 +80,25 @@ async fn trigger_delete_chat(
     path = "",
     summary = "Delete a chat (administration)",
     description = "Permanently deletes a chat, its messages and its members. **Administrators only**: members never \
-                   delete a chat, it is deleted with its last member (`DELETE /api/v1/{chat_id}/users/{user_id}/`).\n\n \
+                   delete a chat, it is deleted with its last member (`DELETE /api/v1/{chat_id}/users/{user_id}/`). \
+                   The deletion is recorded, with the title of the chat, in the moderation log.\n\n \
                    A member who is not an administrator gets `403`; any other non-administrator gets the same `404` \
                    as for an unknown chat.",
     responses(
         (
             status = 204,
-            description = "Conversation supprimée. Corps vide.",
+            description = "Chat deleted. Empty body.",
         ),
         (
             status = 400,
-            description = "Un segment de l'URL n'est pas un entier, ou le corps JSON est malformé.",
+            description = "A URL segment is not an integer.",
             body = String,
             content_type = "text/plain",
             example = json!("Path deserialize error: can not parse `abc` to a u64")
         ),
         (
             status = 401,
-            description = "En-tête `Authorization` absent, JWT invalide ou expiré, ou session révoquée.",
+            description = "Missing `Authorization` header, invalid or expired JWT, or revoked session.",
             body = String,
             content_type = "text/plain",
             example = json!("Jeton expiré")
@@ -113,7 +119,7 @@ async fn trigger_delete_chat(
         ),
         (
             status = 500,
-            description = "Erreur de base de données.",
+            description = "Database error.",
             body = String,
             content_type = "text/plain",
             example = json!("An error occurred while accessing the database.")
@@ -134,10 +140,13 @@ pub async fn delete_chat(
     params: web::Path<ChatPathParams>,
 ) -> Result<impl Responder, DeleteChatError> {
     let chat_id = params.chat_id;
-    if !require_chat_access(&state, chat_id, auth_user.id).await? {
+    if !require_chat_access(&state, chat_id, auth_user.id)
+        .await?
+        .is_admin
+    {
         return Err(DeleteChatError::Forbidden);
     }
-    trigger_delete_chat(state, chat_id).await?;
+    trigger_delete_chat(state, chat_id, auth_user.id).await?;
     Ok(HttpResponse::NoContent().finish())
 }
 

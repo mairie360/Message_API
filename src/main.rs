@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use actix_web::{middleware, web, App, HttpServer};
 
-use dashmap::DashMap;
 use message_api::database::pg_url::build_pg_url;
 use message_api::endpoints::swagger::ApiDoc;
 use message_api::endpoints::{config, health, hello};
@@ -12,6 +11,7 @@ use mairie360_api_lib::security::JwtMiddleware;
 use mairie360_api_lib::state::AppState;
 
 use message_api::sse::event_manager::start_internal_event_listener;
+use message_api::sse::relay::RedisRelay;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
@@ -26,20 +26,22 @@ async fn main() -> std::io::Result<()> {
     let db_port = get_critical_env_var("DB_PORT");
     let db_name = get_critical_env_var("DB_NAME");
     let pg_url = build_pg_url(&db_user, &db_password, &db_host, &db_port, &db_name);
+    let relay = RedisRelay::new(&redis_url);
     let state = AppState::new(redis_url, pg_url).await;
     let host = get_critical_env_var("HOST");
     let port = get_critical_env_var("PORT");
     let bind_address = format!("{}:{}", host, port);
 
-    // 1. Initialisation du canal de broadcast interne (capacité de 100 événements simultanés)
+    // 1. Local bus of the chat events (100 buffered events), fed by the write endpoints or, when
+    // Redis is reachable, by the relay that shares them between replicas.
     let (bus_tx, _bus_rx) = tokio::sync::broadcast::channel(100);
+    if let Some(relay) = &relay {
+        tokio::spawn(relay.clone().run(bus_tx.clone()));
+    }
 
-    let app_state = Arc::new(message_api::sse::state::AppState {
-        online_agents: DashMap::new(),
-        internal_bus: bus_tx,
-    });
+    let app_state = Arc::new(message_api::sse::state::AppState::new(bus_tx, relay));
 
-    // 2. On lance l'écouteur SSE en tâche de fond parallèlement à Actix
+    // 2. SSE listener in the background, next to Actix
     tokio::spawn(start_internal_event_listener(
         app_state.clone(),
         state.get_smart_db().clone(),

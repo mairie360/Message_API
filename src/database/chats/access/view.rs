@@ -3,11 +3,13 @@ use std::fmt::Display;
 use mairie360_api_lib::database::db_interface::{ApiRequestDto, QueryParam};
 
 /// What the caller may do on a chat: whether it exists, whether the caller is one of its (not
-/// excluded) members, and whether the caller is an administrator (who bypasses membership).
+/// excluded) members, whether the caller created it (`conversations.created_by`) and whether the
+/// caller is an administrator (who may read and moderate any chat).
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct ChatAccess {
     pub chat_exists: bool,
     pub is_member: bool,
+    pub is_creator: bool,
     pub is_admin: bool,
 }
 
@@ -53,6 +55,7 @@ impl ApiRequestDto for ChatAccessQueryView {
             'is_member', EXISTS( \
                 SELECT 1 FROM conversation_members \
                 WHERE conversation_id = $1 AND user_id = $2 AND is_excluded = FALSE), \
+            'is_creator', EXISTS(SELECT 1 FROM conversations WHERE id = $1 AND created_by = $2), \
             'is_admin', is_admin($2))"
     }
 

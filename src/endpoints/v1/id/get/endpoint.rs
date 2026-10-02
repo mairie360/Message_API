@@ -6,8 +6,9 @@ use mairie360_api_lib::state::AppState;
 use crate::endpoints::v1::id::access::{require_chat_access, AccessDenied};
 
 use crate::database::chats::get_chat::view::{GetChatQueryView, Message};
-use crate::endpoints::v1::id::get::view::GetChatResultView;
+use crate::endpoints::v1::id::get::view::{GetChatQuery, GetChatResultView};
 use crate::endpoints::v1::id::ChatPathParams;
+use crate::endpoints::validation::ValidatedQuery;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum GetChatError {
@@ -47,54 +48,68 @@ impl ResponseError for GetChatError {
 async fn trigger_get_chat(
     state: web::Data<AppState>,
     chat_id: u64,
+    query: GetChatQuery,
 ) -> Result<GetChatResultView, GetChatError> {
-    let db = state.get_smart_db();
+    let limit = query.limit();
+    // One extra row tells whether older messages remain.
+    let view = GetChatQueryView::new(chat_id, query.before(), limit + 1);
+    let rows: Vec<Message> = state.get_smart_db().fetch_all(&view).await.map_err(|e| {
+        eprintln!("Get chat error: {e}");
+        GetChatError::DatabaseError
+    })?;
 
-    let view = GetChatQueryView::new(chat_id);
-    let result: Vec<Message> = db
-        .fetch_all(&view)
-        .await
-        .map_err(|_| GetChatError::DatabaseError)?;
-
-    Ok(result.into())
+    Ok(GetChatResultView::from_newest_first(rows, limit))
 }
 
 #[utoipa::path(
     get,
     path = "",
     summary = "Read the messages of a chat",
-    description = "Returns the messages of a chat **without modifying** the caller's unread counter. Only the explicit \
-                   acknowledgement `POST /api/v1/{chat_id}/read/` lowers it, so polling this route never marks \
-                   messages as read.\n\n\
-                   There is no pagination: every message is returned.\n\n\
-                   Only the members of the chat may call this route; administrators bypass the check. A caller who is not a member gets the same `404` as for an unknown chat.",
+    description = "Returns one page of the messages of a chat **without modifying** the caller's unread counter. Only \
+                   the explicit acknowledgement `POST /api/v1/{chat_id}/read/` lowers it, so polling this route never \
+                   marks messages as read.\n\n\
+                   **Pagination:** without `before`, the `limit` latest messages (50 by default, 100 at most); the \
+                   page is returned oldest first. When `has_more` is `true`, call again with `before=<next_before>` \
+                   to get the previous page; the last page has `has_more: false` and `next_before: null`. Message \
+                   ids grow in posting order within a chat, so pages never overlap nor skip a message.\n\n\
+                   Only the members of the chat and administrators may call this route. Anyone else gets the same \
+                   `404` as for an unknown chat.",
     responses(
         (
             status = 200,
-            description = "Messages de la conversation.",
+            description = "One page of messages, oldest first.",
             body = GetChatResultView,
             example = json!({
                 "messages": [
                     {
-                        "id": 101,
+                        "id": 117,
+                        "content": "Quelqu'un a des nouvelles du permis de construire de la rue Pasteur ?",
+                        "sender_id": 51,
+                        "created_at": "2026-09-16T09:05:00Z",
+                        "citation": null
+                    },
+                    {
+                        "id": 118,
                         "content": "La réunion est décalée à 15h.",
                         "sender_id": 42,
                         "created_at": "2026-09-16T09:12:00Z",
-                        "citation": null
+                        "citation": 117
                     }
-                ]
+                ],
+                "has_more": true,
+                "next_before": 117
             })
         ),
         (
             status = 400,
-            description = "Un segment de l'URL n'est pas un entier, ou le corps JSON est malformé.",
+            description = "A URL segment is not an integer, or `before` / `limit` is out of range (`before` 1 to 9223372036854775807, `limit` 1 to 100).",
             body = String,
             content_type = "text/plain",
-            example = json!("Path deserialize error: can not parse `abc` to a u64")
+            example = json!("Invalid `limit`: must be between 1 and 100")
         ),
         (
             status = 401,
-            description = "En-tête `Authorization` absent, JWT invalide ou expiré, ou session révoquée.",
+            description = "Missing `Authorization` header, invalid or expired JWT, or revoked session.",
             body = String,
             content_type = "text/plain",
             example = json!("Jeton expiré")
@@ -108,14 +123,15 @@ async fn trigger_get_chat(
         ),
         (
             status = 500,
-            description = "Erreur de base de données.",
+            description = "Database error.",
             body = String,
             content_type = "text/plain",
             example = json!("An error occurred while accessing the database.")
         ),
     ),
     params(
-        ChatPathParams
+        ChatPathParams,
+        GetChatQuery
     ),
     security(
         ("jwt" = [])
@@ -127,10 +143,11 @@ pub async fn get_chat(
     state: web::Data<AppState>,
     user: AuthenticatedUser,
     params: web::Path<ChatPathParams>,
+    query: ValidatedQuery<GetChatQuery>,
 ) -> Result<impl Responder, GetChatError> {
     let chat_id = params.chat_id;
     require_chat_access(&state, chat_id, user.id).await?;
-    let result = trigger_get_chat(state, chat_id).await?;
+    let result = trigger_get_chat(state, chat_id, query.into_inner()).await?;
     Ok(HttpResponse::Ok().json(result))
 }
 

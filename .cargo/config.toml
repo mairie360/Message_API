@@ -20,4 +20,4 @@ cov = ["llvm-cov", "--workspace", "--ignore-filename-regex", "endpoints|main\\.r
 # (mairie360_api_lib::test_setup). Pinned to a dev-<sha> image that ships fn_acknowledge_read
 # (Database v1.5.0, MAIR-269); the lib default predates it. An exported TEST_DB_VERSION still wins.
 [env]
-TEST_DB_VERSION = "dev-ea0c424"
+TEST_DB_VERSION = "dev-fb7c223"

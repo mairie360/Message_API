@@ -43,11 +43,11 @@ async fn trigger_get_chats(
     user_id: u64,
 ) -> Result<GetChatsResultView, GetChatsError> {
     let view = GetChatsQueryView::new(user_id);
-    let result: Vec<GetChatsQueryResultView> = state
-        .get_smart_db()
-        .fetch_all(&view)
-        .await
-        .map_err(|_| GetChatsError::DatabaseError)?;
+    let result: Vec<GetChatsQueryResultView> =
+        state.get_smart_db().fetch_all(&view).await.map_err(|e| {
+            eprintln!("Get chats error: {e}");
+            GetChatsError::DatabaseError
+        })?;
 
     Ok(result.into())
 }

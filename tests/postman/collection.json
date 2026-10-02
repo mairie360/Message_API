@@ -814,13 +814,226 @@
                   "    pm.expect(first.sender_id).to.eql(Number(pm.environment.get(\"admin_user_id\")));",
                   "    pm.expect(first.citation).to.be.null;",
                   "    pm.expect(reply.sender_id).to.eql(Number(pm.environment.get(\"agent_user_id\")));",
-                  "    // `citation` is accepted by POST but not persisted yet (the INSERT ignores it), so it is not asserted on the reply.",
+                  "    pm.expect(reply.citation, \"citation read back\").to.eql(Number(pm.environment.get(\"message_id\")));",
+                  "    pm.expect(pm.response.json().has_more).to.be.false;",
+                  "    pm.expect(pm.response.json().next_before).to.be.null;",
                   "    messages.forEach(m => pm.expect(new Date(m.created_at).toString()).to.not.eql(\"Invalid Date\"));",
                   "});"
                 ]
               }
             }
           ],
+          "response": []
+        },
+        {
+          "name": "A page holds the latest messages and a cursor",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"One message, the reply, with the cursor to the older ones\", function () {",
+                  "    const page = pm.response.json();",
+                  "    pm.expect(page.messages.map(m => m.id)).to.eql([Number(pm.environment.get(\"reply_id\"))]);",
+                  "    pm.expect(page.has_more).to.be.true;",
+                  "    pm.expect(page.next_before).to.eql(Number(pm.environment.get(\"reply_id\")));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_admin}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/{{chat_id}}/?limit=1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "{{chat_id}}",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "1"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "The next page continues before the cursor",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"The first message, and nothing older\", function () {",
+                  "    const page = pm.response.json();",
+                  "    pm.expect(page.messages.map(m => m.id)).to.eql([Number(pm.environment.get(\"message_id\"))]);",
+                  "    pm.expect(page.has_more).to.be.false;",
+                  "    pm.expect(page.next_before).to.be.null;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_admin}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/{{chat_id}}/?limit=1&before={{reply_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "{{chat_id}}",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "1"
+                },
+                {
+                  "key": "before",
+                  "value": "{{reply_id}}"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "A page size out of range is refused",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "pm.test(\"Body matches the expected text\", function () {",
+                  "    pm.expect(pm.response.text()).to.eql(\"Invalid `limit`: must be between 1 and 100\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_admin}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/{{chat_id}}/?limit=0",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "{{chat_id}}",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "0"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "A citation of an unknown message is refused",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "pm.test(\"Body matches the expected text\", function () {",
+                  "    pm.expect(pm.response.text()).to.eql(\"`citation` is not a message of this chat.\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_admin}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/{{chat_id}}/messages/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "{{chat_id}}",
+                "messages",
+                ""
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"Réponse à un message inexistant.\",\n  \"citation\": 999999999\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
           "response": []
         },
         {
@@ -2556,6 +2769,64 @@
           "response": []
         },
         {
+          "name": "An administrator cannot rewrite the message of a member",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 403\", function () {",
+                  "    pm.response.to.have.status(403);",
+                  "});",
+                  "pm.test(\"Body matches the expected text\", function () {",
+                  "    pm.expect(pm.response.text()).to.eql(\"Only the author of a message can edit it.\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_admin}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/{{chat_id}}/messages/{{agent_message_id}}/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "{{chat_id}}",
+                "messages",
+                "{{agent_message_id}}",
+                ""
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"Message réécrit par un administrateur.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
           "name": "An administrator deletes the message of a member",
           "request": {
             "method": "DELETE",
@@ -2594,6 +2865,174 @@
               }
             }
           ],
+          "response": []
+        },
+        {
+          "name": "A member who did not create the chat cannot add members",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// ids must be JSON numbers, not strings.",
+                  "pm.request.body.raw = JSON.stringify({ users_id: [Number(pm.environment.get('third_user_id'))] });"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 403\", function () {",
+                  "    pm.response.to.have.status(403);",
+                  "});",
+                  "pm.test(\"Body matches the expected text\", function () {",
+                  "    pm.expect(pm.response.text()).to.eql(\"Only the creator of the chat or an administrator can manage its other members.\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_agent}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/{{chat_id}}/users/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "{{chat_id}}",
+                "users",
+                ""
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"users_id\": [\n    3\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "A member who did not create the chat cannot remove another member",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 403\", function () {",
+                  "    pm.response.to.have.status(403);",
+                  "});",
+                  "pm.test(\"Body matches the expected text\", function () {",
+                  "    pm.expect(pm.response.text()).to.eql(\"Only the creator of the chat or an administrator can manage its other members.\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_agent}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/{{chat_id}}/users/{{admin_user_id}}/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "{{chat_id}}",
+                "users",
+                "{{admin_user_id}}",
+                ""
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Too many users at once are refused",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "pm.test(\"Body matches the expected text\", function () {",
+                  "    pm.expect(pm.response.text()).to.eql(\"Invalid `users_id`: must hold at most 50 users\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_admin}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/{{chat_id}}/users/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "{{chat_id}}",
+                "users",
+                ""
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"users_id\": [\n    1,\n    2,\n    3,\n    4,\n    5,\n    6,\n    7,\n    8,\n    9,\n    10,\n    11,\n    12,\n    13,\n    14,\n    15,\n    16,\n    17,\n    18,\n    19,\n    20,\n    21,\n    22,\n    23,\n    24,\n    25,\n    26,\n    27,\n    28,\n    29,\n    30,\n    31,\n    32,\n    33,\n    34,\n    35,\n    36,\n    37,\n    38,\n    39,\n    40,\n    41,\n    42,\n    43,\n    44,\n    45,\n    46,\n    47,\n    48,\n    49,\n    50,\n    51\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
           "response": []
         },
         {

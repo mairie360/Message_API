@@ -27,7 +27,9 @@ impl Display for GetChatMembersQueryView {
 
 impl ApiRequestDto for GetChatMembersQueryView {
     fn query_sql(&self) -> &'static str {
-        "SELECT to_jsonb(user_id) FROM conversation_members WHERE conversation_id = $1"
+        // Excluded members no longer see the chat: they are not notified either.
+        "SELECT to_jsonb(user_id) FROM conversation_members \
+         WHERE conversation_id = $1 AND is_excluded = FALSE"
     }
 
     fn query_params(&self) -> &[QueryParam] {

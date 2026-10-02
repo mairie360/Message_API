@@ -42,6 +42,8 @@ async fn test_chat_access_tells_members_outsiders_and_admins_apart() {
 
     let member_access = access(&db, chat_id, member).await;
     assert!(member_access.chat_exists && member_access.is_member && !member_access.is_admin);
+    // A chat created without `created_by` has no creator.
+    assert!(!member_access.is_creator);
 
     let outsider_access = access(&db, chat_id, outsider).await;
     assert!(outsider_access.chat_exists && !outsider_access.is_member);
@@ -115,4 +117,32 @@ async fn test_chat_is_deleted_with_its_last_member() {
         .await
         .unwrap();
     assert!(!access(&db, chat_id, second).await.chat_exists);
+}
+
+#[tokio::test]
+#[serial]
+async fn test_chat_access_tells_the_creator_apart() {
+    let (_container, host) = get_shared_db().await;
+    let db = get_smart_db(host).await;
+    let creator = plain_user(&db).await;
+    let member = plain_user(&db).await;
+    let chat_id = db
+        .fetch_scalar::<i32, _>(&CreateChatQueryView::with_members(
+            "Creator",
+            None,
+            Some(creator),
+            &[creator, member],
+        ))
+        .await
+        .unwrap() as u64;
+
+    assert!(access(&db, chat_id, creator).await.is_creator);
+    assert!(!access(&db, chat_id, member).await.is_creator);
+
+    // A creator who left is still recorded, but no longer a member.
+    db.fetch_scalar::<i32, _>(&RemoveMemberFromChatQueryView::new(chat_id, creator))
+        .await
+        .unwrap();
+    let left = access(&db, chat_id, creator).await;
+    assert!(left.is_creator && !left.is_member);
 }
