@@ -1,7 +1,5 @@
 use actix_web::http::StatusCode;
 use actix_web::{post, web, HttpResponse, Responder, ResponseError};
-use mairie360_api_lib::database::error::DbError;
-use mairie360_api_lib::error::ApiLibError;
 use mairie360_api_lib::security::AuthenticatedUser;
 use mairie360_api_lib::smart_db::SmartTransaction;
 use mairie360_api_lib::state::AppState;
@@ -11,6 +9,7 @@ use crate::endpoints::v1::id::access::{
 };
 
 use crate::database::chats::add_message_to_chat::view::PostMessageInChatQueryView;
+use crate::endpoints::error::{classify, DbFailure};
 use crate::endpoints::v1::id::messages::post::view::{PostMessageResultView, PostMessageView};
 use crate::endpoints::v1::id::ChatPathParams;
 use crate::endpoints::validation::ValidatedJson;
@@ -62,24 +61,17 @@ async fn trigger_post_message(
 ) -> Result<PostMessageResultView, PosteMessageError> {
     let view =
         PostMessageInChatQueryView::replying_to(chat_id, user_id, view.content(), view.citation());
-    let result = tx
-        .fetch_scalar::<i64, _>(&view)
-        .await
-        .map_err(|e| match e {
-            // fk_messages_reply_to: the quoted message is unknown or in another chat.
-            ApiLibError::Database(DbError::ForeignKeyViolation(message))
-                if message.contains("reply_to") =>
-            {
-                PosteMessageError::UnknownCitation
-            }
-            ApiLibError::Database(DbError::ForeignKeyViolation(_)) => {
-                PosteMessageError::UnknownChat
-            }
-            e => {
-                eprintln!("Post message error: {e}");
-                PosteMessageError::DatabaseError
-            }
-        })?;
+    let result =
+        tx.fetch_scalar::<i64, _>(&view)
+            .await
+            .map_err(|e| match classify("post message", e) {
+                // fk_messages_reply_to: the quoted message is unknown or in another chat.
+                DbFailure::ForeignKey(message) if message.contains("reply_to") => {
+                    PosteMessageError::UnknownCitation
+                }
+                DbFailure::ForeignKey(_) => PosteMessageError::UnknownChat,
+                _ => PosteMessageError::DatabaseError,
+            })?;
 
     Ok(PostMessageResultView::new(result as u64))
 }
