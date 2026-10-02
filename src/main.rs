@@ -4,10 +4,10 @@ use actix_web::{middleware, web, App, HttpServer};
 
 use message_api::database::pg_url::build_pg_url;
 use message_api::endpoints::swagger::ApiDoc;
-use message_api::endpoints::{config, health, hello};
+use message_api::endpoints::{config, health, hello, ready};
 use message_api::logging;
 
-use mairie360_api_lib::env_manager::get_critical_env_var;
+use mairie360_api_lib::env_manager::{get_critical_env_var, get_env_var};
 use mairie360_api_lib::security::JwtMiddleware;
 use mairie360_api_lib::state::AppState;
 
@@ -15,6 +15,9 @@ use message_api::sse::event_manager::start_internal_event_listener;
 use message_api::sse::relay::RedisRelay;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
+
+/// Seconds startup waits for PostgreSQL before exiting, unless `DB_STARTUP_TIMEOUT` says otherwise.
+const DEFAULT_DB_STARTUP_TIMEOUT: u64 = 60;
 
 //                                        -- MAIN FUNCTION --
 
@@ -30,6 +33,20 @@ async fn main() -> std::io::Result<()> {
     let pg_url = build_pg_url(&db_user, &db_password, &db_host, &db_port, &db_name);
     let relay = RedisRelay::new(&redis_url);
     let state = AppState::new(redis_url, pg_url).await;
+    // The lib starts without a database (and serves 500s): refuse to start instead, so that the
+    // orchestrator restarts the API until Postgres is there.
+    let db_startup_timeout = get_env_var("DB_STARTUP_TIMEOUT")
+        .and_then(|seconds| seconds.trim().parse().ok())
+        .unwrap_or(DEFAULT_DB_STARTUP_TIMEOUT);
+    ready::wait_for_postgres(
+        state.get_smart_db(),
+        std::time::Duration::from_secs(db_startup_timeout),
+    )
+    .await
+    .map_err(|error| {
+        tracing::error!("{error}, exiting");
+        std::io::Error::other(error)
+    })?;
     let host = get_critical_env_var("HOST");
     let port = get_critical_env_var("PORT");
     let bind_address = format!("{}:{}", host, port);
@@ -65,8 +82,9 @@ async fn main() -> std::io::Result<()> {
                 SwaggerUi::new("/swagger-ui/{_:.*}")
                     .url("/api-docs/openapi.json", ApiDoc::openapi()),
             )
-            // 2. Endpoints Publics
+            // 2. Public probes: liveness and readiness
             .service(health::health)
+            .service(ready::ready)
             .service(hello::hello)
             // 3. Endpoints Protégés par JWT
             .service(

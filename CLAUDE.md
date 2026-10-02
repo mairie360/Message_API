@@ -188,7 +188,7 @@ exposes `pub fn config(cfg: &mut ServiceConfig)` and builds one `web::scope(...)
 three in sync when adding an endpoint: register it in the parent `config()`, add its schemas
 and `__path_*` to the parent `doc.rs`, then regenerate `openapi.json`.
 
-`src/main.rs` mounts Swagger UI + `/health` + `/hello` publicly and everything else under
+`src/main.rs` mounts Swagger UI + `/health` (liveness) + `/ready` (readiness) + `/hello` publicly and everything else under
 `web::scope("/api").wrap(JwtMiddleware)`. `JwtMiddleware` (from the lib) additionally
 whitelists `/`, `/swagger-ui*`, `/api-docs*`, and any path containing `/auth`. On success it
 inserts an `AuthenticatedUser { id }` into request extensions; handlers get it via the
@@ -256,6 +256,15 @@ the container tests.
   keep-alive ping, `authenticate_token` again every 30 s (revoked session, deleted account), and a timer on the JWT
   `exp` when it is readable. Any failure notifies `close`, which ends the response (`take_until`); the connection is
   removed once its receiver is gone.
+
+### Probes and startup (MAIR-423)
+
+`GET /health` is the liveness probe (always `OK`, touches nothing). `GET /ready` (`endpoints/ready.rs`) is the
+readiness probe: Postgres `SELECT 1` and Redis `EXISTS message-api:readiness` (the platform ACL role has no `PING`),
+2 s each, `200 {"postgres":"up","redis":"up"}` or `503` naming the dependency down. The test stacks' `message-ready`
+sidecars and the dev healthcheck wait on `/ready`; the chart probes are in Deploiment. API_lib starts without a
+database, so `main` calls `ready::wait_for_postgres` and exits when Postgres does not answer within
+`DB_STARTUP_TIMEOUT` seconds (default 60). Neither probe is registered under `/api`.
 
 ### Config (env vars, all "critical" → process panics if unset)
 
