@@ -1,4 +1,4 @@
-use crate::common::get_smart_db;
+use crate::common::{get_smart_db, plain_user};
 use mairie360_api_lib::test_setup::queries_setup::get_shared_db;
 use message_api::database::chats::{
     add_users_to_chat::view::AddMembersToChatQueryView,
@@ -34,7 +34,9 @@ async fn test_get_chats_no_chat() {
     let (_container, host) = get_shared_db().await;
     let db = get_smart_db(host).await;
 
-    let view = GetChatsQueryView::new(2);
+    // A fresh account: the seeded ones may have joined chats in other tests.
+    let user = plain_user(&db).await;
+    let view = GetChatsQueryView::new(user);
     let result = db.fetch_all::<GetChatsQueryResultView, _>(&view).await;
 
     assert!(result.is_ok());
