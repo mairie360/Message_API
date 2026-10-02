@@ -1,10 +1,10 @@
 use utoipa::ToSchema;
 
-/// Participant d'une conversation.
+/// A member of a chat.
 #[derive(Debug, serde::Serialize, ToSchema)]
 pub struct User {
-    /// Identifiant Core API du participant, à repasser à `GET /api/v1/user/?ids=…` de Core API
-    /// pour obtenir sa fiche.
+    /// Core API id of the member: pass it to `GET /api/v1/user/?ids=…` of Core API to get their
+    /// profile.
     #[schema(example = 42)]
     id: u64,
 }
@@ -19,16 +19,24 @@ impl User {
     }
 }
 
-/// Participants d'une conversation.
+/// One page of the members of a chat, by increasing id.
 #[derive(Debug, serde::Serialize, ToSchema)]
 pub struct GetUsersView {
-    /// Participants de la conversation. Vide si la conversation n'existe pas.
+    /// Members of the chat, by increasing id: at most `limit`. Empty when `offset` is past the
+    /// last one.
     users: Vec<User>,
+    /// `true` when more members follow: call again with `offset` increased by `limit`.
+    #[schema(example = false)]
+    has_more: bool,
 }
 
 impl GetUsersView {
-    pub fn new(users: Vec<User>) -> Self {
-        Self { users }
+    pub fn new(users: Vec<User>, has_more: bool) -> Self {
+        Self { users, has_more }
+    }
+
+    pub fn has_more(&self) -> bool {
+        self.has_more
     }
 
     pub fn users(&self) -> &[User] {
