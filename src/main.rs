@@ -3,8 +3,8 @@ use std::sync::Arc;
 use actix_web::{middleware, web, App, HttpServer};
 
 use message_api::database::pg_url::build_pg_url;
-use message_api::endpoints::swagger::ApiDoc;
-use message_api::endpoints::{config, health, hello, ready};
+use message_api::endpoints::swagger::{docs_config, swagger_enabled};
+use message_api::endpoints::{config, health, ready};
 use message_api::logging;
 
 use mairie360_api_lib::env_manager::{get_critical_env_var, get_env_var};
@@ -13,8 +13,6 @@ use mairie360_api_lib::state::AppState;
 
 use message_api::sse::event_manager::start_internal_event_listener;
 use message_api::sse::relay::RedisRelay;
-use utoipa::OpenApi;
-use utoipa_swagger_ui::SwaggerUi;
 
 /// Seconds startup waits for PostgreSQL before exiting, unless `DB_STARTUP_TIMEOUT` says otherwise.
 const DEFAULT_DB_STARTUP_TIMEOUT: u64 = 60;
@@ -66,6 +64,10 @@ async fn main() -> std::io::Result<()> {
         state.get_smart_db().clone(),
     ));
     let data = web::Data::new(state);
+    let swagger = swagger_enabled();
+    if swagger {
+        tracing::warn!("SWAGGER_ENABLED: serving /swagger-ui/ and /api-docs/openapi.json");
+    }
 
     let server = HttpServer::new(move || {
         App::new()
@@ -77,19 +79,14 @@ async fn main() -> std::io::Result<()> {
             // Every response is JSON, plain text or an event stream: forbid browsers from sniffing
             // it as HTML.
             .wrap(middleware::DefaultHeaders::new().add(("X-Content-Type-Options", "nosniff")))
-            // 1. Swagger UI et API Docs (Public)
-            .service(
-                SwaggerUi::new("/swagger-ui/{_:.*}")
-                    .url("/api-docs/openapi.json", ApiDoc::openapi()),
-            )
+            // 1. Swagger UI and the OpenAPI document, only when SWAGGER_ENABLED is set (never in
+            // production).
+            .configure(|cfg| docs_config(cfg, swagger))
             // 2. Public probes: liveness and readiness
             .service(health::health)
             .service(ready::ready)
-            .service(hello::hello)
-            // 3. Endpoints Protégés par JWT
-            .service(
-                web::scope("/api").wrap(JwtMiddleware).configure(config), // Tes routes v1, etc.
-            )
+            // 3. Every other route requires a JWT
+            .service(web::scope("/api").wrap(JwtMiddleware).configure(config))
     })
     .bind(bind_address)?;
 

@@ -188,7 +188,9 @@ exposes `pub fn config(cfg: &mut ServiceConfig)` and builds one `web::scope(...)
 three in sync when adding an endpoint: register it in the parent `config()`, add its schemas
 and `__path_*` to the parent `doc.rs`, then regenerate `openapi.json`.
 
-`src/main.rs` mounts Swagger UI + `/health` (liveness) + `/ready` (readiness) + `/hello` publicly and everything else under
+`src/main.rs` mounts `/health` (liveness) + `/ready` (readiness) publicly, Swagger UI + `/api-docs/openapi.json`
+only when `SWAGGER_ENABLED=true` (`swagger::docs_config`, MAIR-424: set by the dev, ZAP and k6 stacks, never on a
+deployed instance nor on the integration stack, whose Postman collection checks the `404`), and everything else under
 `web::scope("/api").wrap(JwtMiddleware)`. `JwtMiddleware` (from the lib) additionally
 whitelists `/`, `/swagger-ui*`, `/api-docs*`, and any path containing `/auth`. On success it
 inserts an `AuthenticatedUser { id }` into request extensions; handlers get it via the
@@ -269,7 +271,7 @@ database, so `main` calls `ready::wait_for_postgres` and exits when Postgres doe
 ### Config (env vars, all "critical" → process panics if unset)
 
 `REDIS_URL`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT`, `DB_NAME`, `HOST`, `PORT`,
-`JWT_SECRET`, `JWT_TIMEOUT`. The Postgres URL is assembled by `database::pg_url::build_pg_url`,
+`JWT_SECRET`, `JWT_TIMEOUT`. Optional: `SWAGGER_ENABLED`, `DB_STARTUP_TIMEOUT`, `LOG_FORMAT`, `RUST_LOG`. The Postgres URL is assembled by `database::pg_url::build_pg_url`,
 which percent-encodes user, password and database name, so `DB_PASSWORD` may contain any
 character. `docker-compose.yml` supplies them for the dev stack (app on
 `:3003`, Postgres via `ghcr.io/mairie360/database`, Liquibase migrations, a `seeder` running
