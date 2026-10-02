@@ -78,8 +78,13 @@ published `ghcr.io/mairie360/message-api:dev-<sha>` image; when it is empty the 
 `development.Dockerfile` first. That image is distroless (no shell, no curl), so readiness is a `message-ready` sidecar
 polling `/health`, and dependent services wait for it with `service_completed_successfully`.
 
-The ZAP scan is authenticated: `security-scan` injects a static admin JWT (`sub=1`, signed with
-`JWT_SECRET=b"secret"`, see the comment in `docker-compose-security.yml`) on every request, waits for the `seeder`
+Since API_lib 2.0.0 refuses a missing, short (< 32 bytes) or well-known `JWT_SECRET` at startup, every `*_test.sh`
+sources `test_secrets.sh` (MAIR-428): a random `JWT_SECRET` per run (unless one is exported) and `ADMIN_JWT`, an HS256
+admin token (`sub=1`, 2 h) forged from it with openssl. The compose files require both (`${VAR:?}`); newman gets the
+secret as `jwt_secret`, k6 the token as `JWT`. No secret or token valid anywhere is committed. The dev stack keeps
+`b"secret"` with `JWT_ALLOW_WEAK_SECRET=true` (dev only).
+
+The ZAP scan is authenticated: `security-scan` injects `ADMIN_JWT` on every request, waits for the `seeder`
 service (`init-test.sql`: plain `User` accounts 2 and 3, user 1 is the Admin created by liquibase) and fails on any
 alert not set to `IGNORE` / `OUTOFSCOPE` in `.zap/rules.tsv` (no `-I`). `-O http://message:3003` is required: the
 spec's `servers` are unreachable from the ZAP container. `rules.tsv` is the one shared by every API, except that the XSS rules (`40012`, `40014`, `40016`, `40017`) are

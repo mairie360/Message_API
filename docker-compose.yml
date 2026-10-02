@@ -141,7 +141,10 @@ services:
     environment:
       <<: *common-env
       PUBLIC_URL: http://message.development.mairie360.fr
+      # Dev-only placeholder shared with the other dev stacks. API_lib refuses it at startup unless
+      # JWT_ALLOW_WEAK_SECRET is set: never set that flag on a deployed instance (MAIR-428).
       JWT_SECRET: b"secret"
+      JWT_ALLOW_WEAK_SECRET: "true"
       JWT_TIMEOUT: 3600
       # Swagger UI on the dev stack; never set on a deployed instance (MAIR-424).
       SWAGGER_ENABLED: "true"
