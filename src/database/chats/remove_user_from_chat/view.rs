@@ -1,5 +1,6 @@
 use std::fmt::Display;
 
+use crate::database::ids::{id_from_sql, id_to_sql};
 use mairie360_api_lib::database::db_interface::{ApiRequestDto, QueryParam};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -11,18 +12,18 @@ impl RemoveMemberFromChatQueryView {
     pub fn new(chat_id: u64, user_id: u64) -> Self {
         Self {
             params: vec![
-                QueryParam::I32(chat_id as i32),
-                QueryParam::I32(user_id as i32),
+                QueryParam::I32(id_to_sql(chat_id)),
+                QueryParam::I32(id_to_sql(user_id)),
             ],
         }
     }
 
     pub fn chat_id(&self) -> u64 {
-        self.params[0].as_i32() as u64
+        id_from_sql(self.params[0].as_i32())
     }
 
     pub fn user_id(&self) -> u64 {
-        self.params[1].as_i32() as u64
+        id_from_sql(self.params[1].as_i32())
     }
 }
 
