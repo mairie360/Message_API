@@ -3,10 +3,11 @@ use actix_web::{delete, web, HttpResponse, Responder, ResponseError};
 use mairie360_api_lib::database::error::DbError;
 use mairie360_api_lib::error::ApiLibError;
 use mairie360_api_lib::security::AuthenticatedUser;
+use mairie360_api_lib::smart_db::SmartTransaction;
 use mairie360_api_lib::state::AppState;
 
 use crate::endpoints::v1::id::access::{
-    require_chat_access, require_message_author, AccessDenied, MessageDenied,
+    begin, commit, require_chat_access_in, require_message_author_in, AccessDenied, MessageDenied,
 };
 
 use crate::database::chats::delete_message_from_chat::view::DeleteMessageQueryView;
@@ -50,16 +51,14 @@ impl ResponseError for DeleteMessageError {
 }
 
 async fn trigger_delete_message(
-    state: web::Data<AppState>,
+    tx: &mut SmartTransaction,
     chat_id: u64,
     message_id: u64,
     performed_by: u64,
 ) -> Result<(), DeleteMessageError> {
     // Logs the deletion in messaging_moderation_log when the message is someone else's.
     let view = DeleteMessageQueryView::new(chat_id, message_id, performed_by);
-    state
-        .get_smart_db()
-        .fetch_scalar::<i64, _>(&view)
+    tx.fetch_scalar::<i64, _>(&view)
         .await
         .map_err(|e| match e {
             ApiLibError::Database(DbError::NotFound) => DeleteMessageError::UnknownMessage,
@@ -138,16 +137,18 @@ pub async fn delete_message(
     params: web::Path<MessagePathParams>,
 ) -> Result<impl Responder, DeleteMessageError> {
     let message_id = params.message_id();
-    let role = require_chat_access(&state, params.chat_id(), auth_user.id).await?;
-    require_message_author(
-        &state,
+    let mut tx = begin(&state).await?;
+    let role = require_chat_access_in(&mut tx, params.chat_id(), auth_user.id).await?;
+    require_message_author_in(
+        &mut tx,
         params.chat_id(),
         message_id,
         auth_user.id,
         role.is_admin,
     )
     .await?;
-    trigger_delete_message(state, params.chat_id(), message_id, auth_user.id).await?;
+    trigger_delete_message(&mut tx, params.chat_id(), message_id, auth_user.id).await?;
+    commit(tx).await?;
     Ok(HttpResponse::NoContent().finish())
 }
 

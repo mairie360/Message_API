@@ -3,9 +3,12 @@ use actix_web::{delete, web, HttpResponse, Responder, ResponseError};
 use mairie360_api_lib::database::error::DbError;
 use mairie360_api_lib::error::ApiLibError;
 use mairie360_api_lib::security::AuthenticatedUser;
+use mairie360_api_lib::smart_db::SmartTransaction;
 use mairie360_api_lib::state::AppState;
 
-use crate::endpoints::v1::id::access::{require_chat_access, AccessDenied, NOT_A_MANAGER_MESSAGE};
+use crate::endpoints::v1::id::access::{
+    begin, commit, require_chat_access_in, AccessDenied, NOT_A_MANAGER_MESSAGE,
+};
 
 use crate::database::chats::delete_empty_chat::view::DeleteEmptyChatQueryView;
 use crate::database::chats::remove_user_from_chat::view::RemoveMemberFromChatQueryView;
@@ -50,14 +53,12 @@ impl ResponseError for RemoveUserFromChatError {
 }
 
 async fn trigger_remove_user_from_chat(
-    state: web::Data<AppState>,
+    tx: &mut SmartTransaction,
     chat_id: u64,
     user_id: u64,
 ) -> Result<(), RemoveUserFromChatError> {
     let view = RemoveMemberFromChatQueryView::new(chat_id, user_id);
-    state
-        .get_smart_db()
-        .fetch_scalar::<i32, _>(&view)
+    tx.fetch_scalar::<i32, _>(&view)
         .await
         .map_err(|e| match e {
             ApiLibError::Database(DbError::NotFound) => RemoveUserFromChatError::BadRequest,
@@ -67,10 +68,9 @@ async fn trigger_remove_user_from_chat(
             }
         })?;
 
-    // A chat lives as long as it has members: the last one leaving deletes it.
-    state
-        .get_smart_db()
-        .execute(DeleteEmptyChatQueryView::new(chat_id))
+    // A chat lives as long as it has members: the last one leaving deletes it, in the same
+    // transaction, so a failure never leaves a chat without members.
+    tx.execute(&DeleteEmptyChatQueryView::new(chat_id))
         .await
         .map_err(|e| {
             eprintln!("Delete empty chat error: {e}");
@@ -147,11 +147,13 @@ pub async fn remove_user_from_chat(
 ) -> Result<impl Responder, RemoveUserFromChatError> {
     let chat_id = params.chat_id();
     let user_id = params.user_id();
-    let role = require_chat_access(&state, chat_id, auth_user.id).await?;
+    let mut tx = begin(&state).await?;
+    let role = require_chat_access_in(&mut tx, chat_id, auth_user.id).await?;
     if user_id != auth_user.id && !role.can_manage_members() {
         return Err(RemoveUserFromChatError::Forbidden);
     }
-    trigger_remove_user_from_chat(state, chat_id, user_id).await?;
+    trigger_remove_user_from_chat(&mut tx, chat_id, user_id).await?;
+    commit(tx).await?;
     Ok(HttpResponse::NoContent().finish())
 }
 

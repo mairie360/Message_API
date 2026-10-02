@@ -3,10 +3,11 @@ use actix_web::{post, web, HttpResponse, Responder, ResponseError};
 use mairie360_api_lib::database::error::DbError;
 use mairie360_api_lib::error::ApiLibError;
 use mairie360_api_lib::security::AuthenticatedUser;
+use mairie360_api_lib::smart_db::SmartTransaction;
 use mairie360_api_lib::state::AppState;
 
 use crate::endpoints::v1::id::access::{
-    require_chat_access, AccessDenied, NotAMember, NOT_A_MEMBER_MESSAGE,
+    begin, commit, require_chat_access_in, AccessDenied, NotAMember, NOT_A_MEMBER_MESSAGE,
 };
 
 use crate::database::chats::add_message_to_chat::view::PostMessageInChatQueryView;
@@ -54,16 +55,14 @@ impl ResponseError for PosteMessageError {
 }
 
 async fn trigger_post_message(
-    state: web::Data<AppState>,
-    sse_state: web::Data<crate::sse::state::AppState>,
+    tx: &mut SmartTransaction,
     user_id: u64,
     view: PostMessageView,
     chat_id: u64,
 ) -> Result<PostMessageResultView, PosteMessageError> {
     let view =
         PostMessageInChatQueryView::replying_to(chat_id, user_id, view.content(), view.citation());
-    let result = state
-        .get_smart_db()
+    let result = tx
         .fetch_scalar::<i64, _>(&view)
         .await
         .map_err(|e| match e {
@@ -81,13 +80,6 @@ async fn trigger_post_message(
                 PosteMessageError::DatabaseError
             }
         })?;
-
-    sse_state
-        .publish(ChatEvent {
-            chat_id,
-            sender_id: user_id,
-        })
-        .await;
 
     Ok(PostMessageResultView::new(result as u64))
 }
@@ -169,10 +161,19 @@ pub async fn post_message(
 ) -> Result<impl Responder, PosteMessageError> {
     let view = view.into_inner();
     let chat_id = params.chat_id;
-    require_chat_access(&state, chat_id, auth_user.id)
+    let mut tx = begin(&state).await?;
+    require_chat_access_in(&mut tx, chat_id, auth_user.id)
         .await?
         .require_member()?;
-    let result = trigger_post_message(state, sse_state, auth_user.id, view, chat_id).await?;
+    let result = trigger_post_message(&mut tx, auth_user.id, view, chat_id).await?;
+    commit(tx).await?;
+    // Only once committed: the members reload the chat as soon as they get the signal.
+    sse_state
+        .publish(ChatEvent {
+            chat_id,
+            sender_id: auth_user.id,
+        })
+        .await;
     Ok(HttpResponse::Ok().json(result))
 }
 
