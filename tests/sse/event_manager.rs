@@ -6,7 +6,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use actix_web::web::Bytes;
-use dashmap::DashMap;
 use mairie360_api_lib::test_setup::queries_setup::get_shared_db;
 use message_api::database::chats::{
     add_users_to_chat::view::AddMembersToChatQueryView, create_chat::view::CreateChatQueryView,
@@ -26,10 +25,7 @@ type SseChannel = (
 async fn spawn_listener(db_url: &str) -> (Arc<AppState>, broadcast::Sender<ChatEvent>) {
     let db = get_smart_db(db_url).await;
     let (bus_tx, _) = broadcast::channel(16);
-    let state = Arc::new(AppState {
-        online_agents: DashMap::new(),
-        internal_bus: bus_tx.clone(),
-    });
+    let state = Arc::new(AppState::new(bus_tx.clone(), None));
 
     tokio::spawn(start_internal_event_listener(state.clone(), db));
     // Laisse le temps au listener de s'abonner au bus avant le premier `send`.
@@ -65,7 +61,6 @@ async fn test_event_manager_notifies_online_members_except_sender() {
         .send(ChatEvent {
             chat_id,
             sender_id: 1,
-            message: "hello".to_string(),
         })
         .is_ok());
 
@@ -104,7 +99,6 @@ async fn test_event_manager_ignores_unknown_chat() {
         .send(ChatEvent {
             chat_id: 999_999,
             sender_id: 42,
-            message: "nobody".to_string(),
         })
         .is_ok());
 
@@ -144,7 +138,6 @@ async fn test_event_manager_notifies_every_connection_of_a_user() {
         .send(ChatEvent {
             chat_id,
             sender_id: 1,
-            message: "hello".to_string(),
         })
         .is_ok());
 
@@ -187,7 +180,6 @@ async fn test_event_manager_prunes_only_closed_connections() {
         .send(ChatEvent {
             chat_id,
             sender_id: 1,
-            message: "hello".to_string(),
         })
         .is_ok());
 
@@ -215,16 +207,12 @@ async fn test_event_manager_survives_a_lagged_receiver() {
 
     // A tiny bus overflowed before the listener reads anything: its first `recv` is `Lagged`.
     let (bus_tx, _keep_alive) = broadcast::channel(2);
-    let state = Arc::new(AppState {
-        online_agents: DashMap::new(),
-        internal_bus: bus_tx.clone(),
-    });
+    let state = Arc::new(AppState::new(bus_tx.clone(), None));
     let rx = bus_tx.subscribe();
     for _ in 0..5 {
         let _ = bus_tx.send(ChatEvent {
             chat_id: 999_999,
             sender_id: 42,
-            message: "overflow".to_string(),
         });
     }
     tokio::spawn(listen(rx, state.clone(), db));
@@ -236,7 +224,6 @@ async fn test_event_manager_survives_a_lagged_receiver() {
         .send(ChatEvent {
             chat_id,
             sender_id: 1,
-            message: "after lag".to_string(),
         })
         .is_ok());
 

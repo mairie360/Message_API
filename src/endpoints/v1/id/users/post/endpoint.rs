@@ -5,11 +5,12 @@ use mairie360_api_lib::error::ApiLibError;
 use mairie360_api_lib::security::AuthenticatedUser;
 use mairie360_api_lib::state::AppState;
 
-use crate::endpoints::v1::id::access::{require_chat_access, AccessDenied};
+use crate::endpoints::v1::id::access::{require_chat_access, AccessDenied, NOT_A_MANAGER_MESSAGE};
 
 use crate::database::chats::add_users_to_chat::view::AddMembersToChatQueryView;
 use crate::endpoints::v1::id::users::post::view::{AddUsersToChat, AddUsersToChatResultView};
 use crate::endpoints::v1::id::ChatPathParams;
+use crate::endpoints::validation::ValidatedJson;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AddUsersToChatError {
@@ -17,6 +18,7 @@ pub enum AddUsersToChatError {
     UnknownChat,
     UnknownUser,
     AlreadyMember,
+    Forbidden,
 }
 
 impl std::fmt::Display for AddUsersToChatError {
@@ -26,6 +28,7 @@ impl std::fmt::Display for AddUsersToChatError {
                 write!(f, "An error occurred while accessing the database.")
             }
             AddUsersToChatError::UnknownChat => write!(f, "Unknown chat."),
+            AddUsersToChatError::Forbidden => f.write_str(NOT_A_MANAGER_MESSAGE),
             AddUsersToChatError::UnknownUser => write!(f, "`users_id` contains an unknown user."),
             AddUsersToChatError::AlreadyMember => {
                 write!(f, "A user of `users_id` is already a member of this chat.")
@@ -41,6 +44,7 @@ impl ResponseError for AddUsersToChatError {
             AddUsersToChatError::UnknownChat => StatusCode::NOT_FOUND,
             AddUsersToChatError::UnknownUser => StatusCode::BAD_REQUEST,
             AddUsersToChatError::AlreadyMember => StatusCode::CONFLICT,
+            AddUsersToChatError::Forbidden => StatusCode::FORBIDDEN,
         }
     }
 
@@ -77,7 +81,10 @@ async fn trigger_add_users_to_chat(
             ApiLibError::Database(DbError::UniqueViolation(_)) => {
                 AddUsersToChatError::AlreadyMember
             }
-            _ => AddUsersToChatError::DatabaseError,
+            e => {
+                eprintln!("Add chat members error: {e}");
+                AddUsersToChatError::DatabaseError
+            }
         })?;
 
     Ok(AddUsersToChatResultView::new(chat_id, added))
@@ -88,28 +95,39 @@ async fn trigger_add_users_to_chat(
     params(ChatPathParams),
     path = "",
     summary = "Add members to a chat",
-    description = "Adds one or more users to a chat in a single call; the chat then shows up in their \
-                   `GET /api/v1/`. Any member of the chat may add users.\n\nOnly the members of the chat may call this route; administrators bypass the check. A caller who is not a member gets the same `404` as for an unknown chat.",
+    description = "Adds one or more users to a chat in a single call; the chat, **with its whole history**, \
+                   then shows up in their `GET /api/v1/`. The call is all or nothing: one unknown user or one \
+                   user already member and nobody is added.\n\n \
+                   **Only the creator of the chat (while still a member) and administrators** may add users; \
+                   any other member gets `403`. A caller who is neither a member nor an administrator gets \
+                   the same `404` as for an unknown chat.",
     responses(
         (
             status = 200,
-            description = "Participants ajoutés. `added` liste ceux qui l'ont effectivement été.",
+            description = "Users added. `added` lists them (every id of `users_id`).",
             body = AddUsersToChatResultView,
             example = json!({ "chat_id": 5, "added": [42, 51] })
         ),
         (
             status = 400,
-            description = "Malformed JSON body, `chat_id` not an integer, missing `users_id`, or `users_id` containing an unknown user.",
+            description = "Malformed JSON body, `chat_id` not an integer, `users_id` missing, empty, longer than 50, with a duplicate or an id outside 1..=2147483647 (`Invalid `users_id`: …`), or containing an unknown user.",
             body = String,
             content_type = "text/plain",
             example = json!("`users_id` contains an unknown user.")
         ),
         (
             status = 401,
-            description = "En-tête `Authorization` absent, JWT invalide ou expiré, ou session révoquée.",
+            description = "Missing `Authorization` header, invalid or expired JWT, or revoked session.",
             body = String,
             content_type = "text/plain",
             example = json!("Jeton expiré")
+        ),
+        (
+            status = 403,
+            description = "The caller is a member but neither the creator of the chat nor an administrator.",
+            body = String,
+            content_type = "text/plain",
+            example = json!("Only the creator of the chat or an administrator can manage its other members.")
         ),
         (
             status = 404,
@@ -127,7 +145,7 @@ async fn trigger_add_users_to_chat(
         ),
         (
             status = 500,
-            description = "Erreur de base de données.",
+            description = "Database error.",
             body = String,
             content_type = "text/plain",
             example = json!("An error occurred while accessing the database.")
@@ -135,7 +153,7 @@ async fn trigger_add_users_to_chat(
     ),
     request_body(
         content = AddUsersToChat,
-        description = "Identifiants Core API des utilisateurs à rattacher.",
+        description = "Core API ids of the users to attach.",
         example = json!({ "users_id": [42, 51] })
     ),
     security(
@@ -147,11 +165,14 @@ async fn trigger_add_users_to_chat(
 pub async fn add_users_to_chat(
     state: web::Data<AppState>,
     auth_user: AuthenticatedUser,
-    view: web::Json<AddUsersToChat>,
+    view: ValidatedJson<AddUsersToChat>,
     params: web::Path<ChatPathParams>,
 ) -> Result<impl Responder, AddUsersToChatError> {
     let view = view.into_inner();
-    require_chat_access(&state, params.chat_id, auth_user.id).await?;
+    let role = require_chat_access(&state, params.chat_id, auth_user.id).await?;
+    if !role.can_manage_members() {
+        return Err(AddUsersToChatError::Forbidden);
+    }
     let result = trigger_add_users_to_chat(state, params.chat_id, view).await?;
     Ok(HttpResponse::Ok().json(result))
 }

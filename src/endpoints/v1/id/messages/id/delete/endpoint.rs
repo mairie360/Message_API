@@ -51,16 +51,22 @@ impl ResponseError for DeleteMessageError {
 
 async fn trigger_delete_message(
     state: web::Data<AppState>,
+    chat_id: u64,
     message_id: u64,
+    performed_by: u64,
 ) -> Result<(), DeleteMessageError> {
-    let view = DeleteMessageQueryView::new(message_id);
+    // Logs the deletion in messaging_moderation_log when the message is someone else's.
+    let view = DeleteMessageQueryView::new(chat_id, message_id, performed_by);
     state
         .get_smart_db()
         .fetch_scalar::<i64, _>(&view)
         .await
         .map_err(|e| match e {
             ApiLibError::Database(DbError::NotFound) => DeleteMessageError::UnknownMessage,
-            _ => DeleteMessageError::DatabaseError,
+            e => {
+                eprintln!("Delete message error: {e}");
+                DeleteMessageError::DatabaseError
+            }
         })?;
 
     Ok(())
@@ -73,30 +79,31 @@ async fn trigger_delete_message(
     description = "Permanently deletes a message of a chat.\n\n \
                    No `ChatSignal` is pushed on the SSE stream: the other members still see the message until they \
                    reload the chat.\n\n \
-                   Only the author of the message may delete it (`403` for another member); administrators bypass \
-                   the check.",
+                   Only the author of the message may delete it (`403` for another member). Administrators may \
+                   delete any message, even in a chat they are not a member of (moderation): the deletion of a \
+                   message written by someone else is recorded, with its content, in the moderation log.",
     responses(
         (
             status = 204,
-            description = "Message supprimé. Corps vide.",
+            description = "Message deleted. Empty body.",
         ),
         (
             status = 400,
-            description = "Un segment de l'URL n'est pas un entier, ou le corps JSON est malformé.",
+            description = "A URL segment is not an integer.",
             body = String,
             content_type = "text/plain",
             example = json!("Path deserialize error: can not parse `abc` to a u64")
         ),
         (
             status = 401,
-            description = "En-tête `Authorization` absent, JWT invalide ou expiré, ou session révoquée.",
+            description = "Missing `Authorization` header, invalid or expired JWT, or revoked session.",
             body = String,
             content_type = "text/plain",
             example = json!("Jeton expiré")
         ),
         (
             status = 403,
-            description = "The message was written by another member.",
+            description = "The message was written by another member and the caller is not an administrator.",
             body = String,
             content_type = "text/plain",
             example = json!("Only the author of a message can delete it.")
@@ -110,7 +117,7 @@ async fn trigger_delete_message(
         ),
         (
             status = 500,
-            description = "Erreur de base de données.",
+            description = "Database error.",
             body = String,
             content_type = "text/plain",
             example = json!("An error occurred while accessing the database.")
@@ -131,9 +138,16 @@ pub async fn delete_message(
     params: web::Path<MessagePathParams>,
 ) -> Result<impl Responder, DeleteMessageError> {
     let message_id = params.message_id();
-    let is_admin = require_chat_access(&state, params.chat_id(), auth_user.id).await?;
-    require_message_author(&state, params.chat_id(), message_id, auth_user.id, is_admin).await?;
-    trigger_delete_message(state, message_id).await?;
+    let role = require_chat_access(&state, params.chat_id(), auth_user.id).await?;
+    require_message_author(
+        &state,
+        params.chat_id(),
+        message_id,
+        auth_user.id,
+        role.is_admin,
+    )
+    .await?;
+    trigger_delete_message(state, params.chat_id(), message_id, auth_user.id).await?;
     Ok(HttpResponse::NoContent().finish())
 }
 

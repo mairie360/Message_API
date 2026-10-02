@@ -17,6 +17,12 @@ use serde::de::DeserializeOwned;
 pub const MAX_TITLE_LENGTH: usize = 150;
 /// `messages.content` is `TEXT`, capped to keep the payloads reasonable.
 pub const MAX_MESSAGE_LENGTH: usize = 5000;
+/// Users attached to a chat in one request (chat creation or `POST /{chat_id}/users/`).
+pub const MAX_MEMBERS_PER_REQUEST: usize = 50;
+/// User ids are `INTEGER` in Postgres: anything above would fail at the database.
+pub const MAX_USER_ID: u64 = i32::MAX as u64;
+/// Message ids are `BIGINT` in Postgres.
+pub const MAX_MESSAGE_ID: u64 = i64::MAX as u64;
 
 /// Why a request value was rejected; its text is the body of the `400` response.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -115,6 +121,41 @@ pub fn check_opaque(field: &str, value: &str, max: usize) -> Result<(), Validati
     check_no_control(field, value)
 }
 
+/// A list of user ids: at most `max` entries, each between 1 and [`MAX_USER_ID`], no duplicate.
+/// `allow_empty` tells whether an empty list is accepted.
+///
+/// # Errors
+///
+/// Returns a [`ValidationError`] naming `field` when one of the rules is broken.
+pub fn check_user_ids(
+    field: &str,
+    ids: &[u64],
+    max: usize,
+    allow_empty: bool,
+) -> Result<(), ValidationError> {
+    if !allow_empty && ids.is_empty() {
+        return Err(ValidationError::new(field, "must not be empty"));
+    }
+    if ids.len() > max {
+        return Err(ValidationError::new(
+            field,
+            &format!("must hold at most {max} users"),
+        ));
+    }
+    if ids.iter().any(|id| *id == 0 || *id > MAX_USER_ID) {
+        return Err(ValidationError::new(
+            field,
+            &format!("ids must be between 1 and {MAX_USER_ID}"),
+        ));
+    }
+    let mut sorted = ids.to_vec();
+    sorted.sort_unstable();
+    if sorted.windows(2).any(|pair| pair[0] == pair[1]) {
+        return Err(ValidationError::new(field, "must not contain duplicates"));
+    }
+    Ok(())
+}
+
 /// Runs `check` on `value` when it is present.
 ///
 /// # Errors
@@ -207,6 +248,19 @@ mod tests {
         assert!(check_description("content", "a\0b", MAX_MESSAGE_LENGTH).is_err());
         assert!(check_description("content", "<b>", MAX_MESSAGE_LENGTH).is_err());
         assert!(check_description("content", &"a".repeat(5001), MAX_MESSAGE_LENGTH).is_err());
+    }
+
+    #[test]
+    fn user_ids_are_bounded_in_range_and_unique() {
+        assert!(check_user_ids("users_id", &[42, 51], 50, false).is_ok());
+        assert!(check_user_ids("users_id", &[], 50, false).is_err());
+        assert!(check_user_ids("members", &[], 50, true).is_ok());
+        assert!(check_user_ids("users_id", &[0], 50, false).is_err());
+        assert!(check_user_ids("users_id", &[MAX_USER_ID + 1], 50, false).is_err());
+        assert!(check_user_ids("users_id", &[MAX_USER_ID], 50, false).is_ok());
+        assert!(check_user_ids("users_id", &[42, 42], 50, false).is_err());
+        let too_many: Vec<u64> = (1..=51).collect();
+        assert!(check_user_ids("users_id", &too_many, 50, false).is_err());
     }
 
     #[test]

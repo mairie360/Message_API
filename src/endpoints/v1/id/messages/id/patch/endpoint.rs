@@ -64,7 +64,10 @@ async fn trigger_patch_message(
         .await
         .map_err(|e| match e {
             ApiLibError::Database(DbError::NotFound) => PatchMessageError::UnknownEvent,
-            _ => PatchMessageError::DatabaseError,
+            e => {
+                eprintln!("Patch message error: {e}");
+                PatchMessageError::DatabaseError
+            }
         })?;
 
     Ok(())
@@ -78,13 +81,14 @@ async fn trigger_patch_message(
                    it overwrites the text.\n\n \
                    Unlike posting, no `ChatSignal` is pushed on the SSE stream: the other members only see the edit \
                    when they reload the chat.\n\n \
-                   Only the author of the message may edit it (`403` for another member); administrators bypass \
-                   the check. A caller who is not a member of the chat gets the same `404` as for an unknown chat. \
+                   **Only the author of the message may edit it**, administrators included: anyone else gets \
+                   `403` (an administrator may delete a message, never rewrite it). A caller who is neither a \
+                   member of the chat nor an administrator gets the same `404` as for an unknown chat. \
                    The response has an empty body.",
     responses(
         (
             status = 200,
-            description = "Message modifié. Corps vide.",
+            description = "Message edited. Empty body.",
         ),
         (
             status = 400,
@@ -95,14 +99,14 @@ async fn trigger_patch_message(
         ),
         (
             status = 401,
-            description = "En-tête `Authorization` absent, JWT invalide ou expiré, ou session révoquée.",
+            description = "Missing `Authorization` header, invalid or expired JWT, or revoked session.",
             body = String,
             content_type = "text/plain",
             example = json!("Jeton expiré")
         ),
         (
             status = 403,
-            description = "The message was written by another member.",
+            description = "The message was written by someone else (administrators included).",
             body = String,
             content_type = "text/plain",
             example = json!("Only the author of a message can edit it.")
@@ -116,7 +120,7 @@ async fn trigger_patch_message(
         ),
         (
             status = 500,
-            description = "Erreur de base de données.",
+            description = "Database error.",
             body = String,
             content_type = "text/plain",
             example = json!("An error occurred while accessing the database.")
@@ -127,7 +131,7 @@ async fn trigger_patch_message(
     ),
     request_body(
         content = PatchMessageView,
-        description = "Nouveau contenu du message, qui remplace intégralement l'ancien.",
+        description = "New content of the message, which replaces the old one entirely.",
         example = json!({ "content": "La réunion est finalement décalée à 16h." })
     ),
     security(
@@ -143,8 +147,9 @@ pub async fn patch_message(
     view: ValidatedJson<PatchMessageView>,
 ) -> Result<impl Responder, PatchMessageError> {
     let message_id = params.message_id();
-    let is_admin = require_chat_access(&state, params.chat_id(), auth_user.id).await?;
-    require_message_author(&state, params.chat_id(), message_id, auth_user.id, is_admin).await?;
+    require_chat_access(&state, params.chat_id(), auth_user.id).await?;
+    // Nobody rewrites the message of someone else, administrators included.
+    require_message_author(&state, params.chat_id(), message_id, auth_user.id, false).await?;
     let view = view.into_inner();
     trigger_patch_message(state, message_id, view).await?;
     Ok(HttpResponse::Ok().finish())

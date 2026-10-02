@@ -20,9 +20,14 @@ fn test_post_message_in_chat_view_accessors() {
     assert_eq!(view.chat_id(), 12);
     assert_eq!(view.sender(), 34);
     assert_eq!(view.message(), "hello");
+    assert_eq!(view.reply_to(), None);
     assert!(format!("{view}").contains("chat_id=12"));
     assert!(view.query_sql().contains("INSERT INTO messages"));
-    assert_eq!(view.query_params().len(), 3);
+    assert_eq!(view.query_params().len(), 4);
+
+    let reply = PostMessageInChatQueryView::replying_to(12, 34, "hello", Some(118));
+    assert_eq!(reply.reply_to(), Some(118));
+    assert!(format!("{reply}").contains("reply_to=Some(118)"));
 }
 
 #[test]
@@ -53,41 +58,57 @@ fn test_create_chat_view_accessors() {
     assert_eq!(view.group_id(), Some(9));
     assert!(format!("{view}").contains("group_id=9"));
     assert!(view.query_sql().contains("INSERT INTO conversations"));
-    assert_eq!(view.query_params().len(), 2);
+    assert_eq!(view.query_params().len(), 4);
+    assert_eq!(view.created_by(), None);
+    assert!(view.members().is_empty());
 
     let without_group = CreateChatQueryView::new("Title", None);
     assert_eq!(without_group.group_id(), None);
     assert!(format!("{without_group}").contains("group_id=0"));
+
+    let with_members = CreateChatQueryView::with_members("Title", None, Some(3), &[3, 4]);
+    assert_eq!(with_members.created_by(), Some(3));
+    assert_eq!(with_members.members(), vec![3, 4]);
+    assert!(format!("{with_members}").contains("created_by=3 members=[3, 4]"));
+    assert!(with_members.query_sql().contains("conversation_members"));
 }
 
 #[test]
 fn test_delete_chat_view_accessors() {
-    let view = DeleteChatQueryView::new(42);
+    let view = DeleteChatQueryView::new(42, 1);
 
     assert_eq!(view.chat_id(), 42);
-    assert!(format!("{view}").contains("chat_id=42"));
+    assert_eq!(view.performed_by(), 1);
+    assert!(format!("{view}").contains("chat_id=42 performed_by=1"));
     assert!(view.query_sql().contains("DELETE FROM conversations"));
-    assert_eq!(view.query_params().len(), 1);
+    assert!(view.query_sql().contains("messaging_moderation_log"));
+    assert_eq!(view.query_params().len(), 2);
 }
 
 #[test]
 fn test_delete_message_view_accessors() {
-    let view = DeleteMessageQueryView::new(42);
+    let view = DeleteMessageQueryView::new(7, 42, 1);
 
+    assert_eq!(view.chat_id(), 7);
     assert_eq!(view.message_id(), 42);
-    assert!(format!("{view}").contains("message_id=42"));
+    assert_eq!(view.performed_by(), 1);
+    assert!(format!("{view}").contains("chat_id=7 message_id=42 performed_by=1"));
     assert!(view.query_sql().contains("DELETE FROM messages"));
-    assert_eq!(view.query_params().len(), 1);
+    assert!(view.query_sql().contains("messaging_moderation_log"));
+    assert_eq!(view.query_params().len(), 3);
 }
 
 #[test]
 fn test_get_chat_view_accessors() {
-    let view = GetChatQueryView::new(42);
+    let view = GetChatQueryView::new(42, None, 50);
 
     assert_eq!(view.chat_id(), 42);
+    assert_eq!(view.before(), None);
+    assert_eq!(view.limit(), 50);
     assert!(format!("{view}").contains("chat_id=42"));
     assert!(view.query_sql().contains("FROM messages"));
-    assert_eq!(view.query_params().len(), 1);
+    assert_eq!(view.query_params().len(), 3);
+    assert_eq!(GetChatQueryView::new(42, Some(118), 10).before(), Some(118));
 }
 
 #[test]

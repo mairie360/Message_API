@@ -1,14 +1,17 @@
-use crate::endpoints::validation::{check_label, Validate, ValidationError, MAX_TITLE_LENGTH};
+use crate::endpoints::validation::{
+    check_label, check_user_ids, Validate, ValidationError, MAX_MEMBERS_PER_REQUEST,
+    MAX_TITLE_LENGTH,
+};
 use utoipa::ToSchema;
 
-/// Conversation à créer, avec ses participants initiaux.
+/// Chat to create, with its first members.
 #[derive(Debug, serde::Deserialize, ToSchema)]
 pub struct CreateChatView {
-    /// Identifiants Core API des autres participants. L'appelant est ajouté automatiquement :
-    /// ne pas inclure son propre identifiant, ni de doublon.
-    #[schema(example = json!([42, 51]))]
+    /// Core API ids of the other members: at most 50 distinct ids, each between 1 and 2147483647.
+    /// May be empty. The caller is added automatically (listing them is harmless).
+    #[schema(example = json!([42, 51]), max_items = 50)]
     members: Vec<u64>,
-    /// Titre de la conversation.
+    /// Title of the chat: empty for a direct chat, otherwise 1 to 150 characters.
     #[schema(max_length = 150, example = "Service urbanisme")]
     name: String,
 }
@@ -27,10 +30,10 @@ impl CreateChatView {
     }
 }
 
-/// Conversation créée.
+/// Chat created.
 #[derive(Debug, serde::Serialize, ToSchema)]
 pub struct CreateChatResultView {
-    /// Identifiant attribué à la conversation créée.
+    /// Id given to the chat.
     #[schema(example = 5)]
     id: u64,
 }
@@ -47,6 +50,7 @@ impl CreateChatResultView {
 
 impl Validate for CreateChatView {
     fn validate(&self) -> Result<(), ValidationError> {
+        check_user_ids("members", &self.members, MAX_MEMBERS_PER_REQUEST, true)?;
         // An empty title is allowed (direct conversation); a non-empty one is a displayed label.
         if self.name.is_empty() {
             return Ok(());

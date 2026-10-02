@@ -5,9 +5,7 @@ use mairie360_api_lib::error::ApiLibError;
 use mairie360_api_lib::security::AuthenticatedUser;
 use mairie360_api_lib::state::AppState;
 
-use crate::database::chats::add_users_to_chat::view::AddMembersToChatQueryView;
 use crate::database::chats::create_chat::view::CreateChatQueryView;
-use crate::database::chats::delete_chat::view::DeleteChatQueryView;
 use crate::endpoints::v1::post::view::{CreateChatResultView, CreateChatView};
 use crate::endpoints::validation::ValidatedJson;
 
@@ -48,71 +46,65 @@ async fn trigger_create_chat(
     user_id: u64,
     view: CreateChatView,
 ) -> Result<CreateChatResultView, CreateChatError> {
-    let db = state.get_smart_db();
-
-    let query_view = CreateChatQueryView::new(view.name(), None);
-    let result = db
-        .fetch_scalar::<i32, _>(&query_view)
-        .await
-        .map_err(|_| CreateChatError::DatabaseError)? as u64;
-
     let mut members = view.members().to_vec();
     members.push(user_id);
     // The creator may also be listed: a duplicate would break the (conversation, user) key.
     members.sort_unstable();
     members.dedup();
-    let query_view = AddMembersToChatQueryView::new(result, members);
-    if let Err(error) = db.execute(query_view).await {
-        // Do not leave a conversation without its members behind.
-        let _ = db
-            .fetch_scalar::<i32, _>(&DeleteChatQueryView::new(result))
-            .await;
-        return Err(match error {
+
+    // One statement creates the chat and its members: an unknown member fails it as a whole.
+    let query_view = CreateChatQueryView::with_members(view.name(), None, Some(user_id), &members);
+    let chat_id = state
+        .get_smart_db()
+        .fetch_scalar::<i32, _>(&query_view)
+        .await
+        .map_err(|e| match e {
             ApiLibError::Database(DbError::ForeignKeyViolation(_)) => {
                 CreateChatError::UnknownMember
             }
-            _ => CreateChatError::DatabaseError,
-        });
-    }
+            e => {
+                eprintln!("Create chat error: {e}");
+                CreateChatError::DatabaseError
+            }
+        })?;
 
-    Ok(CreateChatResultView::new(result))
+    Ok(CreateChatResultView::new(chat_id as u64))
 }
 
 #[utoipa::path(
     post,
     path = "",
-    summary = "Créer une conversation",
-    description = "Crée une conversation et y rattache l'appelant ainsi que les participants \
-                   listés dans `members`.\n\n\
-                   L'appelant est ajouté automatiquement : **ne pas** inclure son propre \
-                   identifiant dans `members`. Sinon le rattachement échoue en `500` alors que la \
-                   conversation a déjà été créée, sans aucun participant.\n\n\
-                   Les identifiants attendus sont ceux des comptes dans Core API. La réponse ne \
-                   contient que l'identifiant attribué.",
+    summary = "Create a chat",
+    description = "Creates a chat and attaches the caller and the users listed in `members`, in a single \
+                   atomic operation: if one member does not exist, nothing is created.\n\n\
+                   The caller is added automatically and becomes the **creator** of the chat: while a member, \
+                   they are the only one (with administrators) who may add members or remove someone else. \
+                   Listing the caller in `members` is harmless.\n\n\
+                   Ids are Core API account ids. The response only holds the id given to the chat.",
     responses(
         (
             status = 200,
-            description = "Conversation créée. Le corps contient l'identifiant attribué.",
+            description = "Chat created. The body holds its id.",
             body = CreateChatResultView,
             example = json!({ "id": 5 })
         ),
         (
             status = 400,
-            description = "Malformed JSON body, missing field, `name` empty (direct conversation) or 1 to 150 characters without control characters nor `<` / `>`, or `members` containing an unknown user (`` `members` contains an unknown user.``; no conversation is created).",
+            description = "Malformed JSON body, missing field, `name` not empty (direct conversation) nor 1 to 150 characters without control characters nor `<` / `>`, `members` longer than 50, with a duplicate or an id outside 1..=2147483647 (`Invalid `members`: …`), or `members` containing an unknown user (`` `members` contains an unknown user.``). No chat is created.",
             body = String,
             content_type = "text/plain",
             example = json!("`members` contains an unknown user.")
         ),
         (
             status = 401,
-            description = "En-tête `Authorization` absent, JWT invalide ou expiré, ou session révoquée.",
+            description = "Missing `Authorization` header, invalid or expired JWT, or revoked session.",
             body = String,
             content_type = "text/plain",
             example = json!("Jeton expiré")
         ),
         (
             status = 500,
-            description = "Erreur de base de données, notamment si `members` contient l'appelant ou un doublon. La conversation peut alors avoir été créée sans participant.",
+            description = "Database error. Nothing is created.",
             body = String,
             content_type = "text/plain",
             example = json!("An error occurred while accessing the database.")
@@ -120,7 +112,7 @@ async fn trigger_create_chat(
     ),
     request_body(
         content = CreateChatView,
-        description = "Titre de la conversation et identifiants Core API de ses participants.",
+        description = "Title of the chat and Core API ids of its other members.",
         example = json!({
             "name": "Service urbanisme",
             "members": [42, 51]

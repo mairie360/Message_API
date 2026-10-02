@@ -49,7 +49,8 @@ migration container, with Postgres published on a random host port (tests must s
 
 `tests/common::get_smart_db(db_url)` builds a `SmartDatabase` over that Postgres. It also
 constructs a `Redis` pointing at `localhost:6379`, but no chat `QueryView` declares a
-`cache_key`, so Redis is never actually contacted — tests do not need a Redis container.
+`cache_key`, so Redis is never actually contacted by the queries. Only `tests/sse/relay.rs` needs Redis: it starts
+its own containers (`redis` image through testcontainers, one of them with the platform ACL of the `message-api` role).
 
 ```bash
 cargo test                                 # whole suite
@@ -93,13 +94,33 @@ scenario: the SSE response never ends, so k6 cuts it after 1 s (error 1050), a t
 `op` tag (200 ms reads, 500 ms writes, 1.5 s stream) and `http_req_failed < 1%`. The spec k6 reads is the one served
 by the image under test, saved into the `openapi-spec` volume by `message-ready`. **Adding an endpoint = adding its
 handler in `load-test.js`** (k6 aborts at init otherwise), nothing to do for ZAP. `init-test.sql` also seeds the
-rows of the spec's path examples (chat 5 with message 118, user 42) so ZAP reaches real rows.
+rows of the spec's path examples (chat 5 created by the Admin with message 118, user 42) so ZAP reaches real rows.
+Message 118 is the Admin's own: nobody edits someone else's message, so ZAP would only get `403` on `PATCH` otherwise.
 
 Every `/api/v1/{chat_id}/**` handler starts with `endpoints::v1::id::access::require_chat_access` (one query:
-chat exists, caller is a non-excluded member, caller `is_admin`): non-members get the same `404` as an unknown
-chat, administrators bypass it. Message edits and deletions also go through `require_message_author` (author only,
-`403` otherwise; admins bypass). Members never delete a chat: `DELETE /{chat_id}/` is admin-only and a chat is
-deleted with its last member (`DeleteEmptyChatQueryView` after each member removal).
+chat exists, caller is a non-excluded member, caller created it (`conversations.created_by`), caller `is_admin`) and
+gets a `ChatRole`; anyone who is neither a member nor an administrator gets the same `404` as an unknown chat. The
+rules (MAIR-394):
+
+- posting a message is for members only (`ChatRole::require_member`): an administrator who is not a member gets `403`;
+- editing a message is for its author only, administrators included (`require_message_author(.., false)`);
+- deleting a message: its author, or an administrator (moderation). `DeleteMessageQueryView` writes a
+  `DELETE_MESSAGE` row with the content in `messaging_moderation_log` in the same statement when the message is
+  someone else's; `DELETE /{chat_id}/` (admin-only) logs `DELETE_CONVERSATION` the same way;
+- any member may leave (`DELETE /{chat_id}/users/{own id}/`); adding members or removing someone else needs
+  `ChatRole::can_manage_members` (the creator while still a member, or an administrator), `403` otherwise. A chat is
+  deleted with its last member (`DeleteEmptyChatQueryView` after each member removal);
+- reading the chat, its members and `POST /read/` are open to members and administrators.
+
+`POST /api/v1/` creates the chat and its members in one statement (`CreateChatQueryView::with_members`, a CTE): an
+unknown member fails the whole statement, nothing is left behind. `users_id` / `members` go through
+`validation::check_user_ids` (at most 50, ids 1..=`i32::MAX`, no duplicate).
+
+`GET /api/v1/{chat_id}/` is paginated by keyset on the message id (`?before=<id>&limit=<1..100, default 50>`): the
+query fetches `limit + 1` rows newest first, `GetChatResultView::from_newest_first` trims the extra one into
+`has_more` / `next_before` and returns the page oldest first. `citation` is stored in `messages.reply_to_id`, whose
+composite foreign key `(conversation_id, reply_to_id)` rejects a message of another chat (mapped to `400`).
+No `QueryParam` holds an optional BIGINT, so an absent `before` / `citation` travels as `0` (`NULLIF`).
 
 Unread counters are only lowered by the explicit `POST /api/v1/{chat_id}/read/` (`{ "readUntilMessageId": n }`, answers
 `{ "unread_count": k }`); `GET /api/v1/{chat_id}/` and `GET /api/v1/` never touch them, so polling is safe. The route is
@@ -108,7 +129,8 @@ which lives in `Devops/Database` (`releases/v1.5.0` + `repeatable/messages/`): i
 (`conversation_read_cursors`) forward only, recounts the messages after it, and answers "no row" (→ `404 Unknown message.`)
 when the id belongs to another chat. Sends and acknowledgements of one conversation are serialized by a transaction advisory
 lock taken by a `BEFORE INSERT` trigger on `messages`, which also draws the message id after the lock so a single cursor is
-sound. **This API needs a Database image that ships that release** (`dev-fb7c223` or later): the compose files and
+sound. **This API needs a Database image that ships that release and `releases/v1.8.0`** (MAIR-394: `created_by`,
+`reply_to_id`, `messaging_moderation_log`): the compose files and
 `TEST_DB_VERSION` in `.cargo/config.toml` pin it, and both have to be bumped together when a newer Database image is
 needed. To try an unmerged Database branch, build `ghcr.io/mairie360/database:<tag>` and `…/liquibase-migrations:<tag>`
 from `Devops/Database` and run `TEST_DB_VERSION=<tag> cargo test`.
@@ -192,18 +214,26 @@ the container tests.
 
 ### Real-time SSE (`src/sse/`)
 
-- `state.rs`: `AppState { online_agents: DashMap<u64 /*user id*/, Vec<(ConnectionId, mpsc::Sender<...>)>>,
-  internal_bus: broadcast::Sender<ChatEvent> }`.
-- `main.rs` creates a `tokio::sync::broadcast` channel and `tokio::spawn`s
-  `event_manager::start_internal_event_listener`, handing it a cloned `SmartDatabase`.
-- Write endpoints (e.g. `v1/id/messages/post`) do their DB write, then
-  `sse_state.internal_bus.send(ChatEvent { chat_id, sender_id, message })`.
-- The listener, per event, queries chat members (`get_chat_users`) and pushes a serde-serialized
+- `state.rs`: `AppState { online_agents: DashMap<u64 /*user id*/, Vec<Connection>>, internal_bus:
+  broadcast::Sender<ChatEvent>, relay: Option<Arc<RedisRelay>> }`, built with `AppState::new`. A `Connection` holds its
+  sender and a `close: Arc<Notify>`. `register` keeps at most `MAX_CONNECTIONS_PER_USER` (5) per user and notifies the
+  evicted oldest ones.
+- `relay.rs`: Redis pub/sub so every replica notifies its own streams. The channel is
+  `<lib key prefix>:sse:chat-events` (`message-api:sse:chat-events` on the platform, whose Redis ACL grants that role
+  `&message-api:*` + `PUBLISH`/`SUBSCRIBE`, `redis.pubSubRoles` in Deploiment). `RedisRelay::run` subscribes and pushes
+  what it receives on `internal_bus`, reconnecting with a backoff; redis-rs drops the error reply of `SUBSCRIBE`, so the
+  subscription is only trusted once a `probe` payload published right after it comes back.
+- `main.rs` creates the `broadcast` channel, spawns `RedisRelay::run` and
+  `event_manager::start_internal_event_listener` (with a cloned `SmartDatabase`).
+- Write endpoints do their DB write, then `sse_state.publish(ChatEvent { chat_id, sender_id })`: through Redis when the
+  relay is subscribed, straight on `internal_bus` otherwise (a duplicate signal only makes a client reload once more).
+- The listener, per event, queries the non-excluded chat members (`get_chat_users`) and pushes a serde-serialized
   `ChatSignal` frame (`data: {...}\n\n`) to every connection of each online member (skipping the
   sender). A `Lagged` bus error is logged and the loop resumes; only closed senders are removed.
-- `GET /api/v1/stream` registers a new connection for the caller (several tabs allowed, via
-  `AppState::register_connection`) and runs a 15s keep-alive ping task that removes only that
-  connection once it is closed.
+- `GET /api/v1/stream` registers a new connection for the caller and spawns a supervisor (`actix_web::rt::spawn`): 15 s
+  keep-alive ping, `authenticate_token` again every 30 s (revoked session, deleted account), and a timer on the JWT
+  `exp` when it is readable. Any failure notifies `close`, which ends the response (`take_until`); the connection is
+  removed once its receiver is gone.
 
 ### Config (env vars, all "critical" → process panics if unset)
 

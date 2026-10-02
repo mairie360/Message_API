@@ -1,15 +1,15 @@
 use crate::endpoints::validation::{
-    check_description, Validate, ValidationError, MAX_MESSAGE_LENGTH,
+    check_description, Validate, ValidationError, MAX_MESSAGE_ID, MAX_MESSAGE_LENGTH,
 };
 use utoipa::ToSchema;
 
-/// Message à publier dans la conversation du chemin.
+/// Message to post in the chat of the path.
 #[derive(Debug, serde::Deserialize, ToSchema)]
 pub struct PostMessageView {
-    /// Identifiant du message auquel celui-ci répond. Facultatif.
-    #[schema(example = 100)]
-    citation: Option<u64>, // message citation
-    /// Contenu du message.
+    /// Id of the message this one answers, in the same chat. Optional (`null` or absent).
+    #[schema(example = 118, minimum = 1)]
+    citation: Option<u64>,
+    /// Content of the message.
     #[schema(
         min_length = 1,
         max_length = 5000,
@@ -32,10 +32,10 @@ impl PostMessageView {
     }
 }
 
-/// Message publié.
+/// Message posted.
 #[derive(Debug, serde::Serialize, ToSchema)]
 pub struct PostMessageResultView {
-    /// Identifiant attribué au message publié.
+    /// Id given to the message.
     #[schema(example = 101)]
     id: u64,
 }
@@ -54,6 +54,12 @@ impl Validate for PostMessageView {
     fn validate(&self) -> Result<(), ValidationError> {
         if self.content.trim().is_empty() {
             return Err(ValidationError::new("content", "must not be empty"));
+        }
+        if matches!(self.citation, Some(id) if id == 0 || id > MAX_MESSAGE_ID) {
+            return Err(ValidationError::new(
+                "citation",
+                &format!("must be a message id between 1 and {MAX_MESSAGE_ID}"),
+            ));
         }
         check_description("content", &self.content, MAX_MESSAGE_LENGTH)
     }

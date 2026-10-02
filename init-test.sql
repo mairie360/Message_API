@@ -27,15 +27,19 @@ ON CONFLICT DO NOTHING;
 
 -- Chat 5 and its message 118 are the ids of the path parameter examples of the spec (user 42 is a
 -- member): ZAP builds its requests from these examples, so seeding them makes it scan the
--- handlers on a real chat instead of stopping at a 404.
-INSERT INTO conversations (id, title, kind) VALUES (5, 'Service urbanisme', 'direct')
+-- handlers on a real chat instead of stopping at a 404. The Admin (user 1) created it and is a
+-- member: an administrator who is not a member may not post (403), and `citation` 118 of the
+-- request example must be a message of this chat.
+INSERT INTO conversations (id, title, kind, created_by) VALUES (5, 'Service urbanisme', 'direct', 1)
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO conversation_members (conversation_id, user_id) VALUES (5, 1), (5, 42)
 ON CONFLICT DO NOTHING;
 
+-- Message 118 is the Admin's own: nobody edits the message of someone else, administrators
+-- included, so ZAP (authenticated as the Admin) would only ever get 403 on PATCH otherwise.
 INSERT INTO messages (id, conversation_id, owner_id, content)
-VALUES (118, 5, 42, 'La réunion est décalée à 15h.')
+VALUES (118, 5, 1, 'La réunion est décalée à 15h.')
 ON CONFLICT (id) DO NOTHING;
 
 -- Explicit ids do not advance the SERIAL sequence: move it past the fixtures so users created
