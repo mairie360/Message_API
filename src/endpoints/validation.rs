@@ -3,8 +3,11 @@
 //! A request view implements [`Validate`] and the handler extracts it with [`ValidatedJson`] or
 //! [`ValidatedQuery`] instead of `web::Json` / `web::Query`: an invalid value is rejected with a
 //! `400 Bad Request` (plain-text body naming the field) before the handler runs, so it never
-//! reaches Postgres (where an over-long value or a NUL byte used to end in a `500`) nor comes back
-//! unescaped in a JSON response.
+//! reaches Postgres (where an over-long value or a NUL byte used to end in a `500`).
+//!
+//! `<` and `>` are ordinary characters ("budget > 10 000 €", "->", "<3", MAIR-426): the API only
+//! serves JSON with `X-Content-Type-Options: nosniff`, which no browser renders as HTML, and
+//! escaping belongs to the fronts that display the text.
 
 use std::fmt;
 use std::future::Future;
@@ -68,15 +71,8 @@ fn check_no_control(field: &str, value: &str) -> Result<(), ValidationError> {
     Ok(())
 }
 
-fn check_no_markup(field: &str, value: &str) -> Result<(), ValidationError> {
-    if value.contains(['<', '>']) {
-        return Err(ValidationError::new(field, "must not contain `<` or `>`"));
-    }
-    Ok(())
-}
-
 /// A short label displayed as-is by the fronts (person name, role or group name): not blank, at
-/// most `max` characters, no control character and no `<` / `>`.
+/// most `max` characters and no control character.
 ///
 /// # Errors
 ///
@@ -86,12 +82,11 @@ pub fn check_label(field: &str, value: &str, max: usize) -> Result<(), Validatio
         return Err(ValidationError::new(field, "must not be empty"));
     }
     check_length(field, value, max)?;
-    check_no_control(field, value)?;
-    check_no_markup(field, value)
+    check_no_control(field, value)
 }
 
 /// A free-text description: may be empty, at most `max` characters, line breaks and tabs
-/// allowed, no other control character and no `<` / `>`.
+/// allowed, no other control character.
 ///
 /// # Errors
 ///
@@ -107,7 +102,7 @@ pub fn check_description(field: &str, value: &str, max: usize) -> Result<(), Val
             "must not contain control characters other than line breaks and tabs",
         ));
     }
-    check_no_markup(field, value)
+    Ok(())
 }
 
 /// An opaque value only compared or stored as text (token, credential, `device_info`, search
@@ -229,12 +224,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn label_rejects_blank_long_control_and_markup() {
+    fn label_rejects_blank_long_and_control() {
         assert!(check_label("name", "Service urbanisme", MAX_TITLE_LENGTH).is_ok());
         assert!(check_label("name", "  ", MAX_TITLE_LENGTH).is_err());
         assert!(check_label("name", &"a".repeat(151), MAX_TITLE_LENGTH).is_err());
         assert!(check_label("name", "Service\0", MAX_TITLE_LENGTH).is_err());
-        assert!(check_label("name", "<script>alert(1);</script>", MAX_TITLE_LENGTH).is_err());
+        assert!(check_label("name", "Budget > 10 000 € -> <3", MAX_TITLE_LENGTH).is_ok());
     }
 
     #[test]
@@ -246,7 +241,7 @@ mod tests {
     fn description_allows_line_breaks_only() {
         assert!(check_description("content", "Bonjour,\nà demain", MAX_MESSAGE_LENGTH).is_ok());
         assert!(check_description("content", "a\0b", MAX_MESSAGE_LENGTH).is_err());
-        assert!(check_description("content", "<b>", MAX_MESSAGE_LENGTH).is_err());
+        assert!(check_description("content", "a < b && b > c", MAX_MESSAGE_LENGTH).is_ok());
         assert!(check_description("content", &"a".repeat(5001), MAX_MESSAGE_LENGTH).is_err());
     }
 
