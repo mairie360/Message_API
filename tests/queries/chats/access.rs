@@ -146,3 +146,94 @@ async fn test_chat_access_tells_the_creator_apart() {
     let left = access(&db, chat_id, creator).await;
     assert!(left.is_creator && !left.is_member);
 }
+
+#[tokio::test]
+#[serial]
+async fn test_locking_access_answers_like_the_plain_one() {
+    let (_container, host) = get_shared_db().await;
+    let db = get_smart_db(host).await;
+    let creator = plain_user(&db).await;
+    let member = plain_user(&db).await;
+    let outsider = plain_user(&db).await;
+    let chat_id = db
+        .fetch_scalar::<i32, _>(&CreateChatQueryView::with_members(
+            "Locking",
+            None,
+            Some(creator),
+            &[creator, member],
+        ))
+        .await
+        .unwrap() as u64;
+
+    for (chat, user) in [
+        (chat_id, creator),
+        (chat_id, member),
+        (chat_id, outsider),
+        (chat_id, 1),
+        (999_999, member),
+    ] {
+        let mut tx = db.begin().await.unwrap();
+        let locked: ChatAccess = tx
+            .fetch_one(&ChatAccessQueryView::locking(chat, user))
+            .await
+            .unwrap();
+        tx.rollback().await.unwrap();
+        let plain = access(&db, chat, user).await;
+        assert_eq!(
+            (
+                locked.chat_exists,
+                locked.is_member,
+                locked.is_creator,
+                locked.is_admin
+            ),
+            (
+                plain.chat_exists,
+                plain.is_member,
+                plain.is_creator,
+                plain.is_admin
+            ),
+            "chat {chat} user {user}"
+        );
+    }
+}
+
+/// MAIR-420: a write checks access and writes in one transaction; until it ends, the member it
+/// checked cannot be removed (no post from a member already gone).
+#[tokio::test]
+#[serial]
+async fn test_locking_access_holds_the_membership_until_the_write_ends() {
+    let (_container, host) = get_shared_db().await;
+    let db = get_smart_db(host).await;
+    let member = plain_user(&db).await;
+    let chat_id = chat_with(&db, vec![member]).await;
+
+    let mut tx = db.begin().await.unwrap();
+    let checked: ChatAccess = tx
+        .fetch_one(&ChatAccessQueryView::locking(chat_id, member))
+        .await
+        .unwrap();
+    assert!(checked.is_member);
+
+    let remover = db.clone();
+    let removal = tokio::spawn(async move {
+        remover
+            .fetch_scalar::<i32, _>(&RemoveMemberFromChatQueryView::new(chat_id, member))
+            .await
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    assert!(
+        !removal.is_finished(),
+        "the removal must wait for the transaction that checked the membership"
+    );
+
+    tx.fetch_scalar::<i64, _>(&PostMessageInChatQueryView::new(
+        chat_id,
+        member,
+        "Juste à temps",
+    ))
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+    assert!(removal.await.unwrap().is_ok());
+    assert!(!access(&db, chat_id, member).await.is_member);
+}

@@ -9,10 +9,15 @@
 //!
 //! A caller who may not see the chat gets the same answer as for an unknown chat, so the routes
 //! never reveal that a chat exists.
+//!
+//! Write routes check access with [`require_chat_access_in`] inside the transaction of their write
+//! (MAIR-420): the check locks the chat and the caller's membership, so a member removed or a chat
+//! deleted concurrently cannot slip between the check and the write.
 
 use actix_web::web;
 use mairie360_api_lib::database::error::DbError;
 use mairie360_api_lib::error::ApiLibError;
+use mairie360_api_lib::smart_db::SmartTransaction;
 use mairie360_api_lib::state::AppState;
 
 use crate::database::chats::access::view::{ChatAccess, ChatAccessQueryView};
@@ -63,6 +68,7 @@ impl ChatRole {
 }
 
 /// Checks that `user_id` may see chat `chat_id` (member or administrator) and returns their role.
+/// For the read-only routes; write routes use [`require_chat_access_in`].
 pub async fn require_chat_access(
     state: &web::Data<AppState>,
     chat_id: u64,
@@ -76,6 +82,43 @@ pub async fn require_chat_access(
             eprintln!("Chat access error: {e}");
             AccessDenied::DatabaseError
         })?;
+    role_of(access)
+}
+
+/// Same as [`require_chat_access`] inside the transaction `tx` of a write: the chat and the
+/// caller's membership stay locked until `tx` ends.
+pub async fn require_chat_access_in(
+    tx: &mut SmartTransaction,
+    chat_id: u64,
+    user_id: u64,
+) -> Result<ChatRole, AccessDenied> {
+    let access: ChatAccess = tx
+        .fetch_one(&ChatAccessQueryView::locking(chat_id, user_id))
+        .await
+        .map_err(|e| {
+            eprintln!("Chat access error: {e}");
+            AccessDenied::DatabaseError
+        })?;
+    role_of(access)
+}
+
+/// Opens the transaction of a write route.
+pub async fn begin(state: &web::Data<AppState>) -> Result<SmartTransaction, AccessDenied> {
+    state.get_smart_db().begin().await.map_err(|e| {
+        eprintln!("Begin transaction error: {e}");
+        AccessDenied::DatabaseError
+    })
+}
+
+/// Commits the transaction of a write route.
+pub async fn commit(tx: SmartTransaction) -> Result<(), AccessDenied> {
+    tx.commit().await.map_err(|e| {
+        eprintln!("Commit transaction error: {e}");
+        AccessDenied::DatabaseError
+    })
+}
+
+fn role_of(access: ChatAccess) -> Result<ChatRole, AccessDenied> {
     if !access.chat_exists || !(access.is_member || access.is_admin) {
         return Err(AccessDenied::NotFound);
     }
@@ -95,17 +138,17 @@ pub enum MessageDenied {
     DatabaseError,
 }
 
-/// Checks that message `message_id` belongs to chat `chat_id` and that `user_id` wrote it. With
-/// `may_moderate` (an administrator deleting a message) the message of anyone is accepted.
-pub async fn require_message_author(
-    state: &web::Data<AppState>,
+/// Checks, inside the transaction `tx` of a write, that message `message_id` belongs to chat
+/// `chat_id` and that `user_id` wrote it. With `may_moderate` (an administrator deleting a message)
+/// the message of anyone is accepted.
+pub async fn require_message_author_in(
+    tx: &mut SmartTransaction,
     chat_id: u64,
     message_id: u64,
     user_id: u64,
     may_moderate: bool,
 ) -> Result<(), MessageDenied> {
-    let owner_id: i32 = state
-        .get_smart_db()
+    let owner_id: i32 = tx
         .fetch_scalar(&MessageOwnerQueryView::new(chat_id, message_id))
         .await
         .map_err(|e| match e {

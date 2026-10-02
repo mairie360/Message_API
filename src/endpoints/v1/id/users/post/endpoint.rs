@@ -3,9 +3,12 @@ use actix_web::{post, web, HttpResponse, Responder, ResponseError};
 use mairie360_api_lib::database::error::DbError;
 use mairie360_api_lib::error::ApiLibError;
 use mairie360_api_lib::security::AuthenticatedUser;
+use mairie360_api_lib::smart_db::SmartTransaction;
 use mairie360_api_lib::state::AppState;
 
-use crate::endpoints::v1::id::access::{require_chat_access, AccessDenied, NOT_A_MANAGER_MESSAGE};
+use crate::endpoints::v1::id::access::{
+    begin, commit, require_chat_access_in, AccessDenied, NOT_A_MANAGER_MESSAGE,
+};
 
 use crate::database::chats::add_users_to_chat::view::AddMembersToChatQueryView;
 use crate::endpoints::v1::id::users::post::view::{AddUsersToChat, AddUsersToChatResultView};
@@ -54,7 +57,7 @@ impl ResponseError for AddUsersToChatError {
 }
 
 async fn trigger_add_users_to_chat(
-    state: web::Data<AppState>,
+    tx: &mut SmartTransaction,
     chat_id: u64,
     view: AddUsersToChat,
 ) -> Result<AddUsersToChatResultView, AddUsersToChatError> {
@@ -64,28 +67,20 @@ async fn trigger_add_users_to_chat(
         return Ok(AddUsersToChatResultView::new(chat_id, Vec::new()));
     }
 
-    state
-        .get_smart_db()
-        .execute(view)
-        .await
-        .map_err(|e| match e {
-            // Both foreign keys of conversation_members: tell the missing chat from the missing user.
-            ApiLibError::Database(DbError::ForeignKeyViolation(message))
-                if message.contains("conversation_id") =>
-            {
-                AddUsersToChatError::UnknownChat
-            }
-            ApiLibError::Database(DbError::ForeignKeyViolation(_)) => {
-                AddUsersToChatError::UnknownUser
-            }
-            ApiLibError::Database(DbError::UniqueViolation(_)) => {
-                AddUsersToChatError::AlreadyMember
-            }
-            e => {
-                eprintln!("Add chat members error: {e}");
-                AddUsersToChatError::DatabaseError
-            }
-        })?;
+    tx.execute(&view).await.map_err(|e| match e {
+        // Both foreign keys of conversation_members: tell the missing chat from the missing user.
+        ApiLibError::Database(DbError::ForeignKeyViolation(message))
+            if message.contains("conversation_id") =>
+        {
+            AddUsersToChatError::UnknownChat
+        }
+        ApiLibError::Database(DbError::ForeignKeyViolation(_)) => AddUsersToChatError::UnknownUser,
+        ApiLibError::Database(DbError::UniqueViolation(_)) => AddUsersToChatError::AlreadyMember,
+        e => {
+            eprintln!("Add chat members error: {e}");
+            AddUsersToChatError::DatabaseError
+        }
+    })?;
 
     Ok(AddUsersToChatResultView::new(chat_id, added))
 }
@@ -169,11 +164,13 @@ pub async fn add_users_to_chat(
     params: web::Path<ChatPathParams>,
 ) -> Result<impl Responder, AddUsersToChatError> {
     let view = view.into_inner();
-    let role = require_chat_access(&state, params.chat_id, auth_user.id).await?;
+    let mut tx = begin(&state).await?;
+    let role = require_chat_access_in(&mut tx, params.chat_id, auth_user.id).await?;
     if !role.can_manage_members() {
         return Err(AddUsersToChatError::Forbidden);
     }
-    let result = trigger_add_users_to_chat(state, params.chat_id, view).await?;
+    let result = trigger_add_users_to_chat(&mut tx, params.chat_id, view).await?;
+    commit(tx).await?;
     Ok(HttpResponse::Ok().json(result))
 }
 
