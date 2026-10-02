@@ -116,6 +116,13 @@ rules (MAIR-394):
   deleted with its last member (`DeleteEmptyChatQueryView` after each member removal);
 - reading the chat, its members and `POST /read/` are open to members and administrators.
 
+Write routes (MAIR-420) open a transaction (`access::begin`), check access with `require_chat_access_in` /
+`require_message_author_in` inside it, write through the same `SmartTransaction`, then `access::commit`. The access
+query is `ChatAccessQueryView::locking`: it takes `FOR KEY SHARE` on the chat row and the caller's membership row,
+so a concurrent member removal or chat deletion waits for the write instead of slipping between check and write
+(TOCTOU). Removing a member and `DeleteEmptyChatQueryView` share that transaction. SSE events are published after
+the commit. Read-only routes keep the plain `require_chat_access`.
+
 `POST /api/v1/` creates the chat and its members in one statement (`CreateChatQueryView::with_members`, a CTE): an
 unknown member fails the whole statement, nothing is left behind. `users_id` / `members` go through
 `validation::check_user_ids` (at most 50, ids 1..=`i32::MAX`, no duplicate).

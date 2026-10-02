@@ -3,10 +3,11 @@ use actix_web::{patch, web, HttpResponse, Responder, ResponseError};
 use mairie360_api_lib::database::error::DbError;
 use mairie360_api_lib::error::ApiLibError;
 use mairie360_api_lib::security::AuthenticatedUser;
+use mairie360_api_lib::smart_db::SmartTransaction;
 use mairie360_api_lib::state::AppState;
 
 use crate::endpoints::v1::id::access::{
-    require_chat_access, require_message_author, AccessDenied, MessageDenied,
+    begin, commit, require_chat_access_in, require_message_author_in, AccessDenied, MessageDenied,
 };
 
 use crate::database::chats::patch_message_in_chat::view::PatchMessageQueryView;
@@ -53,14 +54,12 @@ impl ResponseError for PatchMessageError {
 }
 
 async fn trigger_patch_message(
-    state: web::Data<AppState>,
+    tx: &mut SmartTransaction,
     message_id: u64,
     view: PatchMessageView,
 ) -> Result<(), PatchMessageError> {
     let view = PatchMessageQueryView::new(message_id, view.content());
-    state
-        .get_smart_db()
-        .fetch_scalar::<i64, _>(&view)
+    tx.fetch_scalar::<i64, _>(&view)
         .await
         .map_err(|e| match e {
             ApiLibError::Database(DbError::NotFound) => PatchMessageError::UnknownEvent,
@@ -147,11 +146,13 @@ pub async fn patch_message(
     view: ValidatedJson<PatchMessageView>,
 ) -> Result<impl Responder, PatchMessageError> {
     let message_id = params.message_id();
-    require_chat_access(&state, params.chat_id(), auth_user.id).await?;
+    let mut tx = begin(&state).await?;
+    require_chat_access_in(&mut tx, params.chat_id(), auth_user.id).await?;
     // Nobody rewrites the message of someone else, administrators included.
-    require_message_author(&state, params.chat_id(), message_id, auth_user.id, false).await?;
+    require_message_author_in(&mut tx, params.chat_id(), message_id, auth_user.id, false).await?;
     let view = view.into_inner();
-    trigger_patch_message(state, message_id, view).await?;
+    trigger_patch_message(&mut tx, message_id, view).await?;
+    commit(tx).await?;
     Ok(HttpResponse::Ok().finish())
 }
 

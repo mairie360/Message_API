@@ -3,10 +3,11 @@ use actix_web::{post, web, HttpResponse, Responder, ResponseError};
 use mairie360_api_lib::database::error::DbError;
 use mairie360_api_lib::error::ApiLibError;
 use mairie360_api_lib::security::AuthenticatedUser;
+use mairie360_api_lib::smart_db::SmartTransaction;
 use mairie360_api_lib::state::AppState;
 
 use crate::database::chats::acknowledge_read::view::AcknowledgeReadQueryView;
-use crate::endpoints::v1::id::access::{require_chat_access, AccessDenied};
+use crate::endpoints::v1::id::access::{begin, commit, require_chat_access_in, AccessDenied};
 use crate::endpoints::v1::id::read::post::view::{AcknowledgeReadResultView, AcknowledgeReadView};
 use crate::endpoints::v1::id::ChatPathParams;
 use crate::endpoints::validation::ValidatedJson;
@@ -55,13 +56,12 @@ impl From<AccessDenied> for AcknowledgeReadError {
 }
 
 async fn trigger_acknowledge_read(
-    state: web::Data<AppState>,
+    tx: &mut SmartTransaction,
     chat_id: u64,
     user_id: u64,
     view: AcknowledgeReadView,
 ) -> Result<AcknowledgeReadResultView, AcknowledgeReadError> {
-    let unread_count = state
-        .get_smart_db()
+    let unread_count = tx
         .fetch_scalar::<i32, _>(&AcknowledgeReadQueryView::new(
             chat_id,
             user_id,
@@ -150,7 +150,10 @@ pub async fn acknowledge_read(
     params: web::Path<ChatPathParams>,
 ) -> Result<impl Responder, AcknowledgeReadError> {
     let chat_id = params.chat_id;
-    require_chat_access(&state, chat_id, auth_user.id).await?;
-    let result = trigger_acknowledge_read(state, chat_id, auth_user.id, view.into_inner()).await?;
+    let mut tx = begin(&state).await?;
+    require_chat_access_in(&mut tx, chat_id, auth_user.id).await?;
+    let result =
+        trigger_acknowledge_read(&mut tx, chat_id, auth_user.id, view.into_inner()).await?;
+    commit(tx).await?;
     Ok(HttpResponse::Ok().json(result))
 }
