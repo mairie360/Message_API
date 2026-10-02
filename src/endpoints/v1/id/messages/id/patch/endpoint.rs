@@ -88,7 +88,7 @@ async fn trigger_patch_message(
         ),
         (
             status = 400,
-            description = "Malformed JSON body, URL segment not an integer, `content` breaking its rules (`content` not blank, at most 5000 characters, no `<` / `>`, no control character other than line breaks and tabs), or unknown message (`Unknown event.`).",
+            description = "Malformed JSON body, URL segment not an integer, `content` breaking its rules (`content` not blank, at most 5000 characters, no control character other than line breaks and tabs), or unknown message (`Unknown event.`).",
             body = String,
             content_type = "text/plain",
             example = json!("Unknown event.")
