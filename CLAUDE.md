@@ -298,6 +298,12 @@ fmt/clippy/tests, the three `*_test.sh` stacks run against the published `dev-<s
 Releases use **semantic-release with Angular commit conventions** (`.releaserc.json` /
 `release.config.js`): `feat:` → minor, `fix:`/`chore:`/`perf:` → patch, breaking → major.
 
+Kept in sync with `API_template` (MAIR-427): `cicd.yml` passes only the secrets the reusable workflow declares
+(`CODECOV_TOKEN`, `N8N_WEBHOOK_SECRET`, no `secrets: inherit`) and Renovate bumps the `uses:` tag and `cicd_version`
+in one grouped PR. Both Dockerfiles pin their base images by digest on the template's Rust version; the production
+one builds the dependencies in a cached layer, then the crate, both with `--locked`. The dev image runs as `dev`
+(uid 1000). Every advisory ignored in `.cargo/audit.toml` carries why it does not apply and when to drop it.
+
 ## Pull request reviewers
 
 Every PR requests a review from the whole team, minus its author: `CarolinHugo`, `LAURETbenjamin`, `MathTek` and `Quentintnrl` (`gh pr create … --reviewer CarolinHugo,LAURETbenjamin,MathTek`). `.github/CODEOWNERS` makes GitHub request them automatically as well.
