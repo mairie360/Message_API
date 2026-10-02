@@ -138,8 +138,8 @@ services:
         condition: service_healthy
 
   # The published image is distroless (no shell, no curl), so the API cannot carry its own
-  # healthcheck: this sidecar polls /health and the services that need the API wait for it to
-  # complete instead.
+  # healthcheck: this sidecar polls /ready (PostgreSQL and Redis answer) and the services that need
+  # the API wait for it to complete instead.
   # It also saves the spec served by the image under test into the `openapi-spec` volume: that
   # is the coverage reference of load-test.js (openapi.json is gitignored, so the CI checkout has
   # none, and the served spec is the one of the exact image being tested).
@@ -153,7 +153,7 @@ services:
     volumes:
       - openapi-spec:/spec
     command: >
-      sh -c 'until curl -fsS http://message:3003/health >/dev/null; do
+      sh -c 'until curl -fsS http://message:3003/ready >/dev/null; do
       echo "waiting for message..."; sleep 2; done;
       curl -fsS -o /spec/openapi.json http://message:3003/api-docs/openapi.json && echo "message ready"'
     networks:
