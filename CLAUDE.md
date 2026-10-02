@@ -214,7 +214,10 @@ implementing `mairie360_api_lib::database::db_interface::ApiRequestDto`:
 -> &[QueryParam]`, and optionally `cache_key` / `cache_ttl` (none do yet). The struct
 `#[derive(serde::Serialize, serde::Deserialize)]` (required by `ApiRequestDto`). Getters
 read back out of the `params` vec. IDs are `u64` in the app but `i32`/`i64` in the DB —
-cast when building each `QueryParam`.
+convert with `database::ids` (`id_to_sql` / `id_from_sql` for `INTEGER`, `bigint_to_sql` / `bigint_from_sql` for
+`messages.id`), never with `as`: an `as i32` wraps `chat + 2^32` around to `chat` (MAIR-422). The saturating
+conversions turn an out-of-range id into one no row has, so it ends in the usual `404`. `src/lib.rs` enables the
+clippy cast lints, so `cargo check_code` rejects a new `as` cast.
 
 Endpoints (and `sse::event_manager`) call `state.get_smart_db()` then:
 

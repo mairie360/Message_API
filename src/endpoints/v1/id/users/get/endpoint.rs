@@ -6,6 +6,7 @@ use mairie360_api_lib::state::AppState;
 use crate::endpoints::v1::id::access::{require_chat_access, AccessDenied};
 
 use crate::database::chats::get_chat_users::view::GetChatMembersQueryView;
+use crate::database::ids::id_from_sql;
 use crate::endpoints::error::unexpected;
 use crate::endpoints::v1::id::users::get::view::{GetUsersView, User};
 use crate::endpoints::v1::id::ChatPathParams;
@@ -58,7 +59,7 @@ async fn trigger_get_chat_users(
     Ok(GetUsersView::new(
         result
             .into_iter()
-            .map(|user_id| User::new(user_id as u64))
+            .map(|user_id| User::new(id_from_sql(user_id)))
             .collect(),
     ))
 }
