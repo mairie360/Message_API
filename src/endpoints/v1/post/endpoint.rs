@@ -1,11 +1,10 @@
 use actix_web::http::StatusCode;
 use actix_web::{post, web, HttpResponse, Responder, ResponseError};
-use mairie360_api_lib::database::error::DbError;
-use mairie360_api_lib::error::ApiLibError;
 use mairie360_api_lib::security::AuthenticatedUser;
 use mairie360_api_lib::state::AppState;
 
 use crate::database::chats::create_chat::view::CreateChatQueryView;
+use crate::endpoints::error::{classify, DbFailure};
 use crate::endpoints::v1::post::view::{CreateChatResultView, CreateChatView};
 use crate::endpoints::validation::ValidatedJson;
 
@@ -58,14 +57,9 @@ async fn trigger_create_chat(
         .get_smart_db()
         .fetch_scalar::<i32, _>(&query_view)
         .await
-        .map_err(|e| match e {
-            ApiLibError::Database(DbError::ForeignKeyViolation(_)) => {
-                CreateChatError::UnknownMember
-            }
-            e => {
-                eprintln!("Create chat error: {e}");
-                CreateChatError::DatabaseError
-            }
+        .map_err(|e| match classify("create chat", e) {
+            DbFailure::ForeignKey(_) => CreateChatError::UnknownMember,
+            _ => CreateChatError::DatabaseError,
         })?;
 
     Ok(CreateChatResultView::new(chat_id as u64))

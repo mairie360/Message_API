@@ -24,7 +24,7 @@ pub async fn listen(
         let event = match rx.recv().await {
             Ok(event) => event,
             Err(RecvError::Lagged(skipped)) => {
-                eprintln!("SSE listener lagged: {skipped} chat event(s) dropped, resuming");
+                tracing::warn!("SSE listener lagged: {skipped} chat event(s) dropped, resuming");
                 continue;
             }
             Err(RecvError::Closed) => break,
@@ -39,7 +39,7 @@ pub async fn listen(
             let members: Vec<i32> = match smart_db.fetch_all::<i32, _>(&view).await {
                 Ok(members) => members,
                 Err(e) => {
-                    eprintln!("Failed to fetch the chat members: {}", e);
+                    tracing::error!("Failed to fetch the chat members: {}", e);
                     vec![]
                 }
             };
@@ -51,7 +51,7 @@ pub async fn listen(
             let payload = match serde_json::to_string(&signal) {
                 Ok(payload) => payload,
                 Err(e) => {
-                    eprintln!("Failed to serialize the chat signal: {}", e);
+                    tracing::error!("Failed to serialize the chat signal: {}", e);
                     return;
                 }
             };

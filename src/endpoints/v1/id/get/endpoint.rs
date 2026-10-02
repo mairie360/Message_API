@@ -6,6 +6,7 @@ use mairie360_api_lib::state::AppState;
 use crate::endpoints::v1::id::access::{require_chat_access, AccessDenied};
 
 use crate::database::chats::get_chat::view::{GetChatQueryView, Message};
+use crate::endpoints::error::unexpected;
 use crate::endpoints::v1::id::get::view::{GetChatQuery, GetChatResultView};
 use crate::endpoints::v1::id::ChatPathParams;
 use crate::endpoints::validation::ValidatedQuery;
@@ -54,7 +55,7 @@ async fn trigger_get_chat(
     // One extra row tells whether older messages remain.
     let view = GetChatQueryView::new(chat_id, query.before(), limit + 1);
     let rows: Vec<Message> = state.get_smart_db().fetch_all(&view).await.map_err(|e| {
-        eprintln!("Get chat error: {e}");
+        unexpected("get chat", e);
         GetChatError::DatabaseError
     })?;
 
