@@ -130,6 +130,8 @@ services:
       PUBLIC_URL: http://message.development.mairie360.fr
       JWT_SECRET: b"secret"
       JWT_TIMEOUT: 3600
+      # ZAP imports the spec the API serves; never set on a deployed instance (MAIR-424).
+      SWAGGER_ENABLED: "true"
     depends_on:
       liquibase:
         condition: service_completed_successfully

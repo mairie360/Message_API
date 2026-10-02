@@ -35,17 +35,17 @@
       "name": "Service",
       "item": [
         {
-          "name": "Hello",
+          "name": "Readiness",
           "request": {
-            "method": "POST",
+            "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/",
+              "raw": "{{baseUrl}}/ready",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                ""
+                "ready"
               ]
             }
           },
@@ -58,8 +58,8 @@
                   "pm.test(\"Status is 200\", function () {",
                   "    pm.response.to.have.status(200);",
                   "});",
-                  "pm.test(\"Body matches the expected text\", function () {",
-                  "    pm.expect(pm.response.text()).to.eql(\"Hello, world!\");",
+                  "pm.test(\"PostgreSQL and Redis are up\", function () {",
+                  "    pm.expect(pm.response.json()).to.eql({ postgres: \"up\", redis: \"up\" });",
                   "});"
                 ]
               }
@@ -101,7 +101,7 @@
           "response": []
         },
         {
-          "name": "OpenAPI document",
+          "name": "OpenAPI document is not served in production",
           "request": {
             "method": "GET",
             "header": [],
@@ -122,14 +122,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"Status is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "pm.test(\"Document is an OpenAPI spec with paths\", function () {",
-                  "    const doc = pm.response.json();",
-                  "    pm.expect(doc.openapi).to.be.a(\"string\");",
-                  "    pm.expect(doc.paths).to.be.an(\"object\");",
-                  "    pm.expect(Object.keys(doc.paths)).to.include(\"/api/v1/\");",
+                  "// SWAGGER_ENABLED is not set on this stack, like on the deployed instances (MAIR-424).",
+                  "pm.test(\"Status is 404\", function () {",
+                  "    pm.response.to.have.status(404);",
                   "});"
                 ]
               }
