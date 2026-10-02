@@ -259,6 +259,18 @@ the container tests.
   `exp` when it is readable. Any failure notifies `close`, which ends the response (`take_until`); the connection is
   removed once its receiver is gone.
 
+### Lists and rate limiting (MAIR-425)
+
+`GET /api/v1/` and `GET /api/v1/{chat_id}/users/` take `endpoints::pagination::PageQuery` (`limit` 1..=100, default 50,
+`offset`) and answer `has_more`: the query views' `page()` fetch `limit + 1` rows and `split_page` trims the extra one.
+Their `new()` stays unbounded (`LIMIT NULL`) for the SSE fan-out and the query tests. Messages use their own keyset.
+
+`/api` is rate limited per authenticated user (`endpoints::rate_limit`, `actix-governor`): the BFFs share a few IPs,
+so the key is the `AuthenticatedUser` that `JwtMiddleware` stored, hence `rate_limiter()` is wrapped *before*
+`JwtMiddleware` (inner). `RATE_LIMIT_PER_SECOND` (default 10, `0` disables) and `RATE_LIMIT_BURST` (default 50);
+the ZAP and k6 stacks disable it. `swagger::RateLimitAddon` adds the `429` to every operation with
+`security(("jwt" = []))`, so handlers do not declare it.
+
 ### Probes and startup (MAIR-423)
 
 `GET /health` is the liveness probe (always `OK`, touches nothing). `GET /ready` (`endpoints/ready.rs`) is the
@@ -271,7 +283,7 @@ database, so `main` calls `ready::wait_for_postgres` and exits when Postgres doe
 ### Config (env vars, all "critical" → process panics if unset)
 
 `REDIS_URL`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT`, `DB_NAME`, `HOST`, `PORT`,
-`JWT_SECRET`, `JWT_TIMEOUT`. Optional: `SWAGGER_ENABLED`, `DB_STARTUP_TIMEOUT`, `LOG_FORMAT`, `RUST_LOG`. The Postgres URL is assembled by `database::pg_url::build_pg_url`,
+`JWT_SECRET`, `JWT_TIMEOUT`. Optional: `SWAGGER_ENABLED`, `DB_STARTUP_TIMEOUT`, `RATE_LIMIT_PER_SECOND`, `RATE_LIMIT_BURST`, `LOG_FORMAT`, `RUST_LOG`. The Postgres URL is assembled by `database::pg_url::build_pg_url`,
 which percent-encodes user, password and database name, so `DB_PASSWORD` may contain any
 character. `docker-compose.yml` supplies them for the dev stack (app on
 `:3003`, Postgres via `ghcr.io/mairie360/database`, Liquibase migrations, a `seeder` running

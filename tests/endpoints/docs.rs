@@ -32,3 +32,21 @@ async fn the_template_hello_route_is_gone() {
     .unwrap();
     assert!(document["paths"].get("/").is_none());
 }
+
+#[test]
+fn every_jwt_operation_documents_the_rate_limit() {
+    let document = serde_json::to_value(
+        <message_api::endpoints::swagger::ApiDoc as utoipa::OpenApi>::openapi(),
+    )
+    .unwrap();
+    let mut checked = 0;
+    for (path, operations) in document["paths"].as_object().unwrap() {
+        for (method, operation) in operations.as_object().unwrap() {
+            let secured = operation.get("security").is_some();
+            let limited = operation["responses"].get("429").is_some();
+            assert_eq!(secured, limited, "{method} {path}");
+            checked += usize::from(secured);
+        }
+    }
+    assert!(checked > 0);
+}

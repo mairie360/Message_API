@@ -5,10 +5,8 @@ use crate::database::chats::get_chat::view::Message;
 use crate::database::ids::{bigint_from_sql, id_from_sql};
 use crate::endpoints::validation::{Validate, ValidationError, MAX_MESSAGE_ID};
 
-/// Messages returned when `limit` is not given.
-pub const DEFAULT_PAGE_SIZE: u32 = 50;
-/// Largest `limit` accepted.
-pub const MAX_PAGE_SIZE: u32 = 100;
+/// Same page size bounds as the other lists.
+pub use crate::endpoints::pagination::{DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE};
 
 /// Pagination of the messages of a chat (keyset on the message id).
 #[derive(Debug, Default, serde::Deserialize, IntoParams)]

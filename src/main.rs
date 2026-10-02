@@ -3,6 +3,7 @@ use std::sync::Arc;
 use actix_web::{middleware, web, App, HttpServer};
 
 use message_api::database::pg_url::build_pg_url;
+use message_api::endpoints::rate_limit::{rate_limit_from_env, rate_limiter};
 use message_api::endpoints::swagger::{docs_config, swagger_enabled};
 use message_api::endpoints::{config, health, ready};
 use message_api::logging;
@@ -64,6 +65,10 @@ async fn main() -> std::io::Result<()> {
         state.get_smart_db().clone(),
     ));
     let data = web::Data::new(state);
+    let rate_limit = rate_limit_from_env();
+    if rate_limit.is_none() {
+        tracing::warn!("RATE_LIMIT_PER_SECOND=0: /api is not rate limited");
+    }
     let swagger = swagger_enabled();
     if swagger {
         tracing::warn!("SWAGGER_ENABLED: serving /swagger-ui/ and /api-docs/openapi.json");
@@ -85,8 +90,14 @@ async fn main() -> std::io::Result<()> {
             // 2. Public probes: liveness and readiness
             .service(health::health)
             .service(ready::ready)
-            // 3. Every other route requires a JWT
-            .service(web::scope("/api").wrap(JwtMiddleware).configure(config))
+            // 3. Every other route requires a JWT, and is rate limited per user (the limiter is
+            // wrapped first, so it runs after JwtMiddleware and sees the authenticated user).
+            .service(
+                web::scope("/api")
+                    .wrap(rate_limiter(rate_limit.as_ref()))
+                    .wrap(JwtMiddleware)
+                    .configure(config),
+            )
     })
     .bind(bind_address)?;
 
