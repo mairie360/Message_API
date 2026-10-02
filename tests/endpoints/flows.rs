@@ -222,3 +222,48 @@ async fn stream_opens_an_event_stream() {
     );
     assert_eq!(sse.online_agents.get(&user).map(|c| c.len()), Some(1));
 }
+
+/// MAIR-426: `<` and `>` are ordinary characters, stored and served back as sent (JSON with
+/// `nosniff`, escaping is the fronts' job).
+#[actix_web::test]
+#[serial]
+async fn angle_brackets_are_accepted_in_free_text() {
+    let (state, sse) = states().await;
+    let app = test_app!(state, sse);
+    let (_container, url) = get_shared_db().await;
+    let db = get_smart_db(url).await;
+    let user = plain_user(&db).await;
+
+    let name = "Budget > 10 000 € -> <validé>";
+    let (status, body) = send_json!(
+        app,
+        request(Method::POST, "/api/v1/", Some(user))
+            .set_json(json!({ "name": name, "members": [] }))
+    );
+    assert_eq!(status, StatusCode::OK);
+    let chat_id = body["id"].as_u64().unwrap();
+
+    let content = "a < b && b > c <3 <script>alert(1)</script>";
+    let (status, _) = send!(
+        app,
+        request(
+            Method::POST,
+            &format!("/api/v1/{chat_id}/messages/"),
+            Some(user)
+        )
+        .set_json(json!({ "content": content }))
+    );
+    assert_eq!(status, StatusCode::OK);
+
+    let (_, body) = send_json!(
+        app,
+        request(Method::GET, &format!("/api/v1/{chat_id}/"), Some(user))
+    );
+    assert_eq!(body["messages"][0]["content"], content);
+    let (_, body) = send_json!(app, request(Method::GET, "/api/v1/", Some(user)));
+    assert!(body["chats"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|chat| chat["id"] == chat_id && chat["name"] == name));
+}
