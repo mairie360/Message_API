@@ -3,7 +3,9 @@ use crate::endpoints::ready::ReadyDoc;
 use crate::endpoints::v1::doc::V1Doc;
 use actix_web::web::ServiceConfig;
 use mairie360_api_lib::env_manager::get_env_var;
+use utoipa::openapi::schema::{ObjectBuilder, Type};
 use utoipa::openapi::security::{Http, HttpAuthScheme, SecurityScheme};
+use utoipa::openapi::{ContentBuilder, ResponseBuilder};
 use utoipa::{Modify, OpenApi};
 use utoipa_swagger_ui::SwaggerUi;
 
@@ -70,6 +72,8 @@ Statuses returned across the API, before the handler runs:
 validation rules (length, control characters, `<` / `>`); the body names the first invalid \
 field, e.g. ``Invalid `content`: must not contain `<` or `>` ``. |
 | `401` | `Authorization` header missing or malformed, invalid or expired JWT, or revoked session. |
+| `429` | Rate limit of the caller exceeded (per user, see `RATE_LIMIT_PER_SECOND` / `RATE_LIMIT_BURST`); \
+the body says when to retry. |
 | `500` | Database or Redis failure. |
 ",
         contact(
@@ -97,7 +101,7 @@ field, e.g. ``Invalid `content`: must not contain `<` or `>` ``. |
         (path = "/", api = HealthDoc),
         (path = "/", api = ReadyDoc),
     ),
-    modifiers(&SecurityAddon)
+    modifiers(&SecurityAddon, &RateLimitAddon)
 )]
 pub struct ApiDoc;
 
@@ -119,5 +123,47 @@ impl Modify for SecurityAddon {
                     .build(),
             ),
         )
+    }
+}
+
+/// Adds the `429` of the per-user rate limiter (`rate_limit.rs`, MAIR-425) to every operation that
+/// requires a JWT: the limiter answers before any handler runs, so the handlers cannot declare it.
+struct RateLimitAddon;
+
+impl Modify for RateLimitAddon {
+    fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+        let too_many_requests = ResponseBuilder::new()
+            .description(
+                "The caller sent more requests than their rate limit allows (per user, 10 per second \
+                 with bursts of 50 by default). Retry after the delay given in the body.",
+            )
+            .content(
+                "text/plain",
+                ContentBuilder::new()
+                    .schema(Some(ObjectBuilder::new().schema_type(Type::String)))
+                    .example(Some(serde_json::json!("Too many requests, retry in 1s")))
+                    .build(),
+            )
+            .build();
+        for item in openapi.paths.paths.values_mut() {
+            let operations = [
+                &mut item.get,
+                &mut item.put,
+                &mut item.post,
+                &mut item.delete,
+                &mut item.options,
+                &mut item.head,
+                &mut item.patch,
+                &mut item.trace,
+            ];
+            for operation in operations.into_iter().flatten() {
+                if operation.security.as_ref().is_some_and(|s| !s.is_empty()) {
+                    operation
+                        .responses
+                        .responses
+                        .insert("429".to_string(), too_many_requests.clone().into());
+                }
+            }
+        }
     }
 }

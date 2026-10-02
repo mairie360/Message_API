@@ -5,7 +5,9 @@ use mairie360_api_lib::state::AppState;
 
 use crate::database::chats::get_chats::view::{GetChatsQueryResultView, GetChatsQueryView};
 use crate::endpoints::error::unexpected;
+use crate::endpoints::pagination::PageQuery;
 use crate::endpoints::v1::get::view::GetChatsResultView;
+use crate::endpoints::validation::ValidatedQuery;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum GetChatsError {
@@ -37,23 +39,27 @@ impl ResponseError for GetChatsError {
 async fn trigger_get_chats(
     state: web::Data<AppState>,
     user_id: u64,
+    page: PageQuery,
 ) -> Result<GetChatsResultView, GetChatsError> {
-    let view = GetChatsQueryView::new(user_id);
+    let view = GetChatsQueryView::page(user_id, page.limit(), page.offset());
     let result: Vec<GetChatsQueryResultView> =
         state.get_smart_db().fetch_all(&view).await.map_err(|e| {
             unexpected("get chats", e);
             GetChatsError::DatabaseError
         })?;
 
-    Ok(result.into())
+    Ok(GetChatsResultView::from_rows(result, page.limit()))
 }
 
 #[utoipa::path(
     get,
     path = "",
+    params(PageQuery),
     summary = "List my chats",
-    description = "Returns the chats the user of the JWT is a member of, with their number of unread \
-                   messages in each.\n\n\
+    description = "Returns one page of the chats the user of the JWT is a member of, newest first, with their \
+                   number of unread messages in each.\n\n\
+                   **Paginated** (`limit` 1 to 100, default 50, and `offset`): `has_more` tells whether another \
+                   page follows; ask for it with `offset` increased by `limit`.\n\n\
                    Reading `GET /api/v1/{chat_id}/` does not change `unread_count`: only the explicit \
                    `POST /api/v1/{chat_id}/read/` acknowledgement does.\n\n\
                    A chat without a title has an empty `name`, never `null`.",
@@ -66,8 +72,16 @@ async fn trigger_get_chats(
                 "chats": [
                     { "id": 5, "name": "Service urbanisme", "unread_count": 3 },
                     { "id": 8, "name": "Astreinte week-end", "unread_count": 0 }
-                ]
+                ],
+                "has_more": false
             })
+        ),
+        (
+            status = 400,
+            description = "`limit` not between 1 and 100, or `offset` not between 0 and 2147483647.",
+            body = String,
+            content_type = "text/plain",
+            example = json!("Invalid `limit`: must be between 1 and 100")
         ),
         (
             status = 401,
@@ -93,7 +107,8 @@ async fn trigger_get_chats(
 pub async fn get_chats(
     state: web::Data<AppState>,
     auth_user: AuthenticatedUser,
+    page: ValidatedQuery<PageQuery>,
 ) -> Result<impl Responder, GetChatsError> {
-    let result = trigger_get_chats(state, auth_user.id).await?;
+    let result = trigger_get_chats(state, auth_user.id, page.into_inner()).await?;
     Ok(HttpResponse::Ok().json(result))
 }
