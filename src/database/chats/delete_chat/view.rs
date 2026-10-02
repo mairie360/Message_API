@@ -1,5 +1,6 @@
 use std::fmt::Display;
 
+use crate::database::ids::{id_from_sql, id_to_sql};
 use mairie360_api_lib::database::db_interface::{ApiRequestDto, QueryParam};
 
 /// Deletes chat `chat_id` (members and messages cascade) on behalf of the administrator
@@ -14,18 +15,18 @@ impl DeleteChatQueryView {
     pub fn new(chat_id: u64, performed_by: u64) -> Self {
         Self {
             params: vec![
-                QueryParam::I32(chat_id as i32),
-                QueryParam::I32(performed_by as i32),
+                QueryParam::I32(id_to_sql(chat_id)),
+                QueryParam::I32(id_to_sql(performed_by)),
             ],
         }
     }
 
     pub fn chat_id(&self) -> u64 {
-        self.params[0].as_i32() as u64
+        id_from_sql(self.params[0].as_i32())
     }
 
     pub fn performed_by(&self) -> u64 {
-        self.params[1].as_i32() as u64
+        id_from_sql(self.params[1].as_i32())
     }
 }
 

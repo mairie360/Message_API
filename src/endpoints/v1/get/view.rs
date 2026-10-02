@@ -1,6 +1,7 @@
 use utoipa::ToSchema;
 
 use crate::database::chats::get_chats::view::GetChatsQueryResultView;
+use crate::database::ids::id_from_sql;
 
 /// Conversation de l'utilisateur connecté, avec son nombre de messages non lus.
 #[derive(Debug, serde::Serialize, ToSchema)]
@@ -42,7 +43,7 @@ impl ChatView {
 impl From<GetChatsQueryResultView> for ChatView {
     fn from(result: GetChatsQueryResultView) -> Self {
         Self::new(
-            result.id as u64,
+            id_from_sql(result.id),
             result.title.unwrap_or_default(),
             result.unread_count,
         )

@@ -1,5 +1,6 @@
 use std::fmt::Display;
 
+use crate::database::ids::{bigint_from_sql, bigint_to_sql, id_from_sql, id_to_sql};
 use mairie360_api_lib::database::db_interface::{ApiRequestDto, QueryParam};
 
 /// Posts a message, optionally as a reply to another message of the same chat
@@ -18,21 +19,21 @@ impl PostMessageInChatQueryView {
     pub fn replying_to(chat_id: u64, sender: u64, message: &str, reply_to: Option<u64>) -> Self {
         Self {
             params: vec![
-                QueryParam::I32(chat_id as i32),
-                QueryParam::I32(sender as i32),
+                QueryParam::I32(id_to_sql(chat_id)),
+                QueryParam::I32(id_to_sql(sender)),
                 QueryParam::Text(message.to_string()),
                 // No optional BIGINT in `QueryParam`: 0 (never a message id) stands for "none".
-                QueryParam::I64(reply_to.map_or(0, |id| id as i64)),
+                QueryParam::I64(reply_to.map_or(0, bigint_to_sql)),
             ],
         }
     }
 
     pub fn chat_id(&self) -> u64 {
-        self.params[0].as_i32() as u64
+        id_from_sql(self.params[0].as_i32())
     }
 
     pub fn sender(&self) -> u64 {
-        self.params[1].as_i32() as u64
+        id_from_sql(self.params[1].as_i32())
     }
 
     pub fn message(&self) -> &str {
@@ -42,7 +43,7 @@ impl PostMessageInChatQueryView {
     pub fn reply_to(&self) -> Option<u64> {
         match self.params[3].as_i64() {
             0 => None,
-            id => Some(id as u64),
+            id => Some(bigint_from_sql(id)),
         }
     }
 }

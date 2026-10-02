@@ -424,3 +424,52 @@ async fn invalid_bodies_are_refused_before_any_write() {
     );
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
+
+/// MAIR-422: `as i32` wrapped `chat + 2^32` around to `chat`, so a member could reach their chat
+/// through an alias. Out-of-range ids now saturate and match no row.
+#[actix_web::test]
+#[serial]
+async fn out_of_range_ids_do_not_alias_another_row() {
+    let (state, sse) = states().await;
+    let app = test_app!(state, sse);
+    let (_container, url) = get_shared_db().await;
+    let db = get_smart_db(url).await;
+    let (creator, member) = (plain_user(&db).await, plain_user(&db).await);
+    let (chat, message, _) = seeded_chat!(app, creator, member);
+    let chat_alias = chat + (1u64 << 32);
+    let message_alias = message + (1u64 << 63);
+
+    for (method, uri) in [
+        (Method::GET, format!("/api/v1/{chat_alias}/")),
+        (Method::GET, format!("/api/v1/{chat_alias}/users/")),
+        (
+            Method::DELETE,
+            format!("/api/v1/{chat}/users/{}/", member + (1u64 << 32)),
+        ),
+    ] {
+        let (status, _) = send!(app, request(method.clone(), &uri, Some(member)));
+        assert_ne!(status, StatusCode::OK, "{method} {uri}");
+        assert_ne!(status, StatusCode::NO_CONTENT, "{method} {uri}");
+    }
+    let (status, _) = send!(
+        app,
+        request(
+            Method::DELETE,
+            &format!("/api/v1/{chat}/messages/{message_alias}/"),
+            Some(creator)
+        )
+    );
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // Nothing was removed through an alias.
+    let (_, body) = send_json!(
+        app,
+        request(Method::GET, &format!("/api/v1/{chat}/"), Some(member))
+    );
+    assert_eq!(body["messages"].as_array().unwrap().len(), 2);
+    let (_, body) = send_json!(
+        app,
+        request(Method::GET, &format!("/api/v1/{chat}/users/"), Some(member))
+    );
+    assert_eq!(body["users"].as_array().unwrap().len(), 2);
+}

@@ -1,5 +1,6 @@
 use std::fmt::Display;
 
+use crate::database::ids::id_to_sql;
 use mairie360_api_lib::database::db_interface::{ApiRequestDto, QueryParam};
 
 /// Deletes chat `chat_id` once it has no (not excluded) member left; no-op otherwise. A chat is
@@ -12,7 +13,7 @@ pub struct DeleteEmptyChatQueryView {
 impl DeleteEmptyChatQueryView {
     pub fn new(chat_id: u64) -> Self {
         Self {
-            params: vec![QueryParam::I32(chat_id as i32)],
+            params: vec![QueryParam::I32(id_to_sql(chat_id))],
         }
     }
 }

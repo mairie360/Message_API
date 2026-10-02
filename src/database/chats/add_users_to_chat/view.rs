@@ -1,5 +1,6 @@
 use std::fmt::Display;
 
+use crate::database::ids::{id_from_sql, id_to_sql};
 use mairie360_api_lib::database::db_interface::{ApiRequestDto, QueryParam};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -19,12 +20,12 @@ impl AddMembersToChatQueryView {
             .join(",");
 
         Self {
-            params: vec![QueryParam::I32(chat_id as i32), QueryParam::Text(csv)],
+            params: vec![QueryParam::I32(id_to_sql(chat_id)), QueryParam::Text(csv)],
         }
     }
 
     pub fn chat_id(&self) -> u64 {
-        self.params[0].as_i32() as u64
+        id_from_sql(self.params[0].as_i32())
     }
 
     pub fn user_id(&self) -> Vec<i32> {

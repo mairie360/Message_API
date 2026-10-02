@@ -1,5 +1,6 @@
 use std::fmt::Display;
 
+use crate::database::ids::{bigint_from_sql, bigint_to_sql, id_from_sql, id_to_sql};
 use mairie360_api_lib::database::db_interface::{ApiRequestDto, QueryParam};
 
 /// One page of the messages of a chat, newest first: the `limit` messages whose id is below
@@ -14,27 +15,27 @@ impl GetChatQueryView {
     pub fn new(chat_id: u64, before: Option<u64>, limit: u32) -> Self {
         Self {
             params: vec![
-                QueryParam::I32(chat_id as i32),
+                QueryParam::I32(id_to_sql(chat_id)),
                 // No optional BIGINT in `QueryParam`: 0 (never a message id) means "no cursor".
-                QueryParam::I64(before.map_or(0, |id| id as i64)),
-                QueryParam::I32(limit as i32),
+                QueryParam::I64(before.map_or(0, bigint_to_sql)),
+                QueryParam::I32(i32::try_from(limit).unwrap_or(i32::MAX)),
             ],
         }
     }
 
     pub fn chat_id(&self) -> u64 {
-        self.params[0].as_i32() as u64
+        id_from_sql(self.params[0].as_i32())
     }
 
     pub fn before(&self) -> Option<u64> {
         match self.params[1].as_i64() {
             0 => None,
-            id => Some(id as u64),
+            id => Some(bigint_from_sql(id)),
         }
     }
 
     pub fn limit(&self) -> u32 {
-        self.params[2].as_i32() as u32
+        u32::try_from(self.params[2].as_i32()).unwrap_or_default()
     }
 }
 

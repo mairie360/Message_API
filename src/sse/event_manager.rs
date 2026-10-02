@@ -1,3 +1,4 @@
+use crate::database::ids::id_from_sql;
 use crate::{
     database::chats::get_chat_users::view::GetChatMembersQueryView,
     sse::state::{AppState, ChatSignal},
@@ -57,10 +58,10 @@ pub async fn listen(
             };
 
             for user_id in members {
-                if user_id == event.sender_id as i32 {
+                let user_id = id_from_sql(user_id);
+                if user_id == event.sender_id {
                     continue; // The sender is never notified.
                 }
-                let user_id = user_id as u64;
 
                 for (connection_id, tx) in state_clone.connections_of(user_id) {
                     let frame = web::Bytes::from(format!("data: {}\n\n", payload));

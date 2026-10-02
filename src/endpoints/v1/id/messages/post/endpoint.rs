@@ -9,6 +9,7 @@ use crate::endpoints::v1::id::access::{
 };
 
 use crate::database::chats::add_message_to_chat::view::PostMessageInChatQueryView;
+use crate::database::ids::bigint_from_sql;
 use crate::endpoints::error::{classify, DbFailure};
 use crate::endpoints::v1::id::messages::post::view::{PostMessageResultView, PostMessageView};
 use crate::endpoints::v1::id::ChatPathParams;
@@ -73,7 +74,7 @@ async fn trigger_post_message(
                 _ => PosteMessageError::DatabaseError,
             })?;
 
-    Ok(PostMessageResultView::new(result as u64))
+    Ok(PostMessageResultView::new(bigint_from_sql(result)))
 }
 
 #[utoipa::path(
