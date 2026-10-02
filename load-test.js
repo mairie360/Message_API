@@ -95,6 +95,7 @@ const spec = loadSpec();
 
 const readHandlers = {
   'GET /health': ({ request }) => check(request(), { 'health 200': (r) => r.status === 200 }),
+  'GET /ready': ({ request }) => check(request(), { 'ready 200': (r) => r.status === 200 }),
   'GET /api/v1/': ({ request }) => check(request(), { 'list chats 200': (r) => r.status === 200 }),
   'GET /api/v1/{chat_id}/': ({ request, data }) =>
     check(request({ path: { chat_id: data.chatId } }), { 'get chat 200': (r) => r.status === 200 }),

@@ -151,7 +151,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://message:3003/health"] # change api name and port
+      test: ["CMD", "curl", "-f", "http://message:3003/ready"] # change api name and port
       interval: 10s
       timeout: 5s
       retries: 5
