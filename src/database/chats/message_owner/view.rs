@@ -1,5 +1,6 @@
 use std::fmt::Display;
 
+use crate::database::ids::{bigint_to_sql, id_to_sql};
 use mairie360_api_lib::database::db_interface::{ApiRequestDto, QueryParam};
 
 /// Author of message `message_id` of chat `chat_id` (`0` once the author's account is gone).
@@ -13,8 +14,8 @@ impl MessageOwnerQueryView {
     pub fn new(chat_id: u64, message_id: u64) -> Self {
         Self {
             params: vec![
-                QueryParam::I64(message_id as i64),
-                QueryParam::I32(chat_id as i32),
+                QueryParam::I64(bigint_to_sql(message_id)),
+                QueryParam::I32(id_to_sql(chat_id)),
             ],
         }
     }

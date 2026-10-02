@@ -156,7 +156,7 @@ mod tests {
             .unwrap()
             .as_secs()
             + 3600;
-        let left = time_left(Some(in_an_hour as usize)).unwrap();
+        let left = time_left(Some(usize::try_from(in_an_hour).unwrap())).unwrap();
         assert!(left > Duration::from_secs(3590) && left <= Duration::from_secs(3600));
     }
 }
