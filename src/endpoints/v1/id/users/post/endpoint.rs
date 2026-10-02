@@ -1,7 +1,5 @@
 use actix_web::http::StatusCode;
 use actix_web::{post, web, HttpResponse, Responder, ResponseError};
-use mairie360_api_lib::database::error::DbError;
-use mairie360_api_lib::error::ApiLibError;
 use mairie360_api_lib::security::AuthenticatedUser;
 use mairie360_api_lib::smart_db::SmartTransaction;
 use mairie360_api_lib::state::AppState;
@@ -11,6 +9,7 @@ use crate::endpoints::v1::id::access::{
 };
 
 use crate::database::chats::add_users_to_chat::view::AddMembersToChatQueryView;
+use crate::endpoints::error::{classify, DbFailure};
 use crate::endpoints::v1::id::users::post::view::{AddUsersToChat, AddUsersToChatResultView};
 use crate::endpoints::v1::id::ChatPathParams;
 use crate::endpoints::validation::ValidatedJson;
@@ -67,20 +66,17 @@ async fn trigger_add_users_to_chat(
         return Ok(AddUsersToChatResultView::new(chat_id, Vec::new()));
     }
 
-    tx.execute(&view).await.map_err(|e| match e {
-        // Both foreign keys of conversation_members: tell the missing chat from the missing user.
-        ApiLibError::Database(DbError::ForeignKeyViolation(message))
-            if message.contains("conversation_id") =>
-        {
-            AddUsersToChatError::UnknownChat
-        }
-        ApiLibError::Database(DbError::ForeignKeyViolation(_)) => AddUsersToChatError::UnknownUser,
-        ApiLibError::Database(DbError::UniqueViolation(_)) => AddUsersToChatError::AlreadyMember,
-        e => {
-            eprintln!("Add chat members error: {e}");
-            AddUsersToChatError::DatabaseError
-        }
-    })?;
+    tx.execute(&view)
+        .await
+        .map_err(|e| match classify("add chat members", e) {
+            // Both foreign keys of conversation_members: tell the missing chat from the missing user.
+            DbFailure::ForeignKey(message) if message.contains("conversation_id") => {
+                AddUsersToChatError::UnknownChat
+            }
+            DbFailure::ForeignKey(_) => AddUsersToChatError::UnknownUser,
+            DbFailure::Unique(_) => AddUsersToChatError::AlreadyMember,
+            _ => AddUsersToChatError::DatabaseError,
+        })?;
 
     Ok(AddUsersToChatResultView::new(chat_id, added))
 }

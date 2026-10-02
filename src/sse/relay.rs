@@ -54,7 +54,7 @@ impl RedisRelay {
                 subscribed: AtomicBool::new(false),
             })),
             Err(e) => {
-                eprintln!("SSE relay disabled, invalid Redis URL: {e}");
+                tracing::warn!("SSE relay disabled, invalid Redis URL: {e}");
                 None
             }
         }
@@ -74,7 +74,7 @@ impl RedisRelay {
         match serde_json::to_string(event) {
             Ok(payload) => self.publish_payload(payload).await,
             Err(e) => {
-                eprintln!("Failed to serialize the chat event: {e}");
+                tracing::error!("Failed to serialize the chat event: {e}");
                 false
             }
         }
@@ -86,7 +86,7 @@ impl RedisRelay {
             match self.client.get_multiplexed_async_connection().await {
                 Ok(connection) => *guard = Some(connection),
                 Err(e) => {
-                    eprintln!("SSE relay: cannot connect to Redis to publish: {e}");
+                    tracing::warn!("SSE relay: cannot connect to Redis to publish: {e}");
                     return false;
                 }
             }
@@ -100,7 +100,7 @@ impl RedisRelay {
         {
             Ok(_) => true,
             Err(e) => {
-                eprintln!("SSE relay: publish failed: {e}");
+                tracing::warn!("SSE relay: publish failed: {e}");
                 // Reconnect on the next event.
                 *guard = None;
                 false
@@ -123,18 +123,20 @@ impl RedisRelay {
                             while let Some(message) = messages.next().await {
                                 forward(message.get_payload_bytes(), &bus);
                             }
-                            eprintln!("SSE relay: Redis subscription lost, reconnecting");
+                            tracing::warn!("SSE relay: Redis subscription lost, reconnecting");
                         } else {
-                            eprintln!(
+                            tracing::warn!(
                                 "SSE relay: no message received on {}, check the Redis ACL \
                                  (`&<role>:*`, `+publish`, `+subscribe`)",
                                 self.channel
                             );
                         }
                     }
-                    Err(e) => eprintln!("SSE relay: cannot subscribe to {}: {e}", self.channel),
+                    Err(e) => {
+                        tracing::warn!("SSE relay: cannot subscribe to {}: {e}", self.channel)
+                    }
                 },
-                Err(e) => eprintln!("SSE relay: cannot connect to Redis to subscribe: {e}"),
+                Err(e) => tracing::warn!("SSE relay: cannot connect to Redis to subscribe: {e}"),
             }
             self.subscribed.store(false, Ordering::Release);
             tokio::time::sleep(backoff).await;
@@ -178,6 +180,6 @@ fn forward(payload: &[u8], bus: &broadcast::Sender<ChatEvent>) {
         Ok(event) => {
             let _ = bus.send(event);
         }
-        Err(e) => eprintln!("SSE relay: ignored malformed event: {e}"),
+        Err(e) => tracing::warn!("SSE relay: ignored malformed event: {e}"),
     }
 }
