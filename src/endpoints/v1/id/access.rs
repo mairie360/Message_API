@@ -15,13 +15,12 @@
 //! deleted concurrently cannot slip between the check and the write.
 
 use actix_web::web;
-use mairie360_api_lib::database::error::DbError;
-use mairie360_api_lib::error::ApiLibError;
 use mairie360_api_lib::smart_db::SmartTransaction;
 use mairie360_api_lib::state::AppState;
 
 use crate::database::chats::access::view::{ChatAccess, ChatAccessQueryView};
 use crate::database::chats::message_owner::view::MessageOwnerQueryView;
+use crate::endpoints::error::{classify, unexpected, DbFailure};
 
 /// Body of the `403` answered to an administrator acting as a member of a chat they are not in.
 pub const NOT_A_MEMBER_MESSAGE: &str =
@@ -79,7 +78,7 @@ pub async fn require_chat_access(
         .fetch_one(&ChatAccessQueryView::new(chat_id, user_id))
         .await
         .map_err(|e| {
-            eprintln!("Chat access error: {e}");
+            unexpected("chat access", e);
             AccessDenied::DatabaseError
         })?;
     role_of(access)
@@ -96,7 +95,7 @@ pub async fn require_chat_access_in(
         .fetch_one(&ChatAccessQueryView::locking(chat_id, user_id))
         .await
         .map_err(|e| {
-            eprintln!("Chat access error: {e}");
+            unexpected("chat access", e);
             AccessDenied::DatabaseError
         })?;
     role_of(access)
@@ -105,7 +104,7 @@ pub async fn require_chat_access_in(
 /// Opens the transaction of a write route.
 pub async fn begin(state: &web::Data<AppState>) -> Result<SmartTransaction, AccessDenied> {
     state.get_smart_db().begin().await.map_err(|e| {
-        eprintln!("Begin transaction error: {e}");
+        unexpected("begin transaction", e);
         AccessDenied::DatabaseError
     })
 }
@@ -113,7 +112,7 @@ pub async fn begin(state: &web::Data<AppState>) -> Result<SmartTransaction, Acce
 /// Commits the transaction of a write route.
 pub async fn commit(tx: SmartTransaction) -> Result<(), AccessDenied> {
     tx.commit().await.map_err(|e| {
-        eprintln!("Commit transaction error: {e}");
+        unexpected("commit transaction", e);
         AccessDenied::DatabaseError
     })
 }
@@ -151,12 +150,9 @@ pub async fn require_message_author_in(
     let owner_id: i32 = tx
         .fetch_scalar(&MessageOwnerQueryView::new(chat_id, message_id))
         .await
-        .map_err(|e| match e {
-            ApiLibError::Database(DbError::NotFound) => MessageDenied::NotFound,
-            e => {
-                eprintln!("Message owner error: {e}");
-                MessageDenied::DatabaseError
-            }
+        .map_err(|e| match classify("message owner", e) {
+            DbFailure::NotFound => MessageDenied::NotFound,
+            _ => MessageDenied::DatabaseError,
         })?;
     if may_moderate || owner_id as u64 == user_id {
         Ok(())

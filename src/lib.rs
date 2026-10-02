@@ -1,5 +1,6 @@
 pub mod database;
 pub mod endpoints;
+pub mod logging;
 pub mod sse;
 
 // pub fn add_event(chat_id: u64, sender_id: u64, message: &str) {

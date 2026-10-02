@@ -5,6 +5,7 @@ use actix_web::{middleware, web, App, HttpServer};
 use message_api::database::pg_url::build_pg_url;
 use message_api::endpoints::swagger::ApiDoc;
 use message_api::endpoints::{config, health, hello};
+use message_api::logging;
 
 use mairie360_api_lib::env_manager::get_critical_env_var;
 use mairie360_api_lib::security::JwtMiddleware;
@@ -19,6 +20,7 @@ use utoipa_swagger_ui::SwaggerUi;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    logging::init();
     let redis_url = get_critical_env_var("REDIS_URL");
     let db_user = get_critical_env_var("DB_USER");
     let db_password = get_critical_env_var("DB_PASSWORD");
@@ -52,7 +54,9 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .app_data(web::Data::from(app_state.clone()))
             .app_data(data.clone())
-            .wrap(middleware::Logger::default())
+            // One span per request (request id, method, route, status): the errors logged by the
+            // handlers carry it.
+            .wrap(tracing_actix_web::TracingLogger::default())
             // Every response is JSON, plain text or an event stream: forbid browsers from sniffing
             // it as HTML.
             .wrap(middleware::DefaultHeaders::new().add(("X-Content-Type-Options", "nosniff")))
@@ -74,7 +78,7 @@ async fn main() -> std::io::Result<()> {
     let addr = server.addrs().first().copied();
     tokio::spawn(async move {
         if let Some(addr) = addr {
-            println!("Serveur démarré avec succès sur http://{}", addr);
+            tracing::info!("Server listening on http://{addr}");
         }
     });
 

@@ -143,6 +143,8 @@ services:
       PUBLIC_URL: http://message.development.mairie360.fr
       JWT_SECRET: b"secret"
       JWT_TIMEOUT: 3600
+      # Human-readable logs on the dev stack; JSON (the default) everywhere else.
+      LOG_FORMAT: text
     depends_on:
       liquibase:
         condition: service_completed_successfully
