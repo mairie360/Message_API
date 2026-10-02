@@ -133,6 +133,8 @@ services:
       JWT_TIMEOUT: 3600
       # k6 reads the spec the API serves; never set on a deployed instance (MAIR-424).
       SWAGGER_ENABLED: "true"
+      # k6 runs 20 VUs as one admin: the per-user rate limit would answer 429 (MAIR-425).
+      RATE_LIMIT_PER_SECOND: "0"
     depends_on:
       liquibase:
         condition: service_completed_successfully

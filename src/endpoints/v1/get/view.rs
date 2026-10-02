@@ -2,18 +2,19 @@ use utoipa::ToSchema;
 
 use crate::database::chats::get_chats::view::GetChatsQueryResultView;
 use crate::database::ids::id_from_sql;
+use crate::endpoints::pagination::split_page;
 
-/// Conversation de l'utilisateur connecté, avec son nombre de messages non lus.
+/// A chat of the caller, with their number of unread messages.
 #[derive(Debug, serde::Serialize, ToSchema)]
 pub struct ChatView {
-    /// Identifiant de la conversation, à réutiliser dans `/api/v1/{chat_id}/`.
+    /// Id of the chat, to use as `chat_id` in `/api/v1/{chat_id}/`.
     #[schema(example = 5)]
     id: u64,
-    /// Titre de la conversation. Chaîne vide si elle n'en a pas — jamais `null`.
+    /// Title of the chat. Empty string for a chat without a title, never `null`.
     #[schema(example = "Service urbanisme")]
     name: String,
-    /// Messages non lus par l'utilisateur connecté. La consultation via
-    /// `GET /api/v1/{chat_id}/` ne modifie pas ce compteur.
+    /// Messages the caller has not acknowledged yet. Reading `GET /api/v1/{chat_id}/` does not
+    /// change it, only `POST /api/v1/{chat_id}/read/` does.
     #[schema(example = 3)]
     unread_count: i32,
 }
@@ -50,25 +51,33 @@ impl From<GetChatsQueryResultView> for ChatView {
     }
 }
 
-/// Conversations dont l'utilisateur connecté est participant.
+/// One page of the chats of the caller, newest first.
 #[derive(Debug, serde::Serialize, ToSchema)]
 pub struct GetChatsResultView {
-    /// Conversations dont l'utilisateur connecté est participant.
+    /// Chats of the caller, newest first: at most `limit`. Empty when the caller is in no chat
+    /// or `offset` is past the last one.
     chats: Vec<ChatView>,
+    /// `true` when more chats follow: call again with `offset` increased by `limit`.
+    #[schema(example = false)]
+    has_more: bool,
 }
 
 impl GetChatsResultView {
-    pub fn new(chats: Vec<ChatView>) -> Self {
-        Self { chats }
+    pub fn new(chats: Vec<ChatView>, has_more: bool) -> Self {
+        Self { chats, has_more }
+    }
+
+    /// Builds the page from the `limit + 1` rows fetched (see `pagination::split_page`).
+    pub fn from_rows(rows: Vec<GetChatsQueryResultView>, limit: u32) -> Self {
+        let (rows, has_more) = split_page(rows, limit);
+        Self::new(rows.into_iter().map(ChatView::from).collect(), has_more)
     }
 
     pub fn chats(&self) -> &[ChatView] {
         &self.chats
     }
-}
 
-impl From<Vec<GetChatsQueryResultView>> for GetChatsResultView {
-    fn from(results: Vec<GetChatsQueryResultView>) -> Self {
-        Self::new(results.into_iter().map(ChatView::from).collect())
+    pub fn has_more(&self) -> bool {
+        self.has_more
     }
 }
