@@ -1,5 +1,6 @@
 use std::fmt::Display;
 
+use crate::database::ids::id_to_sql;
 use mairie360_api_lib::database::db_interface::{ApiRequestDto, QueryParam};
 
 /// Creates a chat and attaches its members in **one statement**: when a member does not exist,
@@ -33,7 +34,7 @@ impl CreateChatQueryView {
             params: vec![
                 QueryParam::Text(title.to_string()),
                 QueryParam::OptionI32(group_id),
-                QueryParam::OptionI32(created_by.map(|id| id as i32)),
+                QueryParam::OptionI32(created_by.map(id_to_sql)),
                 QueryParam::Text(csv),
             ],
         }
