@@ -33,7 +33,7 @@ Cargo aliases are defined in `.cargo/config.toml`:
 | Format fix | `cargo lint_fix` |
 | Clippy (CI gate, warnings = errors) | `cargo check_code` (`clippy --all-targets --all-features -- -D warnings`) |
 | Regenerate OpenAPI spec | `cargo open_api > openapi.json` |
-| Coverage (60% line threshold, excludes `endpoints`/`main.rs`/`lib.rs`) | `cargo cov_test` (or `cargo cov` for a `codecov.json` report) |
+| Coverage (60% line threshold, excludes `main.rs`/`lib.rs`; `endpoints/` counts since MAIR-419) | `cargo cov_test` (or `cargo cov` for a `codecov.json` report) |
 | Regenerate the TS client | `npx orval` (reads `openapi.json` → `generated/`) |
 | Run locally | needs all env vars set (see below), then `cargo run` |
 | Full dev stack + hot reload | `docker compose up --watch` |
@@ -41,6 +41,10 @@ Cargo aliases are defined in `.cargo/config.toml`:
 ### Tests
 
 Integration tests live in `tests/` (there is no meaningful unit-test suite in `src/`).
+`tests/endpoints/` calls the real `/api` scope (`JwtMiddleware` + `endpoints::config`) over the shared test database
+with JWTs signed by `harness::token` (the harness sets its own `JWT_SECRET`): it holds the access refusals of every
+route (`401`, outsider `404`, non-creator / non-author / administrator `403`, ids of another chat). A new route or a
+new refusal gets its test there, since `endpoints/` is part of the coverage gate.
 They are plain `#[tokio::test]` + `#[serial]` (`serial_test`) and use `mairie360_api_lib`'s
 `get_shared_db()`, which spins up **real Docker containers via testcontainers** —
 `ghcr.io/mairie360/database:dev-fb7c223` (pinned in `.cargo/config.toml` through `TEST_DB_VERSION`, which overrides the lib default) plus a Liquibase
