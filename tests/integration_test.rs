@@ -1,3 +1,4 @@
-mod common; // Accès à ton pool
+mod common;
+mod endpoints;
 mod queries;
 mod sse;

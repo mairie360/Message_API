@@ -12,9 +12,9 @@ check_code = "clippy --all-targets --all-features -- -D warnings"
 # This alias generate the OpenAPI documentation
 open_api = "run --example generate_openapi"
 
-cov_test = ["llvm-cov", "--workspace", "--ignore-filename-regex", "endpoints|main\\.rs|lib\\.rs", "--fail-under-lines", "60"]
+cov_test = ["llvm-cov", "--workspace", "--ignore-filename-regex", "main\\.rs|lib\\.rs", "--fail-under-lines", "60"]
 
-cov = ["llvm-cov", "--workspace", "--ignore-filename-regex", "endpoints|main\\.rs|lib\\.rs", "--fail-under-lines", "60", "--codecov", "--output-path", "codecov.json"]
+cov = ["llvm-cov", "--workspace", "--ignore-filename-regex", "main\\.rs|lib\\.rs", "--fail-under-lines", "60", "--codecov", "--output-path", "codecov.json"]
 
 # Version of the ghcr.io/mairie360/database and liquibase-migrations images the tests start
 # (mairie360_api_lib::test_setup). Pinned to a dev-<sha> image that ships fn_acknowledge_read
