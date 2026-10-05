@@ -78,11 +78,18 @@ published `ghcr.io/mairie360/message-api:dev-<sha>` image; when it is empty the 
 `development.Dockerfile` first. That image is distroless (no shell, no curl), so readiness is a `message-ready` sidecar
 polling `/health`, and dependent services wait for it with `service_completed_successfully`.
 
-The ZAP scan is authenticated: `security-scan` injects a static admin JWT (`sub=1`, signed with
-`JWT_SECRET=b"secret"`, see the comment in `docker-compose-security.yml`) on every request, waits for the `seeder`
+Since API_lib 2.0.0 refuses a missing, short (< 32 bytes) or well-known `JWT_SECRET` at startup, every `*_test.sh`
+sources `test_secrets.sh` (MAIR-428): a random `JWT_SECRET` per run (unless one is exported) and `ADMIN_JWT`, an HS256
+admin token (`sub=1`, 2 h) forged from it with openssl. The compose files require both (`${VAR:?}`); newman gets the
+secret as `jwt_secret`, k6 the token as `JWT`. No secret or token valid anywhere is committed. The dev stack keeps
+`b"secret"` with `JWT_ALLOW_WEAK_SECRET=true` (dev only).
+
+The ZAP scan is authenticated: `security-scan` injects `ADMIN_JWT` on every request, waits for the `seeder`
 service (`init-test.sql`: plain `User` accounts 2 and 3, user 1 is the Admin created by liquibase) and fails on any
 alert not set to `IGNORE` / `OUTOFSCOPE` in `.zap/rules.tsv` (no `-I`). `-O http://message:3003` is required: the
-spec's `servers` are unreachable from the ZAP container. `rules.tsv` is the one shared by every API, except that the
+spec's `servers` are unreachable from the ZAP container. `rules.tsv` is the one shared by every API, except that the XSS rules (`40012`, `40014`, `40016`, `40017`) are
+`IGNORE` since `<` / `>` are accepted in free text (MAIR-426: the API serves JSON with `nosniff`, escaping is the
+fronts' job), and that the
 `100001` (unexpected content type) scope also covers `/api/v1/stream` (`text/event-stream`): ZAP keeps a single
 `OUTOFSCOPE` regex per rule id, so both paths live in one alternation.
 
@@ -155,7 +162,7 @@ handler to map to its documented `4xx`, anything else is logged at `error` with 
 `.map_err(|_| …)`.
 
 Request bodies with text fields are extracted with `endpoints::validation::ValidatedJson` instead of `web::Json`:
-the view implements `Validate` (length matching the Postgres column, no control character, no `<` / `>`) and an
+the view implements `Validate` (length matching the Postgres column, no control character) and an
 invalid value answers `400` naming the field. Map the lib's `DbError` constraint violations (`ForeignKeyViolation`,
 `UniqueViolation`) to `4xx` instead of `500`.
 
@@ -188,7 +195,9 @@ exposes `pub fn config(cfg: &mut ServiceConfig)` and builds one `web::scope(...)
 three in sync when adding an endpoint: register it in the parent `config()`, add its schemas
 and `__path_*` to the parent `doc.rs`, then regenerate `openapi.json`.
 
-`src/main.rs` mounts Swagger UI + `/health` + `/hello` publicly and everything else under
+`src/main.rs` mounts `/health` (liveness) + `/ready` (readiness) publicly, Swagger UI + `/api-docs/openapi.json`
+only when `SWAGGER_ENABLED=true` (`swagger::docs_config`, MAIR-424: set by the dev, ZAP and k6 stacks, never on a
+deployed instance nor on the integration stack, whose Postman collection checks the `404`), and everything else under
 `web::scope("/api").wrap(JwtMiddleware)`. `JwtMiddleware` (from the lib) additionally
 whitelists `/`, `/swagger-ui*`, `/api-docs*`, and any path containing `/auth`. On success it
 inserts an `AuthenticatedUser { id }` into request extensions; handlers get it via the
@@ -214,7 +223,10 @@ implementing `mairie360_api_lib::database::db_interface::ApiRequestDto`:
 -> &[QueryParam]`, and optionally `cache_key` / `cache_ttl` (none do yet). The struct
 `#[derive(serde::Serialize, serde::Deserialize)]` (required by `ApiRequestDto`). Getters
 read back out of the `params` vec. IDs are `u64` in the app but `i32`/`i64` in the DB —
-cast when building each `QueryParam`.
+convert with `database::ids` (`id_to_sql` / `id_from_sql` for `INTEGER`, `bigint_to_sql` / `bigint_from_sql` for
+`messages.id`), never with `as`: an `as i32` wraps `chat + 2^32` around to `chat` (MAIR-422). The saturating
+conversions turn an out-of-range id into one no row has, so it ends in the usual `404`. `src/lib.rs` enables the
+clippy cast lints, so `cargo check_code` rejects a new `as` cast.
 
 Endpoints (and `sse::event_manager`) call `state.get_smart_db()` then:
 
@@ -254,10 +266,31 @@ the container tests.
   `exp` when it is readable. Any failure notifies `close`, which ends the response (`take_until`); the connection is
   removed once its receiver is gone.
 
+### Lists and rate limiting (MAIR-425)
+
+`GET /api/v1/` and `GET /api/v1/{chat_id}/users/` take `endpoints::pagination::PageQuery` (`limit` 1..=100, default 50,
+`offset`) and answer `has_more`: the query views' `page()` fetch `limit + 1` rows and `split_page` trims the extra one.
+Their `new()` stays unbounded (`LIMIT NULL`) for the SSE fan-out and the query tests. Messages use their own keyset.
+
+`/api` is rate limited per authenticated user (`endpoints::rate_limit`, `actix-governor`): the BFFs share a few IPs,
+so the key is the `AuthenticatedUser` that `JwtMiddleware` stored, hence `rate_limiter()` is wrapped *before*
+`JwtMiddleware` (inner). `RATE_LIMIT_PER_SECOND` (default 10, `0` disables) and `RATE_LIMIT_BURST` (default 50);
+the ZAP and k6 stacks disable it. `swagger::RateLimitAddon` adds the `429` to every operation with
+`security(("jwt" = []))`, so handlers do not declare it.
+
+### Probes and startup (MAIR-423)
+
+`GET /health` is the liveness probe (always `OK`, touches nothing). `GET /ready` (`endpoints/ready.rs`) is the
+readiness probe: Postgres `SELECT 1` and Redis `EXISTS message-api:readiness` (the platform ACL role has no `PING`),
+2 s each, `200 {"postgres":"up","redis":"up"}` or `503` naming the dependency down. The test stacks' `message-ready`
+sidecars and the dev healthcheck wait on `/ready`; the chart probes are in Deploiment. API_lib starts without a
+database, so `main` calls `ready::wait_for_postgres` and exits when Postgres does not answer within
+`DB_STARTUP_TIMEOUT` seconds (default 60). Neither probe is registered under `/api`.
+
 ### Config (env vars, all "critical" → process panics if unset)
 
 `REDIS_URL`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT`, `DB_NAME`, `HOST`, `PORT`,
-`JWT_SECRET`, `JWT_TIMEOUT`. The Postgres URL is assembled by `database::pg_url::build_pg_url`,
+`JWT_SECRET`, `JWT_TIMEOUT`. Optional: `SWAGGER_ENABLED`, `DB_STARTUP_TIMEOUT`, `RATE_LIMIT_PER_SECOND`, `RATE_LIMIT_BURST`, `LOG_FORMAT`, `RUST_LOG`. The Postgres URL is assembled by `database::pg_url::build_pg_url`,
 which percent-encodes user, password and database name, so `DB_PASSWORD` may contain any
 character. `docker-compose.yml` supplies them for the dev stack (app on
 `:3003`, Postgres via `ghcr.io/mairie360/database`, Liquibase migrations, a `seeder` running
@@ -269,6 +302,12 @@ character. `docker-compose.yml` supplies them for the dev stack (app on
 fmt/clippy/tests, the three `*_test.sh` stacks run against the published `dev-<sha>` image through `IMAGE_REF`, builds & publishes the image as `message-api`).
 Releases use **semantic-release with Angular commit conventions** (`.releaserc.json` /
 `release.config.js`): `feat:` → minor, `fix:`/`chore:`/`perf:` → patch, breaking → major.
+
+Kept in sync with `API_template` (MAIR-427): `cicd.yml` passes only the secrets the reusable workflow declares
+(`CODECOV_TOKEN`, `N8N_WEBHOOK_SECRET`, no `secrets: inherit`) and Renovate bumps the `uses:` tag and `cicd_version`
+in one grouped PR. Both Dockerfiles pin their base images by digest on the template's Rust version; the production
+one builds the dependencies in a cached layer, then the crate, both with `--locked`. The dev image runs as `dev`
+(uid 1000). Every advisory ignored in `.cargo/audit.toml` carries why it does not apply and when to drop it.
 
 ## Pull request reviewers
 

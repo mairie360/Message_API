@@ -9,6 +9,7 @@ use crate::endpoints::v1::id::access::{
 };
 
 use crate::database::chats::add_message_to_chat::view::PostMessageInChatQueryView;
+use crate::database::ids::bigint_from_sql;
 use crate::endpoints::error::{classify, DbFailure};
 use crate::endpoints::v1::id::messages::post::view::{PostMessageResultView, PostMessageView};
 use crate::endpoints::v1::id::ChatPathParams;
@@ -73,7 +74,7 @@ async fn trigger_post_message(
                 _ => PosteMessageError::DatabaseError,
             })?;
 
-    Ok(PostMessageResultView::new(result as u64))
+    Ok(PostMessageResultView::new(bigint_from_sql(result)))
 }
 
 #[utoipa::path(
@@ -99,10 +100,10 @@ async fn trigger_post_message(
         ),
         (
             status = 400,
-            description = "Malformed JSON body, `chat_id` not an integer, `content` breaking its rules (not blank, at most 5000 characters, no `<` / `>`, no control character other than line breaks and tabs), `citation` above 9223372036854775807, or `citation` not a message of this chat (`` `citation` is not a message of this chat.``).",
+            description = "Malformed JSON body, `chat_id` not an integer, `content` breaking its rules (not blank, at most 5000 characters, no control character other than line breaks and tabs), `citation` above 9223372036854775807, or `citation` not a message of this chat (`` `citation` is not a message of this chat.``).",
             body = String,
             content_type = "text/plain",
-            example = json!("Invalid `content`: must not contain `<` or `>`")
+            example = json!("Invalid `content`: must be at most 5000 characters")
         ),
         (
             status = 401,

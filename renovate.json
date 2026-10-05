@@ -3,15 +3,26 @@
     "github>mairie360/renovate-config"
   ],
   "packageRules": [
-      {
-        "matchPackageNames": ["sqlx"],
-        "allowedVersions": "0.8.0"
-      }
-    ],
+    {
+      "matchPackageNames": [
+        "sqlx"
+      ],
+      "allowedVersions": "0.8.0"
+    },
+    {
+      "description": "The reusable workflow tag (`uses: …@vX`) and the `cicd_version` input must move together: one PR for both.",
+      "matchDepNames": [
+        "mairie360/CICD"
+      ],
+      "groupName": "mairie360/CICD"
+    }
+  ],
   "customManagers": [
     {
       "customType": "regex",
-      "fileMatch": ["^\\.github/workflows/cicd\\.yml$"],
+      "managerFilePatterns": [
+        "/^\\.github/workflows/cicd\\.yml$/"
+      ],
       "matchStrings": [
         "cicd_version:\\s*(?<currentValue>v\\d+\\.\\d+\\.\\d+)"
       ],

@@ -118,7 +118,7 @@ fn test_get_chat_members_view_accessors() {
     assert_eq!(view.chat_id(), 42);
     assert!(format!("{view}").contains("chat_id=42"));
     assert!(view.query_sql().contains("conversation_members"));
-    assert_eq!(view.query_params().len(), 1);
+    assert_eq!(view.query_params().len(), 3);
 }
 
 #[test]
@@ -128,18 +128,19 @@ fn test_get_chats_view_accessors() {
     assert_eq!(view.user_id(), 42);
     assert!(format!("{view}").contains("user_id=42"));
     assert!(view.query_sql().contains("FROM conversations"));
-    assert_eq!(view.query_params().len(), 1);
+    assert_eq!(view.query_params().len(), 3);
 }
 
 #[test]
 fn test_patch_message_view_accessors() {
-    let view = PatchMessageQueryView::new(42, "new content");
+    let view = PatchMessageQueryView::new(7, 42, "new content");
 
+    assert_eq!(view.chat_id(), 7);
     assert_eq!(view.message_id(), 42);
     assert_eq!(view.content(), "new content");
     assert!(format!("{view}").contains("message_id=42"));
     assert!(view.query_sql().contains("UPDATE messages"));
-    assert_eq!(view.query_params().len(), 2);
+    assert_eq!(view.query_params().len(), 3);
 }
 
 #[test]

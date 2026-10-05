@@ -4,6 +4,7 @@ use mairie360_api_lib::security::AuthenticatedUser;
 use mairie360_api_lib::state::AppState;
 
 use crate::database::chats::create_chat::view::CreateChatQueryView;
+use crate::database::ids::id_from_sql;
 use crate::endpoints::error::{classify, DbFailure};
 use crate::endpoints::v1::post::view::{CreateChatResultView, CreateChatView};
 use crate::endpoints::validation::ValidatedJson;
@@ -62,7 +63,7 @@ async fn trigger_create_chat(
             _ => CreateChatError::DatabaseError,
         })?;
 
-    Ok(CreateChatResultView::new(chat_id as u64))
+    Ok(CreateChatResultView::new(id_from_sql(chat_id)))
 }
 
 #[utoipa::path(
@@ -84,7 +85,7 @@ async fn trigger_create_chat(
         ),
         (
             status = 400,
-            description = "Malformed JSON body, missing field, `name` not empty (direct conversation) nor 1 to 150 characters without control characters nor `<` / `>`, `members` longer than 50, with a duplicate or an id outside 1..=2147483647 (`Invalid `members`: …`), or `members` containing an unknown user (`` `members` contains an unknown user.``). No chat is created.",
+            description = "Malformed JSON body, missing field, `name` not empty (direct conversation) nor 1 to 150 characters without control characters, `members` longer than 50, with a duplicate or an id outside 1..=2147483647 (`Invalid `members`: …`), or `members` containing an unknown user (`` `members` contains an unknown user.``). No chat is created.",
             body = String,
             content_type = "text/plain",
             example = json!("`members` contains an unknown user.")

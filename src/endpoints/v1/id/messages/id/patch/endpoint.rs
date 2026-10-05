@@ -54,10 +54,11 @@ impl ResponseError for PatchMessageError {
 
 async fn trigger_patch_message(
     tx: &mut SmartTransaction,
+    chat_id: u64,
     message_id: u64,
     view: PatchMessageView,
 ) -> Result<(), PatchMessageError> {
-    let view = PatchMessageQueryView::new(message_id, view.content());
+    let view = PatchMessageQueryView::new(chat_id, message_id, view.content());
     tx.fetch_scalar::<i64, _>(&view)
         .await
         .map_err(|e| match classify("patch message", e) {
@@ -87,7 +88,7 @@ async fn trigger_patch_message(
         ),
         (
             status = 400,
-            description = "Malformed JSON body, URL segment not an integer, `content` breaking its rules (`content` not blank, at most 5000 characters, no `<` / `>`, no control character other than line breaks and tabs), or unknown message (`Unknown event.`).",
+            description = "Malformed JSON body, URL segment not an integer, `content` breaking its rules (`content` not blank, at most 5000 characters, no control character other than line breaks and tabs), or unknown message (`Unknown event.`).",
             body = String,
             content_type = "text/plain",
             example = json!("Unknown event.")
@@ -147,7 +148,7 @@ pub async fn patch_message(
     // Nobody rewrites the message of someone else, administrators included.
     require_message_author_in(&mut tx, params.chat_id(), message_id, auth_user.id, false).await?;
     let view = view.into_inner();
-    trigger_patch_message(&mut tx, message_id, view).await?;
+    trigger_patch_message(&mut tx, params.chat_id(), message_id, view).await?;
     commit(tx).await?;
     Ok(HttpResponse::Ok().finish())
 }

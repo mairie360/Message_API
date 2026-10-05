@@ -1,5 +1,7 @@
 name: API CI/CD
 
+# Pull requests run lint, build and tests; a push to `main` also runs the releases and the
+# integration, ZAP and k6 stacks (the reusable workflow gates them on `refs/heads/main`).
 on:
   workflow_dispatch:
   pull_request:
@@ -14,10 +16,13 @@ jobs:
   APIs-cicd:
     uses: mairie360/CICD/.github/workflows/APIs_cicd.yml@v4.0.3
     permissions:
-          contents: write
-          packages: write
-          id-token: write
+      contents: write
+      packages: write
+      id-token: write
     with:
       package_name: message-api
       cicd_version: v4.0.3
-    secrets: inherit
+    # Only the secrets the reusable workflow declares, instead of `secrets: inherit`.
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+      N8N_WEBHOOK_SECRET: ${{ secrets.N8N_WEBHOOK_SECRET }}

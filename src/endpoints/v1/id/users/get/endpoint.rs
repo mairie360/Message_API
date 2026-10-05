@@ -6,9 +6,12 @@ use mairie360_api_lib::state::AppState;
 use crate::endpoints::v1::id::access::{require_chat_access, AccessDenied};
 
 use crate::database::chats::get_chat_users::view::GetChatMembersQueryView;
+use crate::database::ids::id_from_sql;
 use crate::endpoints::error::unexpected;
+use crate::endpoints::pagination::{split_page, PageQuery};
 use crate::endpoints::v1::id::users::get::view::{GetUsersView, User};
 use crate::endpoints::v1::id::ChatPathParams;
+use crate::endpoints::validation::ValidatedQuery;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum GetChatUsersError {
@@ -48,18 +51,21 @@ impl ResponseError for GetChatUsersError {
 async fn trigger_get_chat_users(
     state: web::Data<AppState>,
     chat_id: u64,
+    page: PageQuery,
 ) -> Result<GetUsersView, GetChatUsersError> {
-    let view = GetChatMembersQueryView::new(chat_id);
+    let view = GetChatMembersQueryView::page(chat_id, page.limit(), page.offset());
     let result: Vec<i32> = state.get_smart_db().fetch_all(&view).await.map_err(|e| {
         unexpected("get chat members", e);
         GetChatUsersError::DatabaseError
     })?;
 
+    let (result, has_more) = split_page(result, page.limit());
     Ok(GetUsersView::new(
         result
             .into_iter()
-            .map(|user_id| User::new(user_id as u64))
+            .map(|user_id| User::new(id_from_sql(user_id)))
             .collect(),
+        has_more,
     ))
 }
 
@@ -67,28 +73,33 @@ async fn trigger_get_chat_users(
     get,
     params(
         ChatPathParams,
+        PageQuery,
     ),
     path = "",
     summary = "List the members of a chat",
-    description = "Returns the Core API ids of the members. Only ids are returned: pass them to \
-                   `GET /api/v1/user/?ids=1,2,3` of Core API to get their names.\n\nOnly the members of the chat may call this route; administrators bypass the check. A caller who is not a member gets the same `404` as for an unknown chat.",
+    description = "Returns one page of the Core API ids of the members, by increasing id. Only ids are returned: \
+                   pass them to `GET /api/v1/user/?ids=1,2,3` of Core API to get their names.\n\n\
+                   **Paginated** (`limit` 1 to 100, default 50, and `offset`): `has_more` tells whether another \
+                   page follows; ask for it with `offset` increased by `limit`.\n\n\
+                   Only the members of the chat may call this route; administrators bypass the check. A caller who \
+                   is not a member gets the same `404` as for an unknown chat.",
     responses(
         (
             status = 200,
-            description = "Participants de la conversation.",
+            description = "One page of the members of the chat.",
             body = GetUsersView,
-            example = json!({ "users": [{ "id": 42 }, { "id": 51 }] })
+            example = json!({ "users": [{ "id": 42 }, { "id": 51 }], "has_more": false })
         ),
         (
             status = 400,
-            description = "Un segment de l'URL n'est pas un entier, ou le corps JSON est malformé.",
+            description = "`chat_id` is not an integer, `limit` not between 1 and 100, or `offset` not between 0 and 2147483647.",
             body = String,
             content_type = "text/plain",
             example = json!("Path deserialize error: can not parse `abc` to a u64")
         ),
         (
             status = 401,
-            description = "En-tête `Authorization` absent, JWT invalide ou expiré, ou session révoquée.",
+            description = "Missing `Authorization` header, invalid or expired JWT, or revoked session.",
             body = String,
             content_type = "text/plain",
             example = json!("Jeton expiré")
@@ -102,7 +113,7 @@ async fn trigger_get_chat_users(
         ),
         (
             status = 500,
-            description = "Erreur de base de données.",
+            description = "Database error (logged with its cause).",
             body = String,
             content_type = "text/plain",
             example = json!("An error occurred while accessing the database.")
@@ -118,10 +129,11 @@ pub async fn get_chat_users(
     state: web::Data<AppState>,
     auth_user: AuthenticatedUser,
     params: web::Path<ChatPathParams>,
+    page: ValidatedQuery<PageQuery>,
 ) -> Result<impl Responder, GetChatUsersError> {
     let chat_id = params.chat_id;
     require_chat_access(&state, chat_id, auth_user.id).await?;
-    let result = trigger_get_chat_users(state, chat_id).await?;
+    let result = trigger_get_chat_users(state, chat_id, page.into_inner()).await?;
     Ok(HttpResponse::Ok().json(result))
 }
 

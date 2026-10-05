@@ -20,6 +20,7 @@ use mairie360_api_lib::state::AppState;
 
 use crate::database::chats::access::view::{ChatAccess, ChatAccessQueryView};
 use crate::database::chats::message_owner::view::MessageOwnerQueryView;
+use crate::database::ids::id_from_sql;
 use crate::endpoints::error::{classify, unexpected, DbFailure};
 
 /// Body of the `403` answered to an administrator acting as a member of a chat they are not in.
@@ -154,7 +155,7 @@ pub async fn require_message_author_in(
             DbFailure::NotFound => MessageDenied::NotFound,
             _ => MessageDenied::DatabaseError,
         })?;
-    if may_moderate || owner_id as u64 == user_id {
+    if may_moderate || id_from_sql(owner_id) == user_id {
         Ok(())
     } else {
         Err(MessageDenied::Forbidden)

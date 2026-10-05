@@ -141,8 +141,13 @@ services:
     environment:
       <<: *common-env
       PUBLIC_URL: http://message.development.mairie360.fr
+      # Dev-only placeholder shared with the other dev stacks. API_lib refuses it at startup unless
+      # JWT_ALLOW_WEAK_SECRET is set: never set that flag on a deployed instance (MAIR-428).
       JWT_SECRET: b"secret"
+      JWT_ALLOW_WEAK_SECRET: "true"
       JWT_TIMEOUT: 3600
+      # Swagger UI on the dev stack; never set on a deployed instance (MAIR-424).
+      SWAGGER_ENABLED: "true"
       # Human-readable logs on the dev stack; JSON (the default) everywhere else.
       LOG_FORMAT: text
     depends_on:
@@ -151,7 +156,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://message:3003/health"] # change api name and port
+      test: ["CMD", "curl", "-f", "http://message:3003/ready"] # change api name and port
       interval: 10s
       timeout: 5s
       retries: 5

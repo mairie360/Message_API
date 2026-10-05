@@ -5,4 +5,7 @@
 #[macro_use]
 mod harness;
 mod access;
+mod docs;
 mod flows;
+mod lists;
+mod ready;
