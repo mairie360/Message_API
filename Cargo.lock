@@ -2299,9 +2299,9 @@ dependencies = [
 
 [[package]]
 name = "mairie360_api_lib"
-version = "2.0.0"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a8bd1a9f9f5090724879afec8dab6973a348a31fbcd9497ec1e57f956ba1111d"
+checksum = "6312707b3bfade2391a8e6273483b91bdc107d627ef12b2a86e7c86e54f68ff3"
 dependencies = [
  "actix-web",
  "anyhow",
@@ -2310,8 +2310,10 @@ dependencies = [
  "chrono",
  "deadpool-redis",
  "futures-util",
+ "governor",
  "jsonwebtoken",
  "libc",
+ "percent-encoding",
  "redis",
  "regex",
  "reqwest",
@@ -2323,6 +2325,8 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-postgres",
+ "tracing",
+ "tracing-subscriber",
  "uuid",
 ]
 
@@ -3144,9 +3148,9 @@ dependencies = [
 
 [[package]]
 name = "redis"
-version = "1.6.0"
+version = "1.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e37a4ca5c6ca42aa3e6df2fd32b987a65d32a4c2159a6f3fe0fd1df306a2658f"
+checksum = "ed5b98ae99461e02895c3a96a25dbe4d852a3d5e5b815d31d5d9e4b5344d99e9"
 dependencies = [
  "arcstr",
  "async-lock",
@@ -4254,9 +4258,9 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.53.1"
+version = "1.53.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "202caea871b69668250d242070849eb495be178ed697a3e98aebce5bc81a0bed"
+checksum = "e95f91fcc7a621e8b030f6aa23c71fe9838ae2fb4d8118b75602a328f5144044"
 dependencies = [
  "bytes",
  "libc",
