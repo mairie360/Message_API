@@ -16,6 +16,8 @@ pub struct ChatAccess {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ChatAccessQueryView {
     params: Vec<QueryParam>,
+    /// Lock the chat and the caller's membership until the end of the transaction.
+    lock: bool,
 }
 
 impl ChatAccessQueryView {
@@ -25,6 +27,18 @@ impl ChatAccessQueryView {
                 QueryParam::I32(chat_id as i32),
                 QueryParam::I32(user_id as i32),
             ],
+            lock: false,
+        }
+    }
+
+    /// Same answer as [`Self::new`], for a write run in the same transaction: the chat row and the
+    /// caller's membership row are locked (`FOR KEY SHARE`) until it ends, so the chat cannot be
+    /// deleted nor the caller removed between the check and the write. Non-key updates (exclusion
+    /// flag, title) are not blocked.
+    pub fn locking(chat_id: u64, user_id: u64) -> Self {
+        Self {
+            lock: true,
+            ..Self::new(chat_id, user_id)
         }
     }
 
@@ -50,6 +64,22 @@ impl Display for ChatAccessQueryView {
 
 impl ApiRequestDto for ChatAccessQueryView {
     fn query_sql(&self) -> &'static str {
+        if self.lock {
+            // Locking clauses are not allowed on the nullable side of an outer join: each row is
+            // locked in its own sub-select, which yields no row when it does not exist.
+            return "SELECT jsonb_build_object( \
+                'chat_exists', c.id IS NOT NULL, \
+                'is_member', m.user_id IS NOT NULL, \
+                'is_creator', COALESCE(c.created_by = $2, FALSE), \
+                'is_admin', is_admin($2)) \
+             FROM (SELECT 1) AS one \
+             LEFT JOIN LATERAL ( \
+                SELECT id, created_by FROM conversations WHERE id = $1 FOR KEY SHARE) c ON TRUE \
+             LEFT JOIN LATERAL ( \
+                SELECT user_id FROM conversation_members \
+                WHERE conversation_id = $1 AND user_id = $2 AND is_excluded = FALSE \
+                FOR KEY SHARE) m ON TRUE";
+        }
         "SELECT jsonb_build_object( \
             'chat_exists', EXISTS(SELECT 1 FROM conversations WHERE id = $1), \
             'is_member', EXISTS( \

@@ -3,9 +3,10 @@ use actix_web::{delete, web, HttpResponse, Responder, ResponseError};
 use mairie360_api_lib::database::error::DbError;
 use mairie360_api_lib::error::ApiLibError;
 use mairie360_api_lib::security::AuthenticatedUser;
+use mairie360_api_lib::smart_db::SmartTransaction;
 use mairie360_api_lib::state::AppState;
 
-use crate::endpoints::v1::id::access::{require_chat_access, AccessDenied};
+use crate::endpoints::v1::id::access::{begin, commit, require_chat_access_in, AccessDenied};
 
 use crate::database::chats::delete_chat::view::DeleteChatQueryView;
 use crate::endpoints::v1::id::ChatPathParams;
@@ -54,15 +55,13 @@ impl ResponseError for DeleteChatError {
 }
 
 async fn trigger_delete_chat(
-    state: web::Data<AppState>,
+    tx: &mut SmartTransaction,
     chat_id: u64,
     performed_by: u64,
 ) -> Result<(), DeleteChatError> {
     // Logged in messaging_moderation_log by the same statement.
     let view = DeleteChatQueryView::new(chat_id, performed_by);
-    state
-        .get_smart_db()
-        .fetch_scalar::<i32, _>(&view)
+    tx.fetch_scalar::<i32, _>(&view)
         .await
         .map_err(|e| match e {
             ApiLibError::Database(DbError::NotFound) => DeleteChatError::UnknownEvent,
@@ -140,13 +139,15 @@ pub async fn delete_chat(
     params: web::Path<ChatPathParams>,
 ) -> Result<impl Responder, DeleteChatError> {
     let chat_id = params.chat_id;
-    if !require_chat_access(&state, chat_id, auth_user.id)
+    let mut tx = begin(&state).await?;
+    if !require_chat_access_in(&mut tx, chat_id, auth_user.id)
         .await?
         .is_admin
     {
         return Err(DeleteChatError::Forbidden);
     }
-    trigger_delete_chat(state, chat_id, auth_user.id).await?;
+    trigger_delete_chat(&mut tx, chat_id, auth_user.id).await?;
+    commit(tx).await?;
     Ok(HttpResponse::NoContent().finish())
 }
 
