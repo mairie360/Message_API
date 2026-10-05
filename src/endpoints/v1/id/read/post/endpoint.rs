@@ -1,12 +1,11 @@
 use actix_web::http::StatusCode;
 use actix_web::{post, web, HttpResponse, Responder, ResponseError};
-use mairie360_api_lib::database::error::DbError;
-use mairie360_api_lib::error::ApiLibError;
 use mairie360_api_lib::security::AuthenticatedUser;
 use mairie360_api_lib::smart_db::SmartTransaction;
 use mairie360_api_lib::state::AppState;
 
 use crate::database::chats::acknowledge_read::view::AcknowledgeReadQueryView;
+use crate::endpoints::error::{classify, DbFailure};
 use crate::endpoints::v1::id::access::{begin, commit, require_chat_access_in, AccessDenied};
 use crate::endpoints::v1::id::read::post::view::{AcknowledgeReadResultView, AcknowledgeReadView};
 use crate::endpoints::v1::id::ChatPathParams;
@@ -68,12 +67,9 @@ async fn trigger_acknowledge_read(
             view.read_until_message_id(),
         ))
         .await
-        .map_err(|e| match e {
-            ApiLibError::Database(DbError::NotFound) => AcknowledgeReadError::UnknownMessage,
-            e => {
-                eprintln!("Acknowledge read error: {e}");
-                AcknowledgeReadError::DatabaseError
-            }
+        .map_err(|e| match classify("acknowledge read", e) {
+            DbFailure::NotFound => AcknowledgeReadError::UnknownMessage,
+            _ => AcknowledgeReadError::DatabaseError,
         })?;
 
     Ok(AcknowledgeReadResultView::new(unread_count))

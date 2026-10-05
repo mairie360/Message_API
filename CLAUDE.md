@@ -146,6 +146,14 @@ sound. **This API needs a Database image that ships that release and `releases/v
 needed. To try an unmerged Database branch, build `ghcr.io/mairie360/database:<tag>` and `…/liquibase-migrations:<tag>`
 from `Devops/Database` and run `TEST_DB_VERSION=<tag> cargo test`.
 
+Logging (MAIR-421) goes through `tracing` (`src/logging.rs`, initialized first thing in `main`): JSON lines by
+default, `LOG_FORMAT=text` for readable lines (dev stack), level from `RUST_LOG` (default `info`). `TracingLogger`
+(`tracing-actix-web`) opens one span per request with its `request_id`, so a handler's log carries it. Database errors
+go through `endpoints::error::classify(operation, e)`: `NotFound` / `ForeignKey` / `Unique` come back for the
+handler to map to its documented `4xx`, anything else is logged at `error` with the operation and becomes `500`
+(`unexpected` logs unconditionally, for statements where no client error is possible). No `eprintln!`, no
+`.map_err(|_| …)`.
+
 Request bodies with text fields are extracted with `endpoints::validation::ValidatedJson` instead of `web::Json`:
 the view implements `Validate` (length matching the Postgres column, no control character, no `<` / `>`) and an
 invalid value answers `400` naming the field. Map the lib's `DbError` constraint violations (`ForeignKeyViolation`,
