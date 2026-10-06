@@ -1,7 +1,10 @@
 //! Bounded lists and per-user rate limiting (MAIR-425).
 
 use actix_web::http::{Method, StatusCode};
-use message_api::endpoints::rate_limit::{rate_limit_config, rate_limiter};
+use message_api::endpoints::rate_limit::{
+    rate_limit_config, rate_limit_from_env, rate_limiter, DEFAULT_BURST, DEFAULT_PER_SECOND,
+    RATE_LIMIT_BURST_ENV, RATE_LIMIT_PER_SECOND_ENV,
+};
 use serde_json::json;
 use serial_test::serial;
 
@@ -98,6 +101,73 @@ async fn rate_limit_is_per_user() {
     assert!(body.contains("retry"), "{body}");
 
     // Another user (behind the same BFF address) is not affected.
+    let (status, _) = send!(app, request(Method::GET, "/api/v1/", Some(other)));
+    assert_eq!(status, StatusCode::OK);
+}
+
+/// The production budget (MAIR-474): `rate_limit_from_env()` without overrides, mounted like
+/// `main.rs`. A user gets the whole burst, then `429` with a numeric `Retry-After` of at least one
+/// second, while another user is still served.
+#[actix_web::test]
+#[serial]
+async fn the_production_budget_refuses_a_user_past_its_burst() {
+    std::env::remove_var(RATE_LIMIT_PER_SECOND_ENV);
+    std::env::remove_var(RATE_LIMIT_BURST_ENV);
+    let (state, sse) = states().await;
+    let limit = rate_limit_from_env().expect("the limit is on by default");
+    let app = actix_web::test::init_service(
+        actix_web::App::new()
+            .app_data(sse.clone())
+            .app_data(state.clone())
+            .service(
+                actix_web::web::scope("/api")
+                    .wrap(rate_limiter(Some(&limit)))
+                    .wrap(mairie360_api_lib::security::JwtMiddleware)
+                    .configure(message_api::endpoints::config),
+            ),
+    )
+    .await;
+    let (_container, url) = get_shared_db().await;
+    let db = get_smart_db(url).await;
+    let (busy, other) = (plain_user(&db).await, plain_user(&db).await);
+
+    let started = std::time::Instant::now();
+    let mut served: u64 = 0;
+    let refused = loop {
+        let response = actix_web::test::call_service(
+            &app,
+            request(Method::GET, "/api/v1/", Some(busy)).to_request(),
+        )
+        .await;
+        if response.status() != StatusCode::OK {
+            break response;
+        }
+        served += 1;
+        assert!(served < 10_000, "the limiter never refused");
+    };
+    // The bucket refills while the burst is sent.
+    let refilled =
+        u64::try_from(started.elapsed().as_millis()).unwrap() * DEFAULT_PER_SECOND / 1000 + 1;
+    let burst = u64::from(DEFAULT_BURST);
+    assert!(
+        served >= burst && served <= burst + refilled,
+        "{served} requests served before the 429"
+    );
+    assert_eq!(refused.status(), StatusCode::TOO_MANY_REQUESTS);
+    let retry_after: u64 = refused
+        .headers()
+        .get("retry-after")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!(retry_after >= 1, "Retry-After: {retry_after}");
+    assert_eq!(
+        refused.headers().get("x-ratelimit-after"),
+        refused.headers().get("retry-after")
+    );
+
     let (status, _) = send!(app, request(Method::GET, "/api/v1/", Some(other)));
     assert_eq!(status, StatusCode::OK);
 }

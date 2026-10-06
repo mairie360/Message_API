@@ -44,7 +44,11 @@ Integration tests live in `tests/` (there is no meaningful unit-test suite in `s
 `tests/endpoints/` calls the real `/api` scope (`JwtMiddleware` + `endpoints::config`) over the shared test database
 with JWTs signed by `harness::token` (the harness sets its own `JWT_SECRET`): it holds the access refusals of every
 route (`401`, outsider `404`, non-creator / non-author / administrator `403`, ids of another chat). A new route or a
-new refusal gets its test there, since `endpoints/` is part of the coverage gate.
+new refusal gets its test there, since `endpoints/` is part of the coverage gate. `token_refusals.rs` sweeps every
+operation of `ApiDoc` declaring `jwt` (`401` without a token, with another scheme, garbage, another secret, an
+expired token, `alg: none`, a swapped payload or an asymmetric algorithm; `404` for an unknown or archived account),
+and `lists.rs` checks the production quota of `rate_limit_from_env()` (`429` past the burst, `Retry-After` of at
+least 1 s).
 They are plain `#[tokio::test]` + `#[serial]` (`serial_test`) and use `mairie360_api_lib`'s
 `get_shared_db()`, which spins up **real Docker containers via testcontainers** —
 `ghcr.io/mairie360/database:3.0.0` (pinned in `.cargo/config.toml` through `TEST_DB_VERSION`, which overrides the lib default) plus a Liquibase
@@ -97,12 +101,18 @@ Both the ZAP and k6 stacks carry the OpenAPI coverage gate (MAIR-194) from mairi
 `cicd-repo/` (checked out by CI, cloned by the scripts at the pinned `cicd_version` otherwise, override with
 `CICD_VERSION`; gitignored). ZAP runs with `--hook zap_hooks.py` and fails when an operation of the served spec was
 never reached, or when an operation declaring `security(("jwt" = []))` only got 401/403. `load-test.js` is built on
-`coverage.js` and covers every operation (MAIR-195) as the Admin: GET handlers run in the `reads` scenario (20 VUs)
-against a chat created in `setup()`, the other methods in the `writes` scenario (2 VUs), each handler creating and
-deleting its own chat or message so they are order-independent. `GET /api/v1/stream` has its own 1-VU `stream`
+`coverage.js` and covers every operation (MAIR-195), under a high load on a volume seed (MAIR-474): the performance
+stack's `seeder` also runs `init-perf.sql` (2 000 agents `400001`-`402000` in 16 group chats each, 1 000 direct
+chats, 25 messages per group chat and 10 000 in the hot chat `100000`; agent `400001 + r` is a member of chat
+`100000 + r`). GET handlers run in the `reads` scenario (up to 100 VUs) as a random seeded agent (tokens signed in k6
+with the run's `JWT_SECRET`, which the compose file passes): their chat list at a random offset, one of their chats
+(the hot one at a random `before`, a third of the time) and its members. The other methods run in the `writes`
+scenario (10 VUs) as the Admin, each handler creating and deleting its own chat or message so they are
+order-independent; a `chats_rush` scenario sends `GET /api/v1/` at a fixed 100 req/s. `GET /api/v1/stream` has its own 1-VU `stream`
 scenario: the SSE response never ends, so k6 cuts it after 1 s (error 1050), a timeout marked expected with
 `responseCallback: http.expectedStatuses(0, 200)` so it stays out of `http_req_failed`. One `p(95)` threshold per
-`op` tag (200 ms reads, 500 ms writes, 1.5 s stream) and `http_req_failed < 1%`. The spec k6 reads is the one served
+`op` tag (200 ms reads, 500 ms writes, 1.5 s stream), `checks > 99%`, `dropped_iterations == 0` and
+`http_req_failed < 1%`. Keep `init-perf.sql` and the id ranges at the top of `load-test.js` in step. The spec k6 reads is the one served
 by the image under test, saved into the `openapi-spec` volume by `message-ready`. **Adding an endpoint = adding its
 handler in `load-test.js`** (k6 aborts at init otherwise), nothing to do for ZAP. `init-test.sql` also seeds the
 rows of the spec's path examples (chat 5 created by the Admin with message 118, user 42) so ZAP reaches real rows.
@@ -286,7 +296,8 @@ Their `new()` stays unbounded (`LIMIT NULL`) for the SSE fan-out and the query t
 
 `/api` is rate limited per authenticated user (`endpoints::rate_limit`, `actix-governor`): the BFFs share a few IPs,
 so the key is the `AuthenticatedUser` that `JwtMiddleware` stored, hence `rate_limiter()` is wrapped *before*
-`JwtMiddleware` (inner). `RATE_LIMIT_PER_SECOND` (default 10, `0` disables) and `RATE_LIMIT_BURST` (default 50);
+`JwtMiddleware` (inner). `RATE_LIMIT_PER_SECOND` (default 10, `0` disables) and `RATE_LIMIT_BURST` (default 50); `CallerKey` answers the
+`429` itself so that `Retry-After` / `X-RateLimit-After` say at least 1 s (actix-governor rounds them down to `0`);
 the ZAP and k6 stacks disable it. `swagger::RateLimitAddon` adds the `429` to every operation with
 `security(("jwt" = []))`, so handlers do not declare it.
 
