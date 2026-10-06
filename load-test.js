@@ -124,6 +124,13 @@ const writeHandlers = {
     check(res, { 'create chat 200': (r) => r.status === 200 });
     if (res.status === 200) deleteChat(res.json('id'));
   },
+  // The direct chat of the Admin and MEMBER_ID: the same chat for every call (one per pair), so
+  // both VUs may open it at once; teardown() deletes it.
+  'POST /api/v1/direct/': ({ request }) => {
+    check(request({ body: { contact_id: MEMBER_ID } }), {
+      'open direct chat 200': (r) => r.status === 200,
+    });
+  },
   'DELETE /api/v1/{chat_id}/': ({ request }) => {
     const chatId = createChat('k6 delete chat', [MEMBER_ID]);
     check(request({ path: { chat_id: chatId } }), { 'delete chat 204': (r) => r.status === 204 });
@@ -251,6 +258,7 @@ export function setup() {
 export function teardown(data) {
   deleteChat(data.chatId);
   deleteChat(data.writeChatId);
+  deleteChat(fixture('POST', '/api/v1/direct/', { contact_id: MEMBER_ID }).json('id'));
 }
 
 export function readScenario(data) {

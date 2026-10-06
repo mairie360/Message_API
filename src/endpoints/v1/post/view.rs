@@ -4,14 +4,15 @@ use crate::endpoints::validation::{
 };
 use utoipa::ToSchema;
 
-/// Chat to create, with its first members.
+/// Group chat to create, with its first members.
 #[derive(Debug, serde::Deserialize, ToSchema)]
 pub struct CreateChatView {
     /// Core API ids of the other members: at most 50 distinct ids, each between 1 and 2147483647.
     /// May be empty. The caller is added automatically (listing them is harmless).
     #[schema(example = json!([42, 51]), max_items = 50)]
     members: Vec<u64>,
-    /// Title of the chat: empty for a direct chat, otherwise 1 to 150 characters.
+    /// Title of the chat: 1 to 150 characters, or empty for a chat without a title. A direct chat
+    /// is opened with `POST /api/v1/direct/`, not here.
     #[schema(max_length = 150, example = "Service urbanisme")]
     name: String,
 }
@@ -51,7 +52,7 @@ impl CreateChatResultView {
 impl Validate for CreateChatView {
     fn validate(&self) -> Result<(), ValidationError> {
         check_user_ids("members", &self.members, MAX_MEMBERS_PER_REQUEST, true)?;
-        // An empty title is allowed (direct conversation); a non-empty one is a displayed label.
+        // An empty title is allowed (no title); a non-empty one is a displayed label.
         if self.name.is_empty() {
             return Ok(());
         }

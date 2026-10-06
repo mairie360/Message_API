@@ -117,10 +117,22 @@ rules (MAIR-394):
 - editing a message is for its author only, administrators included (`require_message_author(.., false)`);
 - deleting a message: its author, or an administrator (moderation). `DeleteMessageQueryView` writes a
   `DELETE_MESSAGE` row with the content in `messaging_moderation_log` in the same statement when the message is
-  someone else's; `DELETE /{chat_id}/` (admin-only) logs `DELETE_CONVERSATION` the same way;
-- any member may leave (`DELETE /{chat_id}/users/{own id}/`); adding members or removing someone else needs
-  `ChatRole::can_manage_members` (the creator while still a member, or an administrator), `403` otherwise. A chat is
-  deleted with its last member (`DeleteEmptyChatQueryView` after each member removal);
+  someone else's; `DELETE /{chat_id}/` logs `DELETE_CONVERSATION` the same way, whoever deletes;
+- `DELETE /{chat_id}/` (MAIR-478, `access::chat_access_in` + `ChatDeleteRightQueryView`): a group chat by its
+  creator while still a member, an administrator, or anyone `check_access(user, 'conversations', 'delete', chat)`
+  grants (global `delete_all`, individual or group ACL), member or not; a direct chat by an administrator or
+  `check_access` only. A member who may not gets `403`, anyone else `404`;
+- any member may leave a group chat (`DELETE /{chat_id}/users/{own id}/`); adding members or removing someone else
+  needs `ChatRole::can_manage_members` (the creator while still a member, or an administrator), `403` otherwise. A
+  chat is deleted with its last member (`DeleteEmptyChatQueryView` after each member removal);
+- direct chats (MAIR-478, `conversations.kind = 'direct'` + `direct_user_low` / `direct_user_high`, unique per pair
+  since Database `releases/v1.9.0`) are opened by `POST /api/v1/direct/` (`OpenDirectChatQueryView`, find-or-create
+  in one statement, shows the chat again to the caller, a new chat stays hidden for the contact). Their participants
+  never change: adding members answers `409`, removing the other participant `403` (administrators included).
+  "Leaving" only hides the chat (`HideDirectChatQueryView`, `is_excluded = TRUE`); `POST /{chat_id}/messages/`
+  runs `RevealDirectChatQueryView` before the insert so both participants see it again (and the unread trigger
+  counts the message). Hidden by both, it is deleted by `DeleteEmptyChatQueryView`. `POST /api/v1/` always creates a
+  `group` chat. `GET /api/v1/` exposes `kind` and `contact_id` (the other participant, also when hidden);
 - reading the chat, its members and `POST /read/` are open to members and administrators.
 
 Write routes (MAIR-420) open a transaction (`access::begin`), check access with `require_chat_access_in` /
@@ -147,8 +159,8 @@ which lives in `Devops/Database` (`releases/v1.5.0` + `repeatable/messages/`): i
 (`conversation_read_cursors`) forward only, recounts the messages after it, and answers "no row" (→ `404 Unknown message.`)
 when the id belongs to another chat. Sends and acknowledgements of one conversation are serialized by a transaction advisory
 lock taken by a `BEFORE INSERT` trigger on `messages`, which also draws the message id after the lock so a single cursor is
-sound. **This API needs a Database image that ships that release and `releases/v1.8.0`** (MAIR-394: `created_by`,
-`reply_to_id`, `messaging_moderation_log`): the compose files and
+sound. **This API needs a Database image that ships that release, `releases/v1.8.0`** (MAIR-394: `created_by`,
+`reply_to_id`, `messaging_moderation_log`) **and `releases/v1.9.0`** (MAIR-478: direct chat pair): the compose files and
 `TEST_DB_VERSION` in `.cargo/config.toml` pin it, and both have to be bumped together when a newer Database image is
 needed. To try an unmerged Database branch, build `ghcr.io/mairie360/database:<tag>` and `…/liquibase-migrations:<tag>`
 from `Devops/Database` and run `TEST_DB_VERSION=<tag> cargo test`.

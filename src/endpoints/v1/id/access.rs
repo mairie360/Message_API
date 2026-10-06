@@ -2,10 +2,15 @@
 //!
 //! - Only the (not excluded) members of a chat may post in it and acknowledge its messages.
 //! - Only the author of a message may edit it, nobody else (administrators included).
-//! - Any member may leave a chat; only its creator (`conversations.created_by`, while still a
-//!   member) or an administrator may add members or remove someone else.
-//! - Administrators may read and moderate any chat: read it, list its members, manage them, delete
-//!   any message (logged in `messaging_moderation_log`) and delete the chat.
+//! - Any member may leave a group chat; only its creator (`conversations.created_by`, while still
+//!   a member) or an administrator may add members or remove someone else.
+//! - A direct chat always keeps its two participants (MAIR-478): nobody is added to it nor removed
+//!   from it. A participant only hides it, and any new message shows it again to both.
+//! - A group chat is deleted by its creator (while still a member), an administrator or anyone
+//!   `check_access` grants `delete` on the conversation, and with its last member. A direct chat
+//!   is deleted by an administrator or `check_access`, and once both participants have hidden it.
+//! - Administrators may read and moderate any chat: read it, list its members, manage the members
+//!   of a group chat, delete any message (logged in `messaging_moderation_log`) and delete the chat.
 //!
 //! A caller who may not see the chat gets the same answer as for an unknown chat, so the routes
 //! never reveal that a chat exists.
@@ -29,6 +34,9 @@ pub const NOT_A_MEMBER_MESSAGE: &str =
 /// Body of the `403` answered to a member who may not manage the other members.
 pub const NOT_A_MANAGER_MESSAGE: &str =
     "Only the creator of the chat or an administrator can manage its other members.";
+/// Body of the `4xx` answered to a change of the participants of a direct chat.
+pub const DIRECT_CHAT_MEMBERS_MESSAGE: &str =
+    "A direct chat always keeps its two participants: create a group chat instead.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccessDenied {
@@ -45,6 +53,8 @@ pub struct NotAMember;
 /// What the caller is in a chat they may see (see [`require_chat_access`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChatRole {
+    /// The chat is a direct chat (two participants, see [`super::super::direct`]).
+    pub is_direct: bool,
     pub is_member: bool,
     pub is_creator: bool,
     pub is_admin: bool,
@@ -60,10 +70,10 @@ impl ChatRole {
         }
     }
 
-    /// Adding members or removing someone else: the creator while still a member, or an
-    /// administrator.
+    /// Adding members or removing someone else from a group chat: the creator while still a
+    /// member, or an administrator. Never for a direct chat (see [`DIRECT_CHAT_MEMBERS_MESSAGE`]).
     pub fn can_manage_members(self) -> bool {
-        self.is_admin || (self.is_member && self.is_creator)
+        !self.is_direct && (self.is_admin || (self.is_member && self.is_creator))
     }
 }
 
@@ -92,14 +102,23 @@ pub async fn require_chat_access_in(
     chat_id: u64,
     user_id: u64,
 ) -> Result<ChatRole, AccessDenied> {
-    let access: ChatAccess = tx
-        .fetch_one(&ChatAccessQueryView::locking(chat_id, user_id))
+    role_of(chat_access_in(tx, chat_id, user_id).await?)
+}
+
+/// What `user_id` is in chat `chat_id`, read inside the transaction `tx` of a write with the same
+/// locks as [`require_chat_access_in`], for a route whose rule is not only membership (deleting a
+/// chat). The caller must still answer an unknown chat and a chat the user may not see alike.
+pub async fn chat_access_in(
+    tx: &mut SmartTransaction,
+    chat_id: u64,
+    user_id: u64,
+) -> Result<ChatAccess, AccessDenied> {
+    tx.fetch_one(&ChatAccessQueryView::locking(chat_id, user_id))
         .await
         .map_err(|e| {
             unexpected("chat access", e);
             AccessDenied::DatabaseError
-        })?;
-    role_of(access)
+        })
 }
 
 /// Opens the transaction of a write route.
@@ -123,6 +142,7 @@ fn role_of(access: ChatAccess) -> Result<ChatRole, AccessDenied> {
         return Err(AccessDenied::NotFound);
     }
     Ok(ChatRole {
+        is_direct: access.is_direct,
         is_member: access.is_member,
         is_creator: access.is_creator,
         is_admin: access.is_admin,

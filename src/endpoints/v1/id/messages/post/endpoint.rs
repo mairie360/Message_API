@@ -9,8 +9,9 @@ use crate::endpoints::v1::id::access::{
 };
 
 use crate::database::chats::add_message_to_chat::view::PostMessageInChatQueryView;
+use crate::database::chats::reveal_direct_chat::view::RevealDirectChatQueryView;
 use crate::database::ids::bigint_from_sql;
-use crate::endpoints::error::{classify, DbFailure};
+use crate::endpoints::error::{classify, unexpected, DbFailure};
 use crate::endpoints::v1::id::messages::post::view::{PostMessageResultView, PostMessageView};
 use crate::endpoints::v1::id::ChatPathParams;
 use crate::endpoints::validation::ValidatedJson;
@@ -59,7 +60,18 @@ async fn trigger_post_message(
     user_id: u64,
     view: PostMessageView,
     chat_id: u64,
+    is_direct: bool,
 ) -> Result<PostMessageResultView, PosteMessageError> {
+    if is_direct {
+        // A participant who hid the direct chat sees it again, before the insert so that the
+        // unread-counter trigger counts this message for them.
+        tx.execute(&RevealDirectChatQueryView::new(chat_id))
+            .await
+            .map_err(|e| {
+                unexpected("reveal direct chat", e);
+                PosteMessageError::DatabaseError
+            })?;
+    }
     let view =
         PostMessageInChatQueryView::replying_to(chat_id, user_id, view.content(), view.citation());
     let result =
@@ -88,6 +100,8 @@ async fn trigger_post_message(
                    same chat (`400` otherwise) and is read back as `citation` by `GET /api/v1/{chat_id}/` \
                    (`null` once the quoted message is deleted).\n\n \
                    The response only holds the id given to the message.\n\n \
+                   In a **direct** chat, a participant who hid it sees it again (in `GET /api/v1/`, with this \
+                   message unread, and on their SSE stream): a direct chat is only hidden until its next message.\n\n \
                    Only the members of the chat may post. An administrator who is not a member gets `403` \
                    (administrators read and moderate, they do not take part); anyone else gets the same `404` \
                    as for an unknown chat.",
@@ -155,10 +169,9 @@ pub async fn post_message(
     let view = view.into_inner();
     let chat_id = params.chat_id;
     let mut tx = begin(&state).await?;
-    require_chat_access_in(&mut tx, chat_id, auth_user.id)
-        .await?
-        .require_member()?;
-    let result = trigger_post_message(&mut tx, auth_user.id, view, chat_id).await?;
+    let role = require_chat_access_in(&mut tx, chat_id, auth_user.id).await?;
+    role.require_member()?;
+    let result = trigger_post_message(&mut tx, auth_user.id, view, chat_id, role.is_direct).await?;
     commit(tx).await?;
     // Only once committed: the members reload the chat as soon as they get the signal.
     sse_state

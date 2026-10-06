@@ -5,10 +5,12 @@ use mairie360_api_lib::smart_db::SmartTransaction;
 use mairie360_api_lib::state::AppState;
 
 use crate::endpoints::v1::id::access::{
-    begin, commit, require_chat_access_in, AccessDenied, NOT_A_MANAGER_MESSAGE,
+    begin, commit, require_chat_access_in, AccessDenied, DIRECT_CHAT_MEMBERS_MESSAGE,
+    NOT_A_MANAGER_MESSAGE,
 };
 
 use crate::database::chats::delete_empty_chat::view::DeleteEmptyChatQueryView;
+use crate::database::chats::hide_direct_chat::view::HideDirectChatQueryView;
 use crate::database::chats::remove_user_from_chat::view::RemoveMemberFromChatQueryView;
 use crate::endpoints::error::{classify, unexpected, DbFailure};
 use crate::endpoints::v1::id::users::id::UsersPathParams;
@@ -19,6 +21,7 @@ pub enum RemoveUserFromChatError {
     BadRequest,
     NotFound,
     Forbidden,
+    DirectChat,
 }
 
 impl std::fmt::Display for RemoveUserFromChatError {
@@ -26,6 +29,7 @@ impl std::fmt::Display for RemoveUserFromChatError {
         match self {
             RemoveUserFromChatError::NotFound => write!(f, "Unknown chat."),
             RemoveUserFromChatError::Forbidden => f.write_str(NOT_A_MANAGER_MESSAGE),
+            RemoveUserFromChatError::DirectChat => f.write_str(DIRECT_CHAT_MEMBERS_MESSAGE),
             RemoveUserFromChatError::DatabaseError => {
                 write!(f, "An error occurred while accessing the database.")
             }
@@ -42,7 +46,9 @@ impl ResponseError for RemoveUserFromChatError {
             RemoveUserFromChatError::NotFound => StatusCode::NOT_FOUND,
             RemoveUserFromChatError::DatabaseError => StatusCode::INTERNAL_SERVER_ERROR,
             RemoveUserFromChatError::BadRequest => StatusCode::BAD_REQUEST,
-            RemoveUserFromChatError::Forbidden => StatusCode::FORBIDDEN,
+            RemoveUserFromChatError::Forbidden | RemoveUserFromChatError::DirectChat => {
+                StatusCode::FORBIDDEN
+            }
         }
     }
 
@@ -55,17 +61,25 @@ async fn trigger_remove_user_from_chat(
     tx: &mut SmartTransaction,
     chat_id: u64,
     user_id: u64,
+    is_direct: bool,
 ) -> Result<(), RemoveUserFromChatError> {
-    let view = RemoveMemberFromChatQueryView::new(chat_id, user_id);
-    tx.fetch_scalar::<i32, _>(&view).await.map_err(|e| {
-        match classify("remove chat member", e) {
-            DbFailure::NotFound => RemoveUserFromChatError::BadRequest,
-            _ => RemoveUserFromChatError::DatabaseError,
-        }
+    // A participant of a direct chat only hides it: they stay its participant, and the next
+    // message shows it to them again (MAIR-478).
+    let removed = if is_direct {
+        tx.fetch_scalar::<i32, _>(&HideDirectChatQueryView::new(chat_id, user_id))
+            .await
+    } else {
+        tx.fetch_scalar::<i32, _>(&RemoveMemberFromChatQueryView::new(chat_id, user_id))
+            .await
+    };
+    removed.map_err(|e| match classify("remove chat member", e) {
+        DbFailure::NotFound => RemoveUserFromChatError::BadRequest,
+        _ => RemoveUserFromChatError::DatabaseError,
     })?;
 
-    // A chat lives as long as it has members: the last one leaving deletes it, in the same
-    // transaction, so a failure never leaves a chat without members.
+    // A chat lives as long as someone sees it: the last member leaving (or the second participant
+    // hiding a direct chat) deletes it, in the same transaction, so a failure never leaves a chat
+    // nobody sees.
     tx.execute(&DeleteEmptyChatQueryView::new(chat_id))
         .await
         .map_err(|e| {
@@ -84,6 +98,10 @@ async fn trigger_remove_user_from_chat(
                    **someone else** is reserved to the creator of the chat (while still a member) and to \
                    administrators; any other member gets `403`.\n\n \
                    **The chat is deleted, with its messages, when its last member is removed.**\n\n \
+                   **Direct chat:** a participant may only remove themselves, which **hides** the chat: it leaves \
+                   their `GET /api/v1/`, they stay its participant (`contact_id` on the other side) and the next \
+                   message posted in it, by either participant, shows it to them again. Removing the other \
+                   participant answers `403`, administrators included. The chat is deleted once both have hidden it.\n\n \
                    Removing a user who is not a member answers `400`.\n\n \
                    A caller who is neither a member nor an administrator gets the same `404` as for an unknown chat.",
     responses(
@@ -93,7 +111,7 @@ async fn trigger_remove_user_from_chat(
         ),
         (
             status = 400,
-            description = "A URL segment is not an integer, or `user_id` is not a member of the chat.",
+            description = "A URL segment is not an integer, or `user_id` is not a member of the chat (for a direct chat: has already hidden it).",
             body = String,
             content_type = "text/plain",
             example = json!("This user is not a member of the chat.")
@@ -107,7 +125,7 @@ async fn trigger_remove_user_from_chat(
         ),
         (
             status = 403,
-            description = "The caller removes someone else but is neither the creator of the chat (still a member) nor an administrator.",
+            description = "The caller removes someone else from a group chat but is neither its creator (still a member) nor an administrator (`Only the creator of the chat or an administrator can manage its other members.`), or removes the other participant of a direct chat (`A direct chat always keeps its two participants: create a group chat instead.`).",
             body = String,
             content_type = "text/plain",
             example = json!("Only the creator of the chat or an administrator can manage its other members.")
@@ -145,10 +163,15 @@ pub async fn remove_user_from_chat(
     let user_id = params.user_id();
     let mut tx = begin(&state).await?;
     let role = require_chat_access_in(&mut tx, chat_id, auth_user.id).await?;
-    if user_id != auth_user.id && !role.can_manage_members() {
-        return Err(RemoveUserFromChatError::Forbidden);
+    if user_id != auth_user.id {
+        if role.is_direct {
+            return Err(RemoveUserFromChatError::DirectChat);
+        }
+        if !role.can_manage_members() {
+            return Err(RemoveUserFromChatError::Forbidden);
+        }
     }
-    trigger_remove_user_from_chat(&mut tx, chat_id, user_id).await?;
+    trigger_remove_user_from_chat(&mut tx, chat_id, user_id, role.is_direct).await?;
     commit(tx).await?;
     Ok(HttpResponse::NoContent().finish())
 }
