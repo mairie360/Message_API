@@ -111,8 +111,8 @@ scenario (10 VUs) as the Admin, each handler creating and deleting its own chat 
 order-independent; a `chats_rush` scenario sends `GET /api/v1/` at a fixed 100 req/s. `GET /api/v1/stream` has its own 1-VU `stream`
 scenario: the SSE response never ends, so k6 cuts it after 1 s (error 1050), a timeout marked expected with
 `responseCallback: http.expectedStatuses(0, 200)` so it stays out of `http_req_failed`. One `p(95)` threshold per
-`op` tag (200 ms reads, 500 ms writes, 1.5 s stream), `checks > 99%`, `dropped_iterations == 0` and
-`http_req_failed < 1%`. Keep `init-perf.sql` and the id ranges at the top of `load-test.js` in step. The spec k6 reads is the one served
+`op` tag (200 ms reads, 500 ms writes, 1.5 s stream), `checks == 100%` (status and seeded rows), `dropped_iterations == 0` and
+`http_req_failed == 0`. Keep `init-perf.sql` and the id ranges at the top of `load-test.js` in step. The spec k6 reads is the one served
 by the image under test, saved into the `openapi-spec` volume by `message-ready`. **Adding an endpoint = adding its
 handler in `load-test.js`** (k6 aborts at init otherwise), nothing to do for ZAP. `init-test.sql` also seeds the
 rows of the spec's path examples (chat 5 created by the Admin with message 118, user 42) so ZAP reaches real rows.

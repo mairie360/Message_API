@@ -150,6 +150,8 @@ const readHandlers = {
   'GET /api/v1/': ({ request }) =>
     check(request({ query: { offset: randomInt(CHATS_PER_AGENT) }, headers: randomAgent().headers }), {
       'list chats 200': (r) => r.status === 200,
+      // Every seeded agent is in 16 group chats: an empty page means the seed was not loaded.
+      'list chats reads the seed': (r) => r.status === 200 && r.json('chats').length > 0,
     }),
   // A third of the reads page through the hot chat at a random depth.
   'GET /api/v1/{chat_id}/': ({ request, data }) => {
@@ -164,12 +166,16 @@ const readHandlers = {
             const agent = randomAgent();
             return request({ path: { chat_id: agent.chatId }, headers: agent.headers });
           })();
-    check(res, { 'get chat 200': (r) => r.status === 200 });
+    check(res, {
+      'get chat 200': (r) => r.status === 200,
+      'get chat reads the seeded messages': (r) => r.status === 200 && r.json('messages').length > 0,
+    });
   },
   'GET /api/v1/{chat_id}/users/': ({ request }) => {
     const agent = randomAgent();
     check(request({ path: { chat_id: agent.chatId }, headers: agent.headers }), {
       'list chat users 200': (r) => r.status === 200,
+      'list chat users reads the seeded members': (r) => r.status === 200 && r.json('users').length >= 8,
     });
   },
 };
@@ -324,8 +330,9 @@ export const options = {
     ...latencyThresholds(writes, WRITE_BUDGET_MS),
     'http_req_duration{op:chats_rush}': [`p(95)<${CHATS_RUSH_BUDGET_MS}`],
     dropped_iterations: ['count==0'], // the rush kept its rate
-    checks: ['rate>0.99'], // a wrong status fails the run, not only a slow one
-    http_req_failed: ['rate<0.01'], // Less than 1% errors
+    // Strict (MAIR-474): one wrong status or one missing seeded row fails the run.
+    checks: ['rate==1'],
+    http_req_failed: ['rate==0'],
   },
 };
 
@@ -354,7 +361,10 @@ export function writeScenario(data) {
 
 export function chatsRushScenario() {
   const res = http.get(`${BASE_URL}/api/v1/`, { headers: randomAgent().headers, tags: { op: 'chats_rush' } });
-  check(res, { 'chats rush 200': (r) => r.status === 200 });
+  check(res, {
+    'chats rush 200': (r) => r.status === 200,
+    'chats rush reads the seed': (r) => r.status === 200 && r.json('chats').length > 0,
+  });
 }
 
 export function streamScenario(data) {
