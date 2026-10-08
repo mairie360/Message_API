@@ -145,6 +145,12 @@ rules (MAIR-394):
   `group` chat. `GET /api/v1/` exposes `kind` and `contact_id` (the other participant, also when hidden);
 - reading the chat, its members and `POST /read/` are open to members and administrators.
 
+`access-matrix.yaml` (MAIR-288) is the access decision of every operation of `ApiDoc` (roles that pass, relations
+to the chat: creator, member, author of the message; personal fields of the answer): `tests/endpoints/access_matrix.rs`
+fails when an operation is missing from it or unknown, and calls each operation on a group chat as each role and
+relation (an allowed caller never gets 401 / 403 / 404, the others get 403, or 404 for a hidden chat). **A new route
+goes into the matrix.**
+
 Write routes (MAIR-420) open a transaction (`access::begin`), check access with `require_chat_access_in` /
 `require_message_author_in` inside it, write through the same `SmartTransaction`, then `access::commit`. The access
 query is `ChatAccessQueryView::locking`: it takes `FOR KEY SHARE` on the chat row and the caller's membership row,

@@ -1,0 +1,86 @@
+# Access matrix of Message_API (MAIR-288, epic MAIR-284).
+#
+# A decision of the mairie, proposed by Mairie 360: for every operation of the OpenAPI, who may
+# call it. tests/endpoints/access_matrix.rs reads the spec the API serves and fails when an
+# operation is missing here or listed here without existing, then calls every operation on a group
+# chat as a user of each role with no relation to it, and as each relation to the chat, and checks
+# the answer: an allowed caller never gets 401 / 403 / 404, any other caller gets 403, or 404 when
+# the chat is hidden from them (not a member, not an administrator). Change this file and the code
+# together.
+#
+# Keys of an operation ("METHOD /path" of the OpenAPI):
+#   access     public          no session needed
+#              authenticated   any session (every role, Guest included)
+#   roles      roles that pass whatever the chat (Admin: the platform administrator, `is_admin`)
+#   ownership  relations to the chat that pass:
+#              creator         the member who created the group chat
+#              member          a (non-excluded) member
+#              author          the member who wrote the message
+#   personal   personal fields of the answer (gdpr/inventory.yaml of Database), for the review
+#   note       the rule when it is not obvious
+#
+# Rules of the code (endpoints/v1/id/access.rs, MAIR-394 / MAIR-478): reading a chat, its members
+# and acknowledging it are open to its members and to administrators; posting is for members only;
+# editing a message is its author's only; deleting a message is its author's or an
+# administrator's (moderation, logged); adding members or removing someone else is the creator's
+# (while a member) or an administrator's; any member may leave; deleting a group chat is its
+# creator's (while a member), an administrator's, or anyone `check_access(conversations, delete)`
+# grants. A direct chat never changes participants.
+# Decisions of the mairie (2026-10-08): a Guest only gets the default access of its role.
+
+version: 1
+api: message
+roles: [Admin, Maire, Responsable, User, Guest]
+
+operations:
+  GET /health: {access: public}
+  GET /ready: {access: public}
+
+  GET /api/v1/:
+    access: authenticated
+    roles: [Admin, Maire, Responsable, User, Guest]
+    personal: [chats.contact_id, chats.name]
+    note: "lists only the caller's chats"
+  POST /api/v1/:
+    access: authenticated
+    roles: [Admin, Maire, Responsable, User, Guest]
+  POST /api/v1/direct/:
+    access: authenticated
+    roles: [Admin, Maire, Responsable, User, Guest]
+  GET /api/v1/stream:
+    access: authenticated
+    roles: [Admin, Maire, Responsable, User, Guest]
+    note: "events of the caller's own chats only"
+
+  GET /api/v1/{chat_id}/:
+    access: authenticated
+    roles: [Admin]
+    ownership: [creator, member, author]
+    personal: [messages.sender_id, messages.content]
+  DELETE /api/v1/{chat_id}/:
+    access: authenticated
+    roles: [Admin]
+    ownership: [creator]
+    note: "also anyone check_access(conversations, delete) grants (global delete_all, ACL)"
+  POST /api/v1/{chat_id}/messages/: {access: authenticated, ownership: [creator, member, author]}
+  PATCH /api/v1/{chat_id}/messages/{message_id}/: {access: authenticated, ownership: [author]}
+  DELETE /api/v1/{chat_id}/messages/{message_id}/:
+    access: authenticated
+    roles: [Admin]
+    ownership: [author]
+    note: "an administrator's deletion of someone else's message is logged in messaging_moderation_log"
+  POST /api/v1/{chat_id}/read/:
+    access: authenticated
+    roles: [Admin]
+    ownership: [creator, member, author]
+  GET /api/v1/{chat_id}/users/:
+    access: authenticated
+    roles: [Admin]
+    ownership: [creator, member, author]
+    personal: [users.id]
+  POST /api/v1/{chat_id}/users/: {access: authenticated, roles: [Admin], ownership: [creator]}
+  DELETE /api/v1/{chat_id}/users/{user_id}/:
+    access: authenticated
+    roles: [Admin]
+    ownership: [creator]
+    note: "removing someone else; any member may remove themselves (leave)"
