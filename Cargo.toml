@@ -33,6 +33,8 @@ url = "2.5"
 # Forges the tokens the refusal sweep sends (same version and features as mairie360_api_lib).
 jsonwebtoken = { version = "11.0.0", default-features = false, features = ["rust_crypto"] }
 once_cell = "1.21.3"
+# Reads access-matrix.yaml in tests/endpoints/access_matrix.rs (MAIR-288).
+yaml_serde = "0.10"
 
 
 [profile.dev]
