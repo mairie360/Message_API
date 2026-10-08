@@ -69,9 +69,12 @@ async fn trigger_create_chat(
 #[utoipa::path(
     post,
     path = "",
-    summary = "Create a chat",
-    description = "Creates a chat and attaches the caller and the users listed in `members`, in a single \
-                   atomic operation: if one member does not exist, nothing is created.\n\n\
+    summary = "Create a group chat",
+    description = "Creates a **group** chat (`kind` `group` in `GET /api/v1/`) and attaches the caller and the users \
+                   listed in `members`, in a single atomic operation: if one member does not exist, nothing is \
+                   created.\n\n\
+                   To talk to a single agent, open the direct chat of the pair with `POST /api/v1/direct/` instead: \
+                   this route always creates a new chat, even with a single member.\n\n\
                    The caller is added automatically and becomes the **creator** of the chat: while a member, \
                    they are the only one (with administrators) who may add members or remove someone else. \
                    Listing the caller in `members` is harmless.\n\n\
@@ -85,7 +88,7 @@ async fn trigger_create_chat(
         ),
         (
             status = 400,
-            description = "Malformed JSON body, missing field, `name` not empty (direct conversation) nor 1 to 150 characters without control characters, `members` longer than 50, with a duplicate or an id outside 1..=2147483647 (`Invalid `members`: …`), or `members` containing an unknown user (`` `members` contains an unknown user.``). No chat is created.",
+            description = "Malformed JSON body, missing field, `name` not empty (no title) nor 1 to 150 characters without control characters, `members` longer than 50, with a duplicate or an id outside 1..=2147483647 (`Invalid `members`: …`), or `members` containing an unknown user (`` `members` contains an unknown user.``). No chat is created.",
             body = String,
             content_type = "text/plain",
             example = json!("`members` contains an unknown user.")

@@ -1,3 +1,4 @@
+use crate::endpoints::v1::direct::doc::DirectDoc;
 use crate::endpoints::v1::get::endpoint::__path_get_chats;
 use crate::endpoints::v1::get::view::GetChatsResultView;
 use crate::endpoints::v1::id::doc::IdDoc;
@@ -15,6 +16,7 @@ struct Doc;
 
 #[derive(OpenApi)]
 #[openapi(nest(
+    (path = "/direct", api = DirectDoc),
     (path = "/{chat_id}", api = IdDoc),
     (path = "/stream", api = StreamDoc),
     (path = "/", api = Doc)

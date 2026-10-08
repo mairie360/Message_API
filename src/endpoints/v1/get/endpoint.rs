@@ -62,7 +62,10 @@ async fn trigger_get_chats(
                    page follows; ask for it with `offset` increased by `limit`.\n\n\
                    Reading `GET /api/v1/{chat_id}/` does not change `unread_count`: only the explicit \
                    `POST /api/v1/{chat_id}/read/` acknowledgement does.\n\n\
-                   A chat without a title has an empty `name`, never `null`.",
+                   A chat without a title has an empty `name`, never `null`.\n\n\
+                   `kind` tells a **direct** chat (two agents, opened with `POST /api/v1/direct/`; `contact_id` \
+                   is the other participant, even when they hid it, and `name` is empty: show the contact's \
+                   name) from a **group** chat (`contact_id` is `null`). A chat the caller hid is not listed.",
     responses(
         (
             status = 200,
@@ -70,8 +73,9 @@ async fn trigger_get_chats(
             body = GetChatsResultView,
             example = json!({
                 "chats": [
-                    { "id": 5, "name": "Service urbanisme", "unread_count": 3 },
-                    { "id": 8, "name": "Astreinte week-end", "unread_count": 0 }
+                    { "id": 5, "name": "Service urbanisme", "kind": "group", "contact_id": null, "unread_count": 3 },
+                    { "id": 9, "name": "", "kind": "direct", "contact_id": 42, "unread_count": 1 },
+                    { "id": 8, "name": "Astreinte week-end", "kind": "group", "contact_id": null, "unread_count": 0 }
                 ],
                 "has_more": false
             })

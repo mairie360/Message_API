@@ -3,7 +3,8 @@ use std::fmt::Display;
 use crate::database::ids::{id_from_sql, id_to_sql};
 use mairie360_api_lib::database::db_interface::{ApiRequestDto, QueryParam};
 
-/// Chats of `user_id` with their unread counter, newest first.
+/// Chats of `user_id` with their kind, the contact of a direct chat and their unread counter,
+/// newest first.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GetChatsQueryView {
     params: Vec<QueryParam>,
@@ -60,6 +61,11 @@ impl ApiRequestDto for GetChatsQueryView {
             SELECT
                 c.id,
                 c.title,
+                c.kind,
+                CASE c.direct_user_low
+                    WHEN $1 THEN c.direct_user_high
+                    ELSE c.direct_user_low
+                END AS contact_id,
                 COALESCE(uc.unread_count, 0) AS unread_count
             FROM conversations c
             INNER JOIN conversation_members cm ON c.id = cm.conversation_id
@@ -80,5 +86,9 @@ impl ApiRequestDto for GetChatsQueryView {
 pub struct GetChatsQueryResultView {
     pub id: i32,
     pub title: Option<String>,
+    /// `conversations.kind`: `direct` or `group`.
+    pub kind: String,
+    /// The other participant of a direct chat, `None` for a group chat.
+    pub contact_id: Option<i32>,
     pub unread_count: i32,
 }

@@ -25,6 +25,9 @@ echo "==> API image under test: $IMAGE_REF"
 source "$(dirname "$0")/test_secrets.sh" || exit 1
 
 echo "==> [1/4] Starting the stack and the newman collection..."
+# Fresh database on every run (MAIR-474): a volume left by a previous run would hand the
+# stack its rows (rows the scan deleted, the previous volume seed) instead of the seed under test.
+docker compose -f "$COMPOSE_FILE" down -v --remove-orphans > /dev/null 2>&1
 docker compose -f "$COMPOSE_FILE" up -d
 
 echo "==> [2/4] Waiting for the newman collection to finish..."
@@ -35,7 +38,7 @@ echo "==> [3/4] Report (logs)..."
 docker compose -f "$COMPOSE_FILE" logs "$SERVICE_NAME"
 
 echo "==> [4/4] Cleaning up the containers..."
-docker compose -f "$COMPOSE_FILE" down
+docker compose -f "$COMPOSE_FILE" down -v
 
 echo "----------------------------------------"
 echo "Final exit code: $EXIT_CODE"

@@ -5,7 +5,8 @@ use mairie360_api_lib::smart_db::SmartTransaction;
 use mairie360_api_lib::state::AppState;
 
 use crate::endpoints::v1::id::access::{
-    begin, commit, require_chat_access_in, AccessDenied, NOT_A_MANAGER_MESSAGE,
+    begin, commit, require_chat_access_in, AccessDenied, DIRECT_CHAT_MEMBERS_MESSAGE,
+    NOT_A_MANAGER_MESSAGE,
 };
 
 use crate::database::chats::add_users_to_chat::view::AddMembersToChatQueryView;
@@ -20,6 +21,7 @@ pub enum AddUsersToChatError {
     UnknownChat,
     UnknownUser,
     AlreadyMember,
+    DirectChat,
     Forbidden,
 }
 
@@ -35,6 +37,7 @@ impl std::fmt::Display for AddUsersToChatError {
             AddUsersToChatError::AlreadyMember => {
                 write!(f, "A user of `users_id` is already a member of this chat.")
             }
+            AddUsersToChatError::DirectChat => f.write_str(DIRECT_CHAT_MEMBERS_MESSAGE),
         }
     }
 }
@@ -45,7 +48,9 @@ impl ResponseError for AddUsersToChatError {
             AddUsersToChatError::DatabaseError => StatusCode::INTERNAL_SERVER_ERROR,
             AddUsersToChatError::UnknownChat => StatusCode::NOT_FOUND,
             AddUsersToChatError::UnknownUser => StatusCode::BAD_REQUEST,
-            AddUsersToChatError::AlreadyMember => StatusCode::CONFLICT,
+            AddUsersToChatError::AlreadyMember | AddUsersToChatError::DirectChat => {
+                StatusCode::CONFLICT
+            }
             AddUsersToChatError::Forbidden => StatusCode::FORBIDDEN,
         }
     }
@@ -91,7 +96,9 @@ async fn trigger_add_users_to_chat(
                    user already member and nobody is added.\n\n \
                    **Only the creator of the chat (while still a member) and administrators** may add users; \
                    any other member gets `403`. A caller who is neither a member nor an administrator gets \
-                   the same `404` as for an unknown chat.",
+                   the same `404` as for an unknown chat.\n\n \
+                   A **direct** chat keeps its two participants: adding anyone to it answers `409`, create a \
+                   group chat with `POST /api/v1/` instead.",
     responses(
         (
             status = 200,
@@ -129,7 +136,7 @@ async fn trigger_add_users_to_chat(
         ),
         (
             status = 409,
-            description = "A user of `users_id` is already a member of the chat; nobody is added.",
+            description = "A user of `users_id` is already a member of the chat (`A user of `users_id` is already a member of this chat.`), or the chat is a direct chat (`A direct chat always keeps its two participants: create a group chat instead.`); nobody is added.",
             body = String,
             content_type = "text/plain",
             example = json!("A user of `users_id` is already a member of this chat.")
@@ -162,6 +169,9 @@ pub async fn add_users_to_chat(
     let view = view.into_inner();
     let mut tx = begin(&state).await?;
     let role = require_chat_access_in(&mut tx, params.chat_id, auth_user.id).await?;
+    if role.is_direct {
+        return Err(AddUsersToChatError::DirectChat);
+    }
     if !role.can_manage_members() {
         return Err(AddUsersToChatError::Forbidden);
     }

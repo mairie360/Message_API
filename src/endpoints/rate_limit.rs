@@ -8,13 +8,16 @@
 
 use std::net::IpAddr;
 
+use actix_governor::governor::clock::{Clock, DefaultClock, QuantaInstant};
+use actix_governor::governor::NotUntil;
 use actix_governor::{
     governor::middleware::NoOpMiddleware, Governor, GovernorConfig, GovernorConfigBuilder,
     KeyExtractor, SimpleKeyExtractionError,
 };
 use actix_web::dev::ServiceRequest;
+use actix_web::http::header::ContentType;
 use actix_web::middleware::Condition;
-use actix_web::HttpMessage;
+use actix_web::{HttpMessage, HttpResponse, HttpResponseBuilder};
 use mairie360_api_lib::env_manager::get_env_var;
 use mairie360_api_lib::security::AuthenticatedUser;
 
@@ -49,6 +52,25 @@ impl KeyExtractor for CallerKey {
         req.peer_addr()
             .map(|addr| Caller::Ip(addr.ip()))
             .ok_or_else(|| SimpleKeyExtractionError::new("Unable to identify the caller."))
+    }
+
+    /// `429` with `Retry-After` / `X-RateLimit-After` of at least one second. actix-governor sets
+    /// them in whole seconds rounded down: at the default 10 requests per second the wait is
+    /// 100 ms and both said `0`, telling the client to retry at once (MAIR-474).
+    fn exceed_rate_limit_response(
+        &self,
+        negative: &NotUntil<QuantaInstant>,
+        mut response: HttpResponseBuilder,
+    ) -> HttpResponse {
+        let wait = negative
+            .wait_time_from(DefaultClock::default().now())
+            .as_secs()
+            .max(1);
+        response
+            .content_type(ContentType::plaintext())
+            .insert_header(("Retry-After", wait.to_string()))
+            .insert_header(("X-RateLimit-After", wait.to_string()))
+            .body(format!("Too many requests, retry in {wait}s."))
     }
 }
 

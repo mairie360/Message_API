@@ -17,6 +17,7 @@ async fn every_api_route_requires_a_valid_jwt() {
     for (method, uri) in [
         (Method::GET, "/api/v1/"),
         (Method::POST, "/api/v1/"),
+        (Method::POST, "/api/v1/direct/"),
         (Method::GET, "/api/v1/stream"),
         (Method::GET, "/api/v1/1/"),
         (Method::DELETE, "/api/v1/1/"),
@@ -472,4 +473,80 @@ async fn out_of_range_ids_do_not_alias_another_row() {
         request(Method::GET, &format!("/api/v1/{chat}/users/"), Some(member))
     );
     assert_eq!(body["users"].as_array().unwrap().len(), 2);
+}
+
+/// MAIR-478: the participants of a direct chat never change, and its creator does not own it.
+#[actix_web::test]
+#[serial]
+async fn direct_chat_keeps_its_two_participants() {
+    let (state, sse) = states().await;
+    let app = test_app!(state, sse);
+    let (_container, url) = get_shared_db().await;
+    let db = get_smart_db(url).await;
+    let (alice, bob, carol) = (
+        plain_user(&db).await,
+        plain_user(&db).await,
+        plain_user(&db).await,
+    );
+    let admin = admin_id().await;
+    let (_, body) = send_json!(
+        app,
+        request(Method::POST, "/api/v1/direct/", Some(alice))
+            .set_json(json!({ "contact_id": bob }))
+    );
+    let chat = body["id"].as_u64().unwrap();
+
+    for user in [alice, admin] {
+        let (status, body) = send!(
+            app,
+            request(Method::POST, &format!("/api/v1/{chat}/users/"), Some(user))
+                .set_json(json!({ "users_id": [carol] }))
+        );
+        assert_eq!(status, StatusCode::CONFLICT, "{user}: {body}");
+        let (status, _) = send!(
+            app,
+            request(
+                Method::DELETE,
+                &format!("/api/v1/{chat}/users/{bob}/"),
+                Some(user)
+            )
+        );
+        assert_eq!(status, StatusCode::FORBIDDEN, "{user}");
+    }
+    // Its creator may not delete it for both; an administrator may (moderation).
+    let (status, _) = send!(
+        app,
+        request(Method::DELETE, &format!("/api/v1/{chat}/"), Some(alice))
+    );
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = send!(
+        app,
+        request(Method::DELETE, &format!("/api/v1/{chat}/"), Some(admin))
+    );
+    assert_eq!(status, StatusCode::NO_CONTENT);
+}
+
+#[actix_web::test]
+#[serial]
+async fn direct_chat_needs_another_known_agent() {
+    let (state, sse) = states().await;
+    let app = test_app!(state, sse);
+    let (_container, url) = get_shared_db().await;
+    let db = get_smart_db(url).await;
+    let alice = plain_user(&db).await;
+
+    for (body, expected) in [
+        (json!({ "contact_id": alice }), "oneself"),
+        (json!({ "contact_id": i32::MAX }), "unknown user"),
+        (json!({ "contact_id": 0 }), "contact_id"),
+        (json!({ "contact_id": i32::MAX as u64 + 1 }), "contact_id"),
+        (json!({}), "contact_id"),
+    ] {
+        let (status, message) = send!(
+            app,
+            request(Method::POST, "/api/v1/direct/", Some(alice)).set_json(body.clone())
+        );
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        assert!(message.contains(expected), "{body}: {message}");
+    }
 }

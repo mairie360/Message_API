@@ -3,12 +3,14 @@ use std::fmt::Display;
 use crate::database::ids::{id_from_sql, id_to_sql};
 use mairie360_api_lib::database::db_interface::{ApiRequestDto, QueryParam};
 
-/// What the caller may do on a chat: whether it exists, whether the caller is one of its (not
-/// excluded) members, whether the caller created it (`conversations.created_by`) and whether the
-/// caller is an administrator (who may read and moderate any chat).
+/// What the caller may do on a chat: whether it exists, whether it is a direct chat, whether the
+/// caller is one of its (not excluded) members, whether the caller created it
+/// (`conversations.created_by`) and whether the caller is an administrator (who may read and
+/// moderate any chat).
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct ChatAccess {
     pub chat_exists: bool,
+    pub is_direct: bool,
     pub is_member: bool,
     pub is_creator: bool,
     pub is_admin: bool,
@@ -70,12 +72,13 @@ impl ApiRequestDto for ChatAccessQueryView {
             // locked in its own sub-select, which yields no row when it does not exist.
             return "SELECT jsonb_build_object( \
                 'chat_exists', c.id IS NOT NULL, \
+                'is_direct', COALESCE(c.kind = 'direct', FALSE), \
                 'is_member', m.user_id IS NOT NULL, \
                 'is_creator', COALESCE(c.created_by = $2, FALSE), \
                 'is_admin', is_admin($2)) \
              FROM (SELECT 1) AS one \
              LEFT JOIN LATERAL ( \
-                SELECT id, created_by FROM conversations WHERE id = $1 FOR KEY SHARE) c ON TRUE \
+                SELECT id, kind, created_by FROM conversations WHERE id = $1 FOR KEY SHARE) c ON TRUE \
              LEFT JOIN LATERAL ( \
                 SELECT user_id FROM conversation_members \
                 WHERE conversation_id = $1 AND user_id = $2 AND is_excluded = FALSE \
@@ -83,6 +86,7 @@ impl ApiRequestDto for ChatAccessQueryView {
         }
         "SELECT jsonb_build_object( \
             'chat_exists', EXISTS(SELECT 1 FROM conversations WHERE id = $1), \
+            'is_direct', EXISTS(SELECT 1 FROM conversations WHERE id = $1 AND kind = 'direct'), \
             'is_member', EXISTS( \
                 SELECT 1 FROM conversation_members \
                 WHERE conversation_id = $1 AND user_id = $2 AND is_excluded = FALSE), \

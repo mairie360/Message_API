@@ -30,7 +30,7 @@ ON CONFLICT DO NOTHING;
 -- handlers on a real chat instead of stopping at a 404. The Admin (user 1) created it and is a
 -- member: an administrator who is not a member may not post (403), and `citation` 118 of the
 -- request example must be a message of this chat.
-INSERT INTO conversations (id, title, kind, created_by) VALUES (5, 'Service urbanisme', 'direct', 1)
+INSERT INTO conversations (id, title, kind, created_by) VALUES (5, 'Service urbanisme', 'group', 1)
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO conversation_members (conversation_id, user_id) VALUES (5, 1), (5, 42)

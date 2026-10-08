@@ -3,8 +3,8 @@ use std::fmt::Display;
 use crate::database::ids::id_to_sql;
 use mairie360_api_lib::database::db_interface::{ApiRequestDto, QueryParam};
 
-/// Creates a chat and attaches its members in **one statement**: when a member does not exist,
-/// the foreign key fails the whole statement and no chat is left behind.
+/// Creates a group chat and attaches its members in **one statement**: when a member does not
+/// exist, the foreign key fails the whole statement and no chat is left behind.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CreateChatQueryView {
     params: Vec<QueryParam>,
@@ -76,10 +76,11 @@ impl Display for CreateChatQueryView {
 
 impl ApiRequestDto for CreateChatQueryView {
     fn query_sql(&self) -> &'static str {
-        // `kind` is mandatory since Database 1.2.0: a group chat when group_id is given.
+        // Always a group chat: a direct chat is opened by `OpenDirectChatQueryView`, which records
+        // its pair of participants (MAIR-478).
         "WITH chat AS ( \
              INSERT INTO conversations (title, group_id, kind, created_by) \
-             VALUES ($1, $2::int, CASE WHEN $2::int IS NULL THEN 'direct' ELSE 'group' END, $3::int) \
+             VALUES ($1, $2::int, 'group', $3::int) \
              RETURNING id \
          ), members AS ( \
              INSERT INTO conversation_members (conversation_id, user_id) \
