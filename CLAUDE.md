@@ -183,6 +183,20 @@ handler to map to its documented `4xx`, anything else is logged at `error` with 
 (`unexpected` logs unconditionally, for statements where no client error is possible). No `eprintln!`, no
 `.map_err(|_| …)`.
 
+Traces (MAIR-503, same approach as the Core API POC of MAIR-131): `src/telemetry.rs` installs the logging layer of
+`src/logging.rs` and, when `OTEL_EXPORTER_OTLP_ENDPOINT` (or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`) is set, exports
+the `TracingLogger` spans over OTLP/HTTP (protobuf) to the agent relaying to Scaleway Cockpit (e.g.
+`http://alloy:4318`, `/v1/traces` is appended). Nothing changes without it; `OTEL_SDK_DISABLED=true` forces it off;
+`OTEL_SERVICE_NAME` defaults to `message-api`; a failure to build the exporter is printed and never stops the API.
+Root spans are named `<METHOD> <route pattern>` and continue the BFF's `traceparent`; the SQL of
+`mairie360_api_lib` shows up as `db.statement` span events (placeholders, never the bound values). No personal data
+leaves (MAIR-290, MAIR-501): `telemetry::Redact` drops `http.client_ip` and the query string of `http.target`
+before the export, whatever the root span builder recorded; build providers with `telemetry::tracer_provider`,
+never `SdkTracerProvider::builder()` directly. The `opentelemetry*`, `tracing-opentelemetry` and
+`tracing-actix-web` versions are coupled (0.32 / 0.33 / 0.7 with `opentelemetry_0_32`): bump them together.
+`tests/endpoints/telemetry.rs` asserts the span, the continued trace id, the redaction and the SQL events against
+an in-memory exporter.
+
 Request bodies with text fields are extracted with `endpoints::validation::ValidatedJson` instead of `web::Json`:
 the view implements `Validate` (length matching the Postgres column, no control character) and an
 invalid value answers `400` naming the field. Map the lib's `DbError` constraint violations (`ForeignKeyViolation`,
@@ -313,7 +327,7 @@ database, so `main` calls `ready::wait_for_postgres` and exits when Postgres doe
 ### Config (env vars, all "critical" → process panics if unset)
 
 `REDIS_URL`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT`, `DB_NAME`, `HOST`, `PORT`,
-`JWT_SECRET`, `JWT_TIMEOUT`. Optional: `SWAGGER_ENABLED`, `DB_STARTUP_TIMEOUT`, `RATE_LIMIT_PER_SECOND`, `RATE_LIMIT_BURST`, `LOG_FORMAT`, `RUST_LOG`. The Postgres URL is assembled by `database::pg_url::build_pg_url`,
+`JWT_SECRET`, `JWT_TIMEOUT`. Optional: `SWAGGER_ENABLED`, `DB_STARTUP_TIMEOUT`, `RATE_LIMIT_PER_SECOND`, `RATE_LIMIT_BURST`, `LOG_FORMAT`, `RUST_LOG`, the `OTEL_*` variables of the trace export. The Postgres URL is assembled by `database::pg_url::build_pg_url`,
 which percent-encodes user, password and database name, so `DB_PASSWORD` may contain any
 character. `docker-compose.yml` supplies them for the dev stack (app on
 `:3003`, Postgres via `ghcr.io/mairie360/database`, Liquibase migrations, a `seeder` running

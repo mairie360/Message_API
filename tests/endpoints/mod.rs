@@ -9,4 +9,5 @@ mod docs;
 mod flows;
 mod lists;
 mod ready;
+mod telemetry;
 mod token_refusals;
