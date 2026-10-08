@@ -10,7 +10,7 @@ async-trait = "0.1.89"
 chrono = { version = "0.4", features = ["serde"] }
 dashmap = "6.2.1"
 futures-util = "0.3"
-mairie360_api_lib = "3.0.0"
+mairie360_api_lib = "3.0.1"
 percent-encoding = "2.3"
 redis = { version = "1.6", default-features = false, features = ["tokio-comp"] }
 serde = { version = "1.0.219", features = ["derive"] }
@@ -18,13 +18,15 @@ serde_json = "1.0.140"
 tokio = { version = "1.46.0", features = ["full"] }
 tokio-stream = "0.1.18"
 tracing = "0.1.44"
-tracing-actix-web = "0.7.25"
+# `emit_event_on_error` (a default feature) logs the `Debug` of every error, which can hold the
+# values of the request: `request_log::RedactedRootSpanBuilder` emits that event instead (MAIR-290).
+tracing-actix-web = { version = "0.7.25", default-features = false }
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
 utoipa = { version = "6", features = ["actix_extras", "yaml"] }
 utoipa-swagger-ui = { version = "10", features = ["actix-web"] }
 
 [dev-dependencies]
-mairie360_api_lib = { version = "3.0.0", features = ["test-utils"] }
+mairie360_api_lib = { version = "3.0.1", features = ["test-utils"] }
 serial_test = "4.0.0"
 testcontainers = "0.28"
 url = "2.5"
