@@ -1,0 +1,91 @@
+# GDPR log marker journey (MAIR-290), played by mairie360/CICD tests/gdpr/marker.
+#
+# Message_API receives no account data, but agents write names, e-mails and phone numbers in
+# chat titles and message contents. The marker's values are put there, in query strings and in
+# deliberate errors (refused values, wrong types, unknown rows); the logs of every container of
+# docker-compose-gdpr-marker.yml are then searched for them (gdpr_marker_test.sh). A log
+# describes an error by its type and context, never by the value it received.
+version: 1
+target: http://message:3003
+wait: /ready
+# The admin JWT of this run (sub=1, the Admin seeded by liquibase), forged by test_secrets.sh.
+env: [ADMIN_JWT]
+steps:
+  - name: create a chat named after the marker
+    request:
+      method: POST
+      path: /api/v1/
+      headers: {Authorization: "Bearer {{env.ADMIN_JWT}}"}
+      json: {name: "{{marker.first_name}} {{marker.last_name}}", members: [2]}
+    capture:
+      chat_id: body.id
+  - name: create a chat with members of the wrong type (deliberate error)
+    request:
+      method: POST
+      path: /api/v1/
+      headers: {Authorization: "Bearer {{env.ADMIN_JWT}}"}
+      json: {name: "{{marker.first_name}} {{marker.last_name}}", members: ["{{marker.email}}"]}
+    expect: [400]
+  - name: list the chats with a refused page size (deliberate error, query string)
+    request: {method: GET, path: "/api/v1/?limit={{marker.last_name}}", headers: {Authorization: "Bearer {{env.ADMIN_JWT}}"}}
+    expect: [400]
+  - name: post a message with the marker's contact
+    request:
+      method: POST
+      path: "/api/v1/{{chat_id}}/messages/"
+      headers: {Authorization: "Bearer {{env.ADMIN_JWT}}"}
+      json: {content: "Call {{marker.first_name}} {{marker.last_name}} on {{marker.phone}} or {{marker.email}}"}
+    capture:
+      message_id: body.id
+  - name: post a message quoting a value of the wrong type (deliberate error)
+    request:
+      method: POST
+      path: "/api/v1/{{chat_id}}/messages/"
+      headers: {Authorization: "Bearer {{env.ADMIN_JWT}}"}
+      json: {content: "Call {{marker.first_name}}", citation: "{{marker.phone}}"}
+    expect: [400]
+  - name: post a message in a chat that does not exist (deliberate error)
+    request:
+      method: POST
+      path: /api/v1/999999/messages/
+      headers: {Authorization: "Bearer {{env.ADMIN_JWT}}"}
+      json: {content: "Call {{marker.first_name}} {{marker.last_name}} on {{marker.phone}}"}
+    expect: [404]
+  - name: edit the message
+    request:
+      method: PATCH
+      path: "/api/v1/{{chat_id}}/messages/{{message_id}}/"
+      headers: {Authorization: "Bearer {{env.ADMIN_JWT}}"}
+      json: {content: "{{marker.last_name}} moved, new number {{marker.phone}}"}
+  - name: edit a message that does not exist (deliberate error, answered 400)
+    request:
+      method: PATCH
+      path: "/api/v1/{{chat_id}}/messages/999999/"
+      headers: {Authorization: "Bearer {{env.ADMIN_JWT}}"}
+      json: {content: "{{marker.last_name}} moved, new number {{marker.phone}}"}
+    expect: [400]
+  - name: read the chat
+    request: {method: GET, path: "/api/v1/{{chat_id}}/", headers: {Authorization: "Bearer {{env.ADMIN_JWT}}"}}
+  - name: read the chat with a refused cursor (deliberate error, query string)
+    request: {method: GET, path: "/api/v1/{{chat_id}}/?before={{marker.email}}", headers: {Authorization: "Bearer {{env.ADMIN_JWT}}"}}
+    expect: [400]
+  - name: acknowledge with a value of the wrong type (deliberate error)
+    request:
+      method: POST
+      path: "/api/v1/{{chat_id}}/read/"
+      headers: {Authorization: "Bearer {{env.ADMIN_JWT}}"}
+      json: {readUntilMessageId: "{{marker.last_name}}"}
+    expect: [400]
+  - name: add members of the wrong type (deliberate error)
+    request:
+      method: POST
+      path: "/api/v1/{{chat_id}}/users/"
+      headers: {Authorization: "Bearer {{env.ADMIN_JWT}}"}
+      json: {users_id: ["{{marker.first_name}}"]}
+    expect: [400]
+  - name: delete the message
+    request: {method: DELETE, path: "/api/v1/{{chat_id}}/messages/{{message_id}}/", headers: {Authorization: "Bearer {{env.ADMIN_JWT}}"}}
+    expect: [204]
+  - name: delete the chat
+    request: {method: DELETE, path: "/api/v1/{{chat_id}}/", headers: {Authorization: "Bearer {{env.ADMIN_JWT}}"}}
+    expect: [204]
