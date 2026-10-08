@@ -150,6 +150,9 @@ services:
       SWAGGER_ENABLED: "true"
       # Human-readable logs on the dev stack; JSON (the default) everywhere else.
       LOG_FORMAT: text
+      # Traces OpenTelemetry (MAIR-503), off unless an OTLP/HTTP endpoint is set, e.g. a local
+      # collector listening on the host: OTEL_EXPORTER_OTLP_ENDPOINT=http://host.docker.internal:4318
+      # OTEL_SERVICE_NAME: message-api
     depends_on:
       liquibase:
         condition: service_completed_successfully
