@@ -89,6 +89,12 @@ function randomAgent() {
   return { headers: agentAuth(AGENTS.first + rank), chatId };
 }
 
+/** A random seeded agent by rank (it is a member of chat `GROUP_CHATS.first + rank`). */
+function randomAgentRank() {
+  const rank = randomInt(AGENTS.count);
+  return { rank, headers: agentAuth(AGENTS.first + rank) };
+}
+
 /** A member of the hot chat. */
 const hotMember = () => agentAuth(AGENTS.first + 250 * randomInt(HOT_MEMBERS));
 
@@ -159,28 +165,48 @@ const spec = loadSpec();
 const readHandlers = {
   'GET /health': ({ request }) => check(request(), { 'health 200': (r) => r.status === 200 }),
   'GET /ready': ({ request }) => check(request(), { 'ready 200': (r) => r.status === 200 }),
-  'GET /api/v1/': ({ request }) =>
+  // A third of the lists search the agent's chats by the name of a member it shares chat `100000 + rank`
+  // with (MAIR-507): the full name "Agent Perf <id>", which must find that chat.
+  'GET /api/v1/': ({ request }) => {
+    if (randomInt(3) === 0) {
+      const { rank, headers } = randomAgentRank();
+      const coMember = AGENTS.first + ((rank + 250) % AGENTS.count);
+      const res = request({ query: { search: `Agent Perf ${coMember}` }, headers });
+      check(res, {
+        'search chats 200': (r) => r.status === 200,
+        'search chats finds the chat shared with the member': (r) =>
+          r.status === 200 && r.json('chats').some((chat) => chat.id === GROUP_CHATS.first + rank),
+      });
+      return;
+    }
     check(request({ query: { offset: randomInt(CHATS_PER_AGENT) }, headers: randomAgent().headers }), {
       'list chats 200': (r) => r.status === 200,
       // Every seeded agent is in 16 group chats: an empty page means the seed was not loaded.
       'list chats reads the seed': (r) => r.status === 200 && r.json('chats').length > 0,
-    }),
+      // The list carries what it displays: a name for every chat (a direct chat is named after its
+      // contact) and a member count.
+      'list chats carries names and member counts': (r) =>
+        r.status === 200 && r.json('chats').every((chat) => chat.name.length > 0 && chat.member_count >= 2),
+    });
+  },
   // A third of the reads page through the hot chat at a random depth.
   'GET /api/v1/{chat_id}/': ({ request, data }) => {
-    const res =
-      randomInt(3) === 0
-        ? request({
-            path: { chat_id: HOT_CHAT_ID },
-            query: { before: data.hotNewestId + 1 - randomInt(HOT_MESSAGES), limit: PAGE },
-            headers: hotMember(),
-          })
-        : (() => {
-            const agent = randomAgent();
-            return request({ path: { chat_id: agent.chatId }, headers: agent.headers });
-          })();
+    const hot = randomInt(3) === 0;
+    const agent = hot ? undefined : randomAgent();
+    const chatId = hot ? HOT_CHAT_ID : agent.chatId;
+    const res = hot
+      ? request({
+          path: { chat_id: HOT_CHAT_ID },
+          query: { before: data.hotNewestId + 1 - randomInt(HOT_MESSAGES), limit: PAGE },
+          headers: hotMember(),
+        })
+      : request({ path: { chat_id: chatId }, headers: agent.headers });
     check(res, {
       'get chat 200': (r) => r.status === 200,
       'get chat reads the seeded messages': (r) => r.status === 200 && r.json('messages').length > 0,
+      // The header of the chat comes with the page (MAIR-507).
+      'get chat carries its header': (r) =>
+        r.status === 200 && r.json('chat.id') === chatId && r.json('chat.name').length > 0 && r.json('chat.member_count') === 8,
     });
   },
   'GET /api/v1/{chat_id}/users/': ({ request }) => {
@@ -188,6 +214,9 @@ const readHandlers = {
     check(request({ path: { chat_id: agent.chatId }, headers: agent.headers }), {
       'list chat users 200': (r) => r.status === 200,
       'list chat users reads the seeded members': (r) => r.status === 200 && r.json('users').length >= 8,
+      // The members come with their names (MAIR-507).
+      'list chat users carries the names': (r) =>
+        r.status === 200 && r.json('users').every((user) => user.first_name === 'Agent' && user.last_name.startsWith('Perf ')),
     });
   },
 };
@@ -376,6 +405,8 @@ export function chatsRushScenario() {
   check(res, {
     'chats rush 200': (r) => r.status === 200,
     'chats rush reads the seed': (r) => r.status === 200 && r.json('chats').length > 0,
+    'chats rush carries names and member counts': (r) =>
+      r.status === 200 && r.json('chats').every((chat) => chat.name.length > 0 && chat.member_count >= 2),
   });
 }
 

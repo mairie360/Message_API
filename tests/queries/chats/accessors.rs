@@ -128,7 +128,7 @@ fn test_get_chats_view_accessors() {
     assert_eq!(view.user_id(), 42);
     assert!(format!("{view}").contains("user_id=42"));
     assert!(view.query_sql().contains("FROM conversations"));
-    assert_eq!(view.query_params().len(), 3);
+    assert_eq!(view.query_params().len(), 4);
 }
 
 #[test]

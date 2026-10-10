@@ -5,6 +5,7 @@
 #[macro_use]
 mod harness;
 mod access;
+mod chat_list;
 mod docs;
 mod flows;
 mod lists;

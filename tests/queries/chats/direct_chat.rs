@@ -64,7 +64,7 @@ async fn test_direct_chat_lists_its_contact_on_both_sides() {
     let for_alice = listed(&db, alice, chat).await.unwrap();
     assert_eq!(for_alice.kind, "direct");
     assert_eq!(for_alice.contact_id, Some(bob as i32));
-    assert_eq!(for_alice.title, None);
+    assert_eq!(for_alice.title.as_deref(), Some("Chat Member"));
     // A new chat stays hidden for the contact until a message is posted in it.
     assert!(listed(&db, bob, chat).await.is_none());
 
