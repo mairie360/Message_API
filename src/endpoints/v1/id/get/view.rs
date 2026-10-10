@@ -3,6 +3,7 @@ use utoipa::{IntoParams, ToSchema};
 
 use crate::database::chats::get_chat::view::Message;
 use crate::database::ids::{bigint_from_sql, id_from_sql};
+use crate::endpoints::v1::get::view::ChatView;
 use crate::endpoints::validation::{Validate, ValidationError, MAX_MESSAGE_ID};
 
 /// Same page size bounds as the other lists.
@@ -53,6 +54,43 @@ impl Validate for GetChatQuery {
     }
 }
 
+/// The message another one answers, with what is needed to display the quote without reading it.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, ToSchema)]
+pub struct QuotedMessageView {
+    /// Id of the quoted message (the `citation` of the message that quotes it).
+    #[schema(example = 117)]
+    id: u64,
+    /// Core API id of the author of the quoted message; `null` once the author's account is
+    /// deleted.
+    #[schema(example = 51, nullable = true)]
+    sender_id: Option<u64>,
+    /// First 100 characters of the quoted message.
+    #[schema(example = "Quelqu'un a des nouvelles du permis de construire de la rue Pasteur ?")]
+    excerpt: String,
+}
+
+impl QuotedMessageView {
+    pub fn new(id: u64, sender_id: Option<u64>, excerpt: &str) -> Self {
+        Self {
+            id,
+            sender_id,
+            excerpt: excerpt.to_string(),
+        }
+    }
+
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+
+    pub fn sender_id(&self) -> Option<u64> {
+        self.sender_id
+    }
+
+    pub fn excerpt(&self) -> &str {
+        &self.excerpt
+    }
+}
+
 /// A message of a chat.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, ToSchema)]
 pub struct MessageView {
@@ -72,6 +110,9 @@ pub struct MessageView {
     /// quoted message is deleted.
     #[schema(example = 117, nullable = true)]
     citation: Option<u64>,
+    /// The message `citation` points to (author and excerpt), also when it is older than this page;
+    /// `null` exactly when `citation` is.
+    quoted: Option<QuotedMessageView>,
 }
 
 impl MessageView {
@@ -88,7 +129,13 @@ impl MessageView {
             sender_id,
             created_at,
             citation,
+            quoted: None,
         }
+    }
+
+    pub fn with_quoted(mut self, quoted: Option<QuotedMessageView>) -> Self {
+        self.quoted = quoted;
+        self
     }
 
     pub fn id(&self) -> u64 {
@@ -110,10 +157,22 @@ impl MessageView {
     pub fn citation(&self) -> Option<u64> {
         self.citation
     }
+
+    pub fn quoted(&self) -> Option<&QuotedMessageView> {
+        self.quoted.as_ref()
+    }
 }
 
 impl From<Message> for MessageView {
     fn from(message: Message) -> Self {
+        let quoted = match (message.reply_to_id, message.reply_excerpt.as_deref()) {
+            (Some(id), Some(excerpt)) => Some(QuotedMessageView::new(
+                bigint_from_sql(id),
+                message.reply_owner_id.map(id_from_sql),
+                excerpt,
+            )),
+            _ => None,
+        };
         Self::new(
             bigint_from_sql(message.id),
             &message.content,
@@ -121,12 +180,17 @@ impl From<Message> for MessageView {
             message.created_at,
             message.reply_to_id.map(bigint_from_sql),
         )
+        .with_quoted(quoted)
     }
 }
 
 /// One page of the messages of a chat.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, ToSchema)]
 pub struct GetChatResultView {
+    /// The chat itself, as a line of the chat list (`GET /api/v1/`): name to display, kind,
+    /// contact, member count and the caller's unread counter. Read in the same call so that
+    /// opening a chat needs nothing else but its members (`GET /api/v1/{chat_id}/users/`).
+    chat: ChatView,
     /// Messages of the page, **oldest first** (display order). Empty when the chat has no
     /// message older than `before`.
     messages: Vec<MessageView>,
@@ -139,13 +203,14 @@ pub struct GetChatResultView {
 }
 
 impl GetChatResultView {
-    pub fn new(messages: Vec<MessageView>, has_more: bool) -> Self {
+    pub fn new(chat: ChatView, messages: Vec<MessageView>, has_more: bool) -> Self {
         let next_before = if has_more {
             messages.first().map(MessageView::id)
         } else {
             None
         };
         Self {
+            chat,
             messages,
             has_more,
             next_before,
@@ -154,11 +219,19 @@ impl GetChatResultView {
 
     /// Builds a page from the rows of `GetChatQueryView` run with `limit + 1` (newest first):
     /// the extra row only tells that older messages remain.
-    pub fn from_newest_first(mut rows: Vec<Message>, limit: u32) -> Self {
+    pub fn from_newest_first(chat: ChatView, mut rows: Vec<Message>, limit: u32) -> Self {
         let has_more = rows.len() > limit as usize;
         rows.truncate(limit as usize);
         rows.reverse();
-        Self::new(rows.into_iter().map(MessageView::from).collect(), has_more)
+        Self::new(
+            chat,
+            rows.into_iter().map(MessageView::from).collect(),
+            has_more,
+        )
+    }
+
+    pub fn chat(&self) -> &ChatView {
+        &self.chat
     }
 
     pub fn messages(&self) -> &[MessageView] {
@@ -177,6 +250,7 @@ impl GetChatResultView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::endpoints::v1::get::view::ChatKind;
 
     fn message(id: i64) -> Message {
         Message {
@@ -185,13 +259,26 @@ mod tests {
             content: format!("message {id}"),
             created_at: Utc::now(),
             reply_to_id: None,
+            reply_owner_id: None,
+            reply_excerpt: None,
         }
+    }
+
+    fn chat() -> ChatView {
+        ChatView::new(
+            5,
+            "Service urbanisme".to_string(),
+            ChatKind::Group,
+            None,
+            8,
+            0,
+        )
     }
 
     #[test]
     fn a_full_page_tells_where_to_continue() {
         let rows = vec![message(5), message(4), message(3)];
-        let page = GetChatResultView::from_newest_first(rows, 2);
+        let page = GetChatResultView::from_newest_first(chat(), rows, 2);
         let ids: Vec<u64> = page.messages().iter().map(MessageView::id).collect();
         assert_eq!(ids, vec![4, 5]);
         assert!(page.has_more());
@@ -200,10 +287,26 @@ mod tests {
 
     #[test]
     fn the_last_page_has_no_cursor() {
-        let page = GetChatResultView::from_newest_first(vec![message(2), message(1)], 2);
+        let page = GetChatResultView::from_newest_first(chat(), vec![message(2), message(1)], 2);
         assert!(!page.has_more());
         assert_eq!(page.next_before(), None);
         assert_eq!(page.messages().len(), 2);
+    }
+
+    #[test]
+    fn a_quote_comes_with_its_author_and_excerpt() {
+        let mut quoting = message(7);
+        quoting.reply_to_id = Some(3);
+        quoting.reply_owner_id = Some(51);
+        quoting.reply_excerpt = Some("Le permis ?".to_string());
+        let view = MessageView::from(quoting);
+        assert_eq!(view.citation(), Some(3));
+        let quoted = view.quoted().expect("quoted message");
+        assert_eq!(
+            (quoted.id(), quoted.sender_id(), quoted.excerpt()),
+            (3, Some(51), "Le permis ?")
+        );
+        assert!(MessageView::from(message(8)).quoted().is_none());
     }
 
     #[test]

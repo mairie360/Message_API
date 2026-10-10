@@ -162,6 +162,22 @@ query fetches `limit + 1` rows newest first, `GetChatResultView::from_newest_fir
 composite foreign key `(conversation_id, reply_to_id)` rejects a message of another chat (mapped to `400`).
 No `QueryParam` holds an optional BIGINT, so an absent `before` / `citation` travels as `0` (`NULLIF`).
 
+MAIR-507, what a client needs to display the list and to open a chat, in one query each:
+
+- `GET /api/v1/` returns per chat `name` (the title of a group chat; the other participant's "Prénom Nom" for a
+  direct chat, joined from `users` in the same statement), `kind`, `contact_id`, `member_count` (a direct chat always
+  has 2) and `unread_count`. `?search=` (`ChatListQuery`, at most 150 characters, no control character) keeps the
+  chats whose title matches, or whose contact (direct chat) or a member other than the caller (group chat) has a
+  first name, last name or full name (both orders) matching, `ILIKE '%term%'` with `%`, `_` and `\` escaped by
+  `search_pattern`. It is case-insensitive but not accent-insensitive (the schema has no `unaccent`), and the pagination
+  applies to the filtered list. The user-name branches use the trigram indexes of Database 3.0.0.
+- `GET /api/v1/{chat_id}/users/` returns `id`, `first_name`, `last_name` (`GetChatUsersQueryView`, a join with `users`);
+  the SSE fan-out keeps using the ids-only `GetChatMembersQueryView::new`.
+- `GET /api/v1/{chat_id}/` returns `chat` (the same fields as a list line, `GetChatHeaderQueryView`, read in parallel
+  with the page; an administrator who is not a participant of a direct chat gets both names and no `contact_id`) and,
+  for each message that quotes another, `quoted` (`id`, `sender_id`, first 100 characters), joined in the page query so
+  it is there even when the quoted message is older than the page.
+
 Unread counters are only lowered by the explicit `POST /api/v1/{chat_id}/read/` (`{ "readUntilMessageId": n }`, answers
 `{ "unread_count": k }`); `GET /api/v1/{chat_id}/` and `GET /api/v1/` never touch them, so polling is safe. The route is
 `endpoints::v1::id::read` and one call to the Postgres function `fn_acknowledge_read` (`database::chats::acknowledge_read`),

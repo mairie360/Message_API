@@ -3,19 +3,37 @@ use utoipa::ToSchema;
 /// A member of a chat.
 #[derive(Debug, serde::Serialize, ToSchema)]
 pub struct User {
-    /// Core API id of the member: pass it to `GET /api/v1/user/?ids=…` of Core API to get their
-    /// profile.
+    /// Core API id of the member: pass it to `GET /api/v1/user/?ids=…` of Core API for the rest of
+    /// their profile.
     #[schema(example = 42)]
     id: u64,
+    /// First name of the member, as in Core API.
+    #[schema(example = "Xavier")]
+    first_name: String,
+    /// Last name of the member, as in Core API.
+    #[schema(example = "Bertrand")]
+    last_name: String,
 }
 
 impl User {
-    pub fn new(id: u64) -> Self {
-        Self { id }
+    pub fn new(id: u64, first_name: &str, last_name: &str) -> Self {
+        Self {
+            id,
+            first_name: first_name.to_string(),
+            last_name: last_name.to_string(),
+        }
     }
 
     pub fn id(&self) -> u64 {
         self.id
+    }
+
+    pub fn first_name(&self) -> &str {
+        &self.first_name
+    }
+
+    pub fn last_name(&self) -> &str {
+        &self.last_name
     }
 }
 
