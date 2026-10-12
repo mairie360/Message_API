@@ -7,6 +7,7 @@ use message_api::endpoints::rate_limit::{rate_limit_from_env, rate_limiter};
 use message_api::endpoints::swagger::{docs_config, swagger_enabled};
 use message_api::endpoints::{config, health, ready};
 use message_api::logging;
+use message_api::request_log::{hide_query, restore_query, RedactedRootSpanBuilder};
 
 use mairie360_api_lib::env_manager::{get_critical_env_var, get_env_var};
 use mairie360_api_lib::security::JwtMiddleware;
@@ -79,8 +80,12 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::Data::from(app_state.clone()))
             .app_data(data.clone())
             // One span per request (request id, method, route, status): the errors logged by the
-            // handlers carry it.
-            .wrap(tracing_actix_web::TracingLogger::default())
+            // handlers carry it. It records the path without the query string and no error
+            // `Debug` (MAIR-290, see `request_log`): `hide_query` runs before it, `restore_query`
+            // right after it.
+            .wrap(middleware::from_fn(restore_query))
+            .wrap(tracing_actix_web::TracingLogger::<RedactedRootSpanBuilder>::new())
+            .wrap(middleware::from_fn(hide_query))
             // Every response is JSON, plain text or an event stream: forbid browsers from sniffing
             // it as HTML.
             .wrap(middleware::DefaultHeaders::new().add(("X-Content-Type-Options", "nosniff")))
