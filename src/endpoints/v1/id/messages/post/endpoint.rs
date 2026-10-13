@@ -83,6 +83,8 @@ async fn trigger_post_message(
                     PosteMessageError::UnknownCitation
                 }
                 DbFailure::ForeignKey(_) => PosteMessageError::UnknownChat,
+                // The quoted message is deleted (tombstone): nothing was inserted.
+                DbFailure::NotFound => PosteMessageError::UnknownCitation,
                 _ => PosteMessageError::DatabaseError,
             })?;
 
@@ -97,8 +99,9 @@ async fn trigger_post_message(
     description = "Adds a message to a chat and pushes a `ChatSignal` on the SSE stream of every other connected \
                    member. The author is taken from the JWT, never from the body.\n\n \
                    `citation` is optional: the id of the message this one answers. It must be a message of the \
-                   same chat (`400` otherwise) and is read back as `citation` by `GET /api/v1/{chat_id}/` \
-                   (`null` once the quoted message is deleted).\n\n \
+                   same chat and not deleted (`400` otherwise) and is read back as `citation` by \
+                   `GET /api/v1/{chat_id}/` (`null` once the quoted message is deleted).\n\n \
+                   The signal is `NEW_MSG` with the new `message_id`, pushed once the message is committed.\n\n \
                    The response only holds the id given to the message.\n\n \
                    In a **direct** chat, a participant who hid it sees it again (in `GET /api/v1/`, with this \
                    message unread, and on their SSE stream): a direct chat is only hidden until its next message.\n\n \
@@ -114,7 +117,7 @@ async fn trigger_post_message(
         ),
         (
             status = 400,
-            description = "Malformed JSON body, `chat_id` not an integer, `content` breaking its rules (not blank, at most 5000 characters, no control character other than line breaks and tabs), `citation` above 9223372036854775807, or `citation` not a message of this chat (`` `citation` is not a message of this chat.``).",
+            description = "Malformed JSON body, `chat_id` not an integer, `content` breaking its rules (not blank, at most 5000 characters, no control character other than line breaks and tabs), `citation` above 9223372036854775807, or `citation` not a message of this chat or a deleted one (`` `citation` is not a message of this chat.``).",
             body = String,
             content_type = "text/plain",
             example = json!("Invalid `content`: must be at most 5000 characters")
@@ -173,12 +176,13 @@ pub async fn post_message(
     role.require_member()?;
     let result = trigger_post_message(&mut tx, auth_user.id, view, chat_id, role.is_direct).await?;
     commit(tx).await?;
-    // Only once committed: the members reload the chat as soon as they get the signal.
+    // Only once committed: the members read the new message as soon as they get the signal.
     sse_state
-        .publish(ChatEvent {
+        .publish(ChatEvent::message_created(
             chat_id,
-            sender_id: auth_user.id,
-        })
+            auth_user.id,
+            result.id(),
+        ))
         .await;
     Ok(HttpResponse::Ok().json(result))
 }

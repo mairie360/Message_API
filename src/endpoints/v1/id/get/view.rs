@@ -9,22 +9,48 @@ use crate::endpoints::validation::{Validate, ValidationError, MAX_MESSAGE_ID};
 /// Same page size bounds as the other lists.
 pub use crate::endpoints::pagination::{DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE};
 
-/// Pagination of the messages of a chat (keyset on the message id).
+/// Pagination of the messages of a chat: the history (keyset on the message id, `before`), or the
+/// changes since a cursor (`since`, `since_id`).
 #[derive(Debug, Default, serde::Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct GetChatQuery {
-    /// Only return messages older than this message id (exclusive): pass the `next_before` of the
-    /// previous page. Absent = the latest messages.
+    /// History only: return messages older than this message id (exclusive), passing the
+    /// `next_before` of the previous page. Absent = the latest messages. Not allowed with `since`.
     #[param(example = 118, minimum = 1)]
     before: Option<u64>,
     /// Number of messages to return, 1 to 100. Default 50.
     #[param(example = 50, minimum = 1, maximum = 100)]
     limit: Option<u32>,
+    /// Incremental read (MAIR-524): only the messages changed after this cursor (posted, edited or
+    /// deleted), in change order. RFC 3339 date-time, URL-encoded (`+` of an offset as `%2B`); pass
+    /// the `next_since` of the previous response. Not allowed with `before`.
+    #[param(value_type = Option<String>, format = DateTime, example = "2026-09-16T09:12:00.482113Z")]
+    since: Option<DateTime<Utc>>,
+    /// Second half of the cursor, with `since` only: the `next_since_id` of the previous response,
+    /// so that the changes sharing the `since` instant are not returned twice nor skipped.
+    /// Default 0: every change after `since` and the ones at exactly `since`.
+    #[param(example = 118, minimum = 0)]
+    since_id: Option<u64>,
 }
 
 impl GetChatQuery {
     pub fn new(before: Option<u64>, limit: Option<u32>) -> Self {
-        Self { before, limit }
+        Self {
+            before,
+            limit,
+            since: None,
+            since_id: None,
+        }
+    }
+
+    /// The changes after the cursor `(since, since_id)`.
+    pub fn since(since: DateTime<Utc>, since_id: Option<u64>, limit: Option<u32>) -> Self {
+        Self {
+            before: None,
+            limit,
+            since: Some(since),
+            since_id,
+        }
     }
 
     pub fn before(&self) -> Option<u64> {
@@ -33,6 +59,12 @@ impl GetChatQuery {
 
     pub fn limit(&self) -> u32 {
         self.limit.unwrap_or(DEFAULT_PAGE_SIZE)
+    }
+
+    /// The cursor of an incremental read, `None` for the history.
+    pub fn cursor(&self) -> Option<(DateTime<Utc>, u64)> {
+        self.since
+            .map(|since| (since, self.since_id.unwrap_or_default()))
     }
 }
 
@@ -48,6 +80,21 @@ impl Validate for GetChatQuery {
             return Err(ValidationError::new(
                 "limit",
                 &format!("must be between 1 and {MAX_PAGE_SIZE}"),
+            ));
+        }
+        if self.since.is_some() && self.before.is_some() {
+            return Err(ValidationError::new(
+                "since",
+                "cannot be combined with `before`: read the history or the changes",
+            ));
+        }
+        if self.since_id.is_some() && self.since.is_none() {
+            return Err(ValidationError::new("since_id", "requires `since`"));
+        }
+        if matches!(self.since_id, Some(id) if id > MAX_MESSAGE_ID) {
+            return Err(ValidationError::new(
+                "since_id",
+                &format!("must be between 0 and {MAX_MESSAGE_ID}"),
             ));
         }
         Ok(())
@@ -113,6 +160,18 @@ pub struct MessageView {
     /// The message `citation` points to (author and excerpt), also when it is older than this page;
     /// `null` exactly when `citation` is.
     quoted: Option<QuotedMessageView>,
+    /// Date of the last edit of the content; `null` when the message was never edited.
+    #[schema(value_type = Option<String>, format = DateTime, example = "2026-09-16T09:14:30.105822Z", nullable = true, required = true)]
+    edited_at: Option<DateTime<Utc>>,
+    /// Date of the last change of the message (posted, edited or deleted), the order of the
+    /// incremental reads (`since`).
+    #[schema(value_type = String, format = DateTime, example = "2026-09-16T09:14:30.105822Z")]
+    updated_at: DateTime<Utc>,
+    /// `true` for a deleted message (tombstone), only returned by an incremental read (`since`):
+    /// remove it from the display. Its `content` is then empty and `citation` / `quoted` are
+    /// `null`. Always `false` in the history.
+    #[schema(example = false)]
+    deleted: bool,
 }
 
 impl MessageView {
@@ -130,7 +189,23 @@ impl MessageView {
             created_at,
             citation,
             quoted: None,
+            edited_at: None,
+            updated_at: created_at,
+            deleted: false,
         }
+    }
+
+    /// Change tracking of the message (MAIR-524).
+    pub fn with_changes(
+        mut self,
+        edited_at: Option<DateTime<Utc>>,
+        updated_at: DateTime<Utc>,
+        deleted: bool,
+    ) -> Self {
+        self.edited_at = edited_at;
+        self.updated_at = updated_at;
+        self.deleted = deleted;
+        self
     }
 
     pub fn with_quoted(mut self, quoted: Option<QuotedMessageView>) -> Self {
@@ -161,11 +236,26 @@ impl MessageView {
     pub fn quoted(&self) -> Option<&QuotedMessageView> {
         self.quoted.as_ref()
     }
+
+    pub fn edited_at(&self) -> Option<&DateTime<Utc>> {
+        self.edited_at.as_ref()
+    }
+
+    pub fn updated_at(&self) -> &DateTime<Utc> {
+        &self.updated_at
+    }
+
+    pub fn deleted(&self) -> bool {
+        self.deleted
+    }
 }
 
 impl From<Message> for MessageView {
     fn from(message: Message) -> Self {
-        let quoted = match (message.reply_to_id, message.reply_excerpt.as_deref()) {
+        let quoted = match (
+            message.reply_to_id.filter(|_| !message.deleted),
+            message.reply_excerpt.as_deref(),
+        ) {
             (Some(id), Some(excerpt)) => Some(QuotedMessageView::new(
                 bigint_from_sql(id),
                 message.reply_owner_id.map(id_from_sql),
@@ -178,28 +268,47 @@ impl From<Message> for MessageView {
             &message.content,
             message.owner_id.map(id_from_sql),
             message.created_at,
-            message.reply_to_id.map(bigint_from_sql),
+            message
+                .reply_to_id
+                .filter(|_| !message.deleted)
+                .map(bigint_from_sql),
         )
         .with_quoted(quoted)
+        .with_changes(message.edited_at, message.updated_at, message.deleted)
     }
 }
 
-/// One page of the messages of a chat.
+/// One page of the messages of a chat: the history, or the changes since a cursor.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, ToSchema)]
 pub struct GetChatResultView {
     /// The chat itself, as a line of the chat list (`GET /api/v1/`): name to display, kind,
     /// contact, member count and the caller's unread counter. Read in the same call so that
     /// opening a chat needs nothing else but its members (`GET /api/v1/{chat_id}/users/`).
     chat: ChatView,
-    /// Messages of the page, **oldest first** (display order). Empty when the chat has no
-    /// message older than `before`.
+    /// History: messages of the page, **oldest first** (display order), never deleted ones; empty
+    /// when the chat has no message older than `before`. Incremental read (`since`): the messages
+    /// changed after the cursor in change order (`updated_at`, then `id`), tombstones included
+    /// (`deleted: true`); empty when nothing changed.
     messages: Vec<MessageView>,
-    /// Whether older messages remain: then pass `next_before` as `before` to get them.
+    /// Whether more remain: older messages (history, then pass `next_before` as `before`), or more
+    /// changes (incremental read, then call again at once with `next_since` / `next_since_id`).
     #[schema(example = true)]
     has_more: bool,
-    /// Id of the oldest message of the page when `has_more` is `true`, `null` otherwise.
+    /// History: id of the oldest message of the page when `has_more` is `true`, `null` otherwise.
+    /// Always `null` for an incremental read.
     #[schema(example = 101, nullable = true)]
     next_before: Option<u64>,
+    /// Cursor to pass as `since` on the next incremental read, never `null`. Incremental read: the
+    /// `updated_at` of the last message returned, or the `since` received when nothing changed.
+    /// History: the `updated_at` of the latest change of the chat when this response was read (the
+    /// creation of the chat when it has no message), so that polling from it misses nothing
+    /// that happened after the page.
+    #[schema(value_type = String, format = DateTime, example = "2026-09-16T09:12:00.482113Z")]
+    next_since: DateTime<Utc>,
+    /// Second half of the cursor, to pass as `since_id` with `next_since`: the id of that message
+    /// (`0` when the chat has no message, or the `since_id` received).
+    #[schema(example = 118, minimum = 0)]
+    next_since_id: u64,
 }
 
 impl GetChatResultView {
@@ -209,12 +318,22 @@ impl GetChatResultView {
         } else {
             None
         };
+        let next_since = chat.last_activity_at();
         Self {
             chat,
             messages,
             has_more,
             next_before,
+            next_since,
+            next_since_id: 0,
         }
+    }
+
+    /// The cursor to poll from after this response.
+    pub fn with_cursor(mut self, since: DateTime<Utc>, since_id: u64) -> Self {
+        self.next_since = since;
+        self.next_since_id = since_id;
+        self
     }
 
     /// Builds a page from the rows of `GetChatQueryView` run with `limit + 1` (newest first):
@@ -228,6 +347,31 @@ impl GetChatResultView {
             rows.into_iter().map(MessageView::from).collect(),
             has_more,
         )
+    }
+
+    /// Builds an incremental read from the rows of `GetChatChangesQueryView` run with `limit + 1`
+    /// after the cursor `(since, since_id)`: the extra row only tells that more changes remain,
+    /// and the cursor moves to the last row returned (stays put when nothing changed).
+    pub fn from_changes(
+        chat: ChatView,
+        mut rows: Vec<Message>,
+        limit: u32,
+        since: DateTime<Utc>,
+        since_id: u64,
+    ) -> Self {
+        let has_more = rows.len() > limit as usize;
+        rows.truncate(limit as usize);
+        let (next_since, next_since_id) = rows.last().map_or((since, since_id), |row| {
+            (row.updated_at, bigint_from_sql(row.id))
+        });
+        Self {
+            chat,
+            messages: rows.into_iter().map(MessageView::from).collect(),
+            has_more,
+            next_before: None,
+            next_since,
+            next_since_id,
+        }
     }
 
     pub fn chat(&self) -> &ChatView {
@@ -245,6 +389,14 @@ impl GetChatResultView {
     pub fn next_before(&self) -> Option<u64> {
         self.next_before
     }
+
+    pub fn next_since(&self) -> &DateTime<Utc> {
+        &self.next_since
+    }
+
+    pub fn next_since_id(&self) -> u64 {
+        self.next_since_id
+    }
 }
 
 #[cfg(test)]
@@ -261,6 +413,9 @@ mod tests {
             reply_to_id: None,
             reply_owner_id: None,
             reply_excerpt: None,
+            updated_at: Utc::now(),
+            edited_at: None,
+            deleted: false,
         }
     }
 
@@ -272,6 +427,7 @@ mod tests {
             None,
             8,
             0,
+            Utc::now(),
         )
     }
 
@@ -307,6 +463,65 @@ mod tests {
             (3, Some(51), "Le permis ?")
         );
         assert!(MessageView::from(message(8)).quoted().is_none());
+    }
+
+    #[test]
+    fn an_incremental_read_moves_the_cursor_to_its_last_row() {
+        let since = Utc::now();
+        let mut rows = vec![message(3), message(9), message(4)];
+        rows[1].deleted = true;
+        rows[1].content = String::new();
+        rows[1].reply_to_id = Some(3);
+        let page = GetChatResultView::from_changes(chat(), rows.clone(), 2, since, 0);
+        let ids: Vec<u64> = page.messages().iter().map(MessageView::id).collect();
+        assert_eq!(
+            ids,
+            vec![3, 9],
+            "change order is kept, the extra row is dropped"
+        );
+        assert!(page.has_more());
+        assert_eq!(page.next_before(), None);
+        assert_eq!(page.next_since_id(), 9);
+        assert_eq!(page.next_since(), &rows[1].updated_at);
+        // A tombstone has no quote.
+        assert!(page.messages()[1].deleted());
+        assert_eq!(page.messages()[1].citation(), None);
+    }
+
+    #[test]
+    fn an_empty_incremental_read_echoes_the_cursor() {
+        let since = Utc::now();
+        let page = GetChatResultView::from_changes(chat(), vec![], 50, since, 118);
+        assert!(!page.has_more());
+        assert_eq!((page.next_since(), page.next_since_id()), (&since, 118));
+    }
+
+    #[test]
+    fn since_and_before_are_mutually_exclusive() {
+        let since = GetChatQuery {
+            before: Some(118),
+            limit: None,
+            since: Some(Utc::now()),
+            since_id: None,
+        };
+        assert!(since
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .starts_with("Invalid `since`"));
+        let orphan = GetChatQuery {
+            since_id: Some(3),
+            ..GetChatQuery::default()
+        };
+        assert!(orphan
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .starts_with("Invalid `since_id`"));
+        assert!(GetChatQuery::since(Utc::now(), Some(0), Some(100))
+            .validate()
+            .is_ok());
+        assert_eq!(GetChatQuery::new(None, None).cursor(), None);
     }
 
     #[test]

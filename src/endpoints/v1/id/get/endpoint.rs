@@ -5,8 +5,10 @@ use mairie360_api_lib::state::AppState;
 
 use crate::endpoints::v1::id::access::{require_chat_access, AccessDenied};
 
-use crate::database::chats::get_chat::view::{GetChatHeaderQueryView, GetChatQueryView, Message};
-use crate::database::chats::get_chats::view::GetChatsQueryResultView;
+use crate::database::chats::get_chat::view::{
+    ChatHeader, GetChatChangesQueryView, GetChatHeaderQueryView, GetChatQueryView, Message,
+};
+use crate::database::ids::bigint_from_sql;
 use crate::endpoints::error::unexpected;
 use crate::endpoints::v1::get::view::ChatView;
 use crate::endpoints::v1::id::get::view::{GetChatQuery, GetChatResultView};
@@ -55,33 +57,53 @@ async fn trigger_get_chat(
     query: GetChatQuery,
 ) -> Result<GetChatResultView, GetChatError> {
     let limit = query.limit();
-    // One extra row tells whether older messages remain.
-    let view = GetChatQueryView::new(chat_id, query.before(), limit + 1);
     let header = GetChatHeaderQueryView::new(chat_id, user_id);
     let db = state.get_smart_db();
-    // The page and the header of the chat are independent reads: one round trip each, in parallel.
-    let (rows, header) = tokio::try_join!(
-        async {
-            db.fetch_all::<Message, _>(&view).await.map_err(|e| {
-                unexpected("get chat", e);
-                GetChatError::DatabaseError
-            })
-        },
-        async {
-            db.fetch_one::<GetChatsQueryResultView, _>(&header)
-                .await
-                .map_err(|e| {
-                    unexpected("get chat header", e);
+    let read_header = async {
+        db.fetch_one::<ChatHeader, _>(&header).await.map_err(|e| {
+            unexpected("get chat header", e);
+            GetChatError::DatabaseError
+        })
+    };
+
+    if let Some((since, since_id)) = query.cursor() {
+        // Incremental read: the cursor comes from the rows themselves, the header is read in
+        // parallel. One extra row tells whether more changes remain.
+        let view = GetChatChangesQueryView::new(chat_id, since, since_id, limit + 1);
+        let (rows, header) = tokio::try_join!(
+            async {
+                db.fetch_all::<Message, _>(&view).await.map_err(|e| {
+                    unexpected("get chat changes", e);
                     GetChatError::DatabaseError
                 })
-        },
-    )?;
+            },
+            read_header,
+        )?;
+        return Ok(GetChatResultView::from_changes(
+            ChatView::from(header.chat),
+            rows,
+            limit,
+            since,
+            since_id,
+        ));
+    }
 
-    Ok(GetChatResultView::from_newest_first(
-        ChatView::from(header),
-        rows,
-        limit,
-    ))
+    // History. The header carries the cursor of the latest change: it is read *before* the page,
+    // so that a change committed in between is after the cursor (read again by the next
+    // incremental read) rather than missed. One extra row tells whether older messages remain.
+    let header = read_header.await?;
+    let view = GetChatQueryView::new(chat_id, query.before(), limit + 1);
+    let rows = db.fetch_all::<Message, _>(&view).await.map_err(|e| {
+        unexpected("get chat", e);
+        GetChatError::DatabaseError
+    })?;
+
+    Ok(
+        GetChatResultView::from_newest_first(ChatView::from(header.chat), rows, limit).with_cursor(
+            header.latest_change_at,
+            bigint_from_sql(header.latest_change_id),
+        ),
+    )
 }
 
 #[utoipa::path(
@@ -101,16 +123,29 @@ async fn trigger_get_chat(
                    that is needed to open a chat. For an administrator who is not a participant of a direct chat, \
                    `name` holds both names and `contact_id` is `null`.\n\n\
                    **Quotes:** a message that answers another has its `citation` id and a `quoted` object (author and \
-                   first 100 characters), also when the quoted message is older than the page.\n\n\
+                   first 100 characters), also when the quoted message is older than the page. Once the quoted \
+                   message is deleted, both are `null`.\n\n\
+                   **Deleted messages** are tombstones: the history (without `since`) never returns them.\n\n\
+                   **Incremental read** (MAIR-524, replaces reloading the open chat): `since=<next_since>&since_id=<next_since_id>` \
+                   returns only the messages **posted, edited or deleted** after that cursor, in change order \
+                   (`updated_at`, then `id`), at most `limit`. A deleted message comes as a tombstone \
+                   (`deleted: true`, empty `content`, `citation` and `quoted` `null`): remove it, and drop the \
+                   `quoted` of the messages that cite it. An edited one comes again with its new `content` and \
+                   `edited_at`. Every response carries the next cursor (`next_since`, `next_since_id`): the last \
+                   row returned, or the cursor received when nothing changed (`messages` empty). When `has_more` \
+                   is `true`, call again at once with it. Start from the `next_since` / `next_since_id` of the \
+                   history response: changes are ordered by commit within a chat, so a cursor never skips one. \
+                   `since` and `before` are mutually exclusive (`400`). `GET /api/v1/stream` signals when to \
+                   read (`NEW_MSG`, `MSG_EDITED`, `MSG_DELETED`).\n\n\
                    Only the members of the chat and administrators may call this route. Anyone else gets the same \
                    `404` as for an unknown chat.",
     responses(
         (
             status = 200,
-            description = "The chat and one page of its messages, oldest first.",
+            description = "The chat and one page of its messages: the history oldest first, or (with `since`) the changes after the cursor in change order, tombstones included.",
             body = GetChatResultView,
             example = json!({
-                "chat": { "id": 5, "name": "Service urbanisme", "kind": "group", "contact_id": null, "member_count": 8, "unread_count": 3 },
+                "chat": { "id": 5, "name": "Service urbanisme", "kind": "group", "contact_id": null, "member_count": 8, "unread_count": 3, "last_activity_at": "2026-09-16T09:14:30.105822Z" },
                 "messages": [
                     {
                         "id": 117,
@@ -118,7 +153,10 @@ async fn trigger_get_chat(
                         "sender_id": 51,
                         "created_at": "2026-09-16T09:05:00Z",
                         "citation": null,
-                        "quoted": null
+                        "quoted": null,
+                        "edited_at": null,
+                        "updated_at": "2026-09-16T09:05:00.331207Z",
+                        "deleted": false
                     },
                     {
                         "id": 118,
@@ -126,16 +164,21 @@ async fn trigger_get_chat(
                         "sender_id": 42,
                         "created_at": "2026-09-16T09:12:00Z",
                         "citation": 117,
-                        "quoted": { "id": 117, "sender_id": 51, "excerpt": "Quelqu'un a des nouvelles du permis de construire de la rue Pasteur ?" }
+                        "quoted": { "id": 117, "sender_id": 51, "excerpt": "Quelqu'un a des nouvelles du permis de construire de la rue Pasteur ?" },
+                        "edited_at": "2026-09-16T09:14:30.105822Z",
+                        "updated_at": "2026-09-16T09:14:30.105822Z",
+                        "deleted": false
                     }
                 ],
                 "has_more": true,
-                "next_before": 117
+                "next_before": 117,
+                "next_since": "2026-09-16T09:14:30.105822Z",
+                "next_since_id": 118
             })
         ),
         (
             status = 400,
-            description = "A URL segment is not an integer, or `before` / `limit` is out of range (`before` 1 to 9223372036854775807, `limit` 1 to 100).",
+            description = "A URL segment is not an integer, `before` / `limit` / `since_id` is out of range (`before` 1 to 9223372036854775807, `limit` 1 to 100, `since_id` 0 to 9223372036854775807), `since` is not an RFC 3339 date-time (an unencoded `+` of an offset reads as a space), `since` is combined with `before`, or `since_id` comes without `since`.",
             body = String,
             content_type = "text/plain",
             example = json!("Invalid `limit`: must be between 1 and 100")

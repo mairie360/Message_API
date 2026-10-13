@@ -813,6 +813,14 @@
                   "    pm.expect(pm.response.json().has_more).to.be.false;",
                   "    pm.expect(pm.response.json().next_before).to.be.null;",
                   "    messages.forEach(m => pm.expect(new Date(m.created_at).toString()).to.not.eql(\"Invalid Date\"));",
+                  "});",
+                  "pm.test(\"The history carries the cursor of its latest change (MAIR-524)\", function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.next_since_id).to.eql(Number(pm.environment.get(\"reply_id\")));",
+                  "    pm.expect(new Date(body.next_since).toString()).to.not.eql(\"Invalid Date\");",
+                  "    body.messages.forEach(m => pm.expect(m.deleted).to.be.false);",
+                  "    pm.environment.set(\"since\", body.next_since);",
+                  "    pm.environment.set(\"since_id\", body.next_since_id);",
                   "});"
                 ]
               }
@@ -1362,6 +1370,121 @@
               }
             }
           ],
+          "response": []
+        },
+        {
+          "name": "Changes since the cursor hold the edit and the tombstone",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"The edit, then the deletion, in change order\", function () {",
+                  "    const body = pm.response.json();",
+                  "    const ids = body.messages.map(m => m.id);",
+                  "    pm.expect(ids).to.eql([Number(pm.environment.get(\"message_id\")), Number(pm.environment.get(\"reply_id\"))]);",
+                  "    const [edited, tombstone] = body.messages;",
+                  "    pm.expect(edited.deleted).to.be.false;",
+                  "    pm.expect(edited.edited_at).to.be.a(\"string\");",
+                  "    pm.expect(tombstone.deleted).to.be.true;",
+                  "    pm.expect(tombstone.content).to.eql(\"\");",
+                  "    pm.expect(tombstone.citation).to.be.null;",
+                  "    pm.expect(body.has_more).to.be.false;",
+                  "    pm.expect(body.next_before).to.be.null;",
+                  "    pm.expect(body.next_since_id).to.eql(Number(pm.environment.get(\"reply_id\")));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_admin}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/{{chat_id}}/?since={{since}}&since_id={{since_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "{{chat_id}}",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "since",
+                  "value": "{{since}}"
+                },
+                {
+                  "key": "since_id",
+                  "value": "{{since_id}}"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "A cursor with before is refused",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "pm.test(\"Body names the field\", function () {",
+                  "    pm.expect(pm.response.text()).to.match(/^Invalid `since`/);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_admin}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/{{chat_id}}/?since={{since}}&before={{reply_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "{{chat_id}}",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "since",
+                  "value": "{{since}}"
+                },
+                {
+                  "key": "before",
+                  "value": "{{reply_id}}"
+                }
+              ]
+            }
+          },
           "response": []
         }
       ]
