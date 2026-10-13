@@ -4,7 +4,7 @@ use crate::database::ids::{bigint_from_sql, bigint_to_sql, id_from_sql, id_to_sq
 use mairie360_api_lib::database::db_interface::{ApiRequestDto, QueryParam};
 
 /// Replaces the content of message `message_id` of chat `chat_id`. No row (`DbError::NotFound`)
-/// when the message does not belong to that chat.
+/// when the message does not belong to that chat or is deleted (tombstone).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PatchMessageQueryView {
     params: Vec<QueryParam>,
@@ -47,7 +47,9 @@ impl Display for PatchMessageQueryView {
 
 impl ApiRequestDto for PatchMessageQueryView {
     fn query_sql(&self) -> &'static str {
-        "UPDATE messages SET content = $2 WHERE id = $1 AND conversation_id = $3 RETURNING id"
+        // A tombstone is never edited back (MAIR-524).
+        "UPDATE messages SET content = $2 \
+         WHERE id = $1 AND conversation_id = $3 AND deleted_at IS NULL RETURNING id"
     }
 
     fn query_params(&self) -> &[QueryParam] {

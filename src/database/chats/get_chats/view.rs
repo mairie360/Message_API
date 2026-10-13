@@ -5,7 +5,7 @@ use mairie360_api_lib::database::db_interface::{ApiRequestDto, QueryParam};
 
 /// Chats of `user_id` with their displayed name (the title of a group chat, the other participant's
 /// full name for a direct chat), kind, contact of a direct chat, member count and unread counter,
-/// newest first. Optionally filtered by a search term.
+/// newest first. Optionally filtered by a search term, and by a `last_activity_at` cursor.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GetChatsQueryView {
     params: Vec<QueryParam>,
@@ -39,6 +39,12 @@ fn search_pattern(term: Option<&str>) -> QueryParam {
     QueryParam::Text(pattern)
 }
 
+/// `since` of a list without cursor: before any `last_activity_at` (no `QueryParam` holds an
+/// optional timestamp).
+fn no_since() -> chrono::DateTime<chrono::Utc> {
+    chrono::DateTime::UNIX_EPOCH
+}
+
 impl GetChatsQueryView {
     /// Every chat of the user.
     pub fn new(user_id: u64) -> Self {
@@ -49,6 +55,7 @@ impl GetChatsQueryView {
                 QueryParam::OptionI32(None),
                 QueryParam::I32(0),
                 search_pattern(None),
+                QueryParam::DateTime(no_since()),
             ],
         }
     }
@@ -58,12 +65,25 @@ impl GetChatsQueryView {
     /// name of the chat, or the name of one of its members other than the caller (the other
     /// participant of a direct chat).
     pub fn page(user_id: u64, limit: u32, offset: u32, search: Option<&str>) -> Self {
+        Self::page_since(user_id, limit, offset, search, None)
+    }
+
+    /// Same as [`Self::page`], restricted with `since` to the chats whose `last_activity_at`
+    /// (creation or last message change, Database 3.1.0) is after it (MAIR-524).
+    pub fn page_since(
+        user_id: u64,
+        limit: u32,
+        offset: u32,
+        search: Option<&str>,
+        since: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Self {
         Self {
             params: vec![
                 QueryParam::I32(id_to_sql(user_id)),
                 page_limit(limit),
                 page_offset(offset),
                 search_pattern(search),
+                QueryParam::DateTime(since.unwrap_or_else(no_since)),
             ],
         }
     }
@@ -102,7 +122,8 @@ impl ApiRequestDto for GetChatsQueryView {
                     FROM conversation_members m
                     WHERE m.conversation_id = c.id AND m.is_excluded = FALSE
                 ) END AS member_count,
-                COALESCE(uc.unread_count, 0) AS unread_count
+                COALESCE(uc.unread_count, 0) AS unread_count,
+                c.last_activity_at
             FROM conversations c
             INNER JOIN conversation_members cm ON c.id = cm.conversation_id
             LEFT JOIN unread_counters uc
@@ -114,6 +135,7 @@ impl ApiRequestDto for GetChatsQueryView {
                 END
             )
             WHERE cm.user_id = $1 AND cm.is_excluded = FALSE
+              AND c.last_activity_at > $5
               AND (
                 $4 = ''
                 OR c.title ILIKE $4
@@ -159,4 +181,6 @@ pub struct GetChatsQueryResultView {
     /// Members that did not leave the chat; a direct chat always has its two participants.
     pub member_count: i32,
     pub unread_count: i32,
+    /// Creation of the chat or last change of one of its messages (posted, edited, deleted).
+    pub last_activity_at: chrono::DateTime<chrono::Utc>,
 }

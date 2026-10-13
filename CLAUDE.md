@@ -51,7 +51,7 @@ and `lists.rs` checks the production quota of `rate_limit_from_env()` (`429` pas
 least 1 s).
 They are plain `#[tokio::test]` + `#[serial]` (`serial_test`) and use `mairie360_api_lib`'s
 `get_shared_db()`, which spins up **real Docker containers via testcontainers** —
-`ghcr.io/mairie360/database:3.0.0` (pinned in `.cargo/config.toml` through `TEST_DB_VERSION`, which overrides the lib default) plus a Liquibase
+`ghcr.io/mairie360/database:3.1.0` (pinned in `.cargo/config.toml` through `TEST_DB_VERSION`, which overrides the lib default) plus a Liquibase
 migration container, with Postgres published on a random host port (tests must still stay
 `#[serial]`). A running Docker daemon and pull access to `ghcr.io/mairie360/*` are required.
 
@@ -103,12 +103,15 @@ Both the ZAP and k6 stacks carry the OpenAPI coverage gate (MAIR-194) from mairi
 never reached, or when an operation declaring `security(("jwt" = []))` only got 401/403. `load-test.js` is built on
 `coverage.js` and covers every operation (MAIR-195), under a high load on a volume seed (MAIR-474): the performance
 stack's `seeder` also runs `init-perf.sql` (2 000 agents `400001`-`402000` in 16 group chats each, 1 000 direct
-chats, 25 messages per group chat and 10 000 in the hot chat `100000`; agent `400001 + r` is a member of chat
-`100000 + r`). GET handlers run in the `reads` scenario (up to 100 VUs) as a random seeded agent (tokens signed in k6
+chats, 25 messages per group chat, 100 in the busy chats `100001`-`100100` (one in 20 soft-deleted, MAIR-524) and
+10 000 in the hot chat `100000`; agent `400001 + r` is a member of chat `100000 + r`). GET handlers run in the `reads` scenario (up to 100 VUs) as a random seeded agent (tokens signed in k6
 with the run's `JWT_SECRET`, which the compose file passes): their chat list at a random offset, one of their chats
 (the hot one at a random `before`, a third of the time) and its members. The other methods run in the `writes`
 scenario (10 VUs) as the Admin, each handler creating and deleting its own chat or message so they are
-order-independent; a `chats_rush` scenario sends `GET /api/v1/` at a fixed 100 req/s. `GET /api/v1/stream` has its own 1-VU `stream`
+order-independent; a `chats_rush` scenario sends `GET /api/v1/` at a fixed 100 req/s; a `chat_poll`
+scenario (MAIR-524) sends the incremental reads that replaced the 2 s reloads at a fixed rate (`op:chat_since`
+`GET /api/v1/{chat_id}/?since=` on a busy chat, from its cursor read in `setup()` or, one time in four, from 2000 for a
+full page; `op:chats_since` `GET /api/v1/?since=`), each with a 200 ms `p(95)`. `GET /api/v1/stream` has its own 1-VU `stream`
 scenario: the SSE response never ends, so k6 cuts it after 1 s (error 1050), a timeout marked expected with
 `responseCallback: http.expectedStatuses(0, 200)` so it stays out of `http_req_failed`. One `p(95)` threshold per
 `op` tag (200 ms reads, 500 ms writes, 1.5 s stream), `checks == 100%` (status and seeded rows), `dropped_iterations == 0` and
@@ -125,9 +128,13 @@ rules (MAIR-394):
 
 - posting a message is for members only (`ChatRole::require_member`): an administrator who is not a member gets `403`;
 - editing a message is for its author only, administrators included (`require_message_author(.., false)`);
-- deleting a message: its author, or an administrator (moderation). `DeleteMessageQueryView` writes a
-  `DELETE_MESSAGE` row with the content in `messaging_moderation_log` in the same statement when the message is
-  someone else's; `DELETE /{chat_id}/` logs `DELETE_CONVERSATION` the same way, whoever deletes;
+- deleting a message: its author, or an administrator (moderation). It is a **soft delete** (MAIR-524):
+  `DeleteMessageQueryView` sets `deleted_at` (Database `fn_track_message_change` empties the content), writes a
+  `DELETE_MESSAGE` row with the content read before the update in `messaging_moderation_log` when the message is
+  someone else's, and lowers the `unread_counters` that still counted it (recipients but the author whose read cursor
+  is before it and who joined before it), all in one statement run after `LockChatMessagesQueryView` (the conversation
+  advisory lock, so no acknowledgement races the adjustment). A tombstone is final: `PATCH` answers `404 Unknown
+  message.`, `DELETE` `404`, quoting it `400`; `DELETE /{chat_id}/` logs `DELETE_CONVERSATION` the same way, whoever deletes;
 - `DELETE /{chat_id}/` (MAIR-478, `access::chat_access_in` + `ChatDeleteRightQueryView`): a group chat by its
   creator while still a member, an administrator, or anyone `check_access(user, 'conversations', 'delete', chat)`
   grants (global `delete_all`, individual or group ACL), member or not; a direct chat by an administrator or
@@ -161,6 +168,29 @@ query fetches `limit + 1` rows newest first, `GetChatResultView::from_newest_fir
 `has_more` / `next_before` and returns the page oldest first. `citation` is stored in `messages.reply_to_id`, whose
 composite foreign key `(conversation_id, reply_to_id)` rejects a message of another chat (mapped to `400`).
 No `QueryParam` holds an optional BIGINT, so an absent `before` / `citation` travels as `0` (`NULLIF`).
+The history (`GetChatQueryView`) skips tombstones, and hides the quote (`citation` and `quoted` `null`) of a deleted
+message.
+
+MAIR-524, incremental reads (they replace the front's 2 s reload of the list and of the open chat; **this API needs
+Database `releases/v3.1.0`**: `messages.updated_at` / `edited_at` / `deleted_at`, `conversations.last_activity_at`,
+`idx_messages_conversation_updated`):
+
+- `GET /api/v1/{chat_id}/?since=<RFC 3339>&since_id=<id, default 0>&limit=` (`GetChatChangesQueryView`): the messages
+  posted, edited or deleted after the cursor, keyset `(m.updated_at, m.id) > ($since, $since_id)` ordered by
+  `(updated_at, id)` (served by `idx_messages_conversation_updated`, checked by an `EXPLAIN` test), tombstones included
+  as `deleted: true` with an empty `content`. `GetChatResultView::from_changes` trims the `limit + 1` row into
+  `has_more` and moves `next_since` / `next_since_id` to the last row (echoes the input when empty). `since` with
+  `before`, or `since_id` without `since`, is a `400`. The trigger stamps `updated_at` with `clock_timestamp()` under
+  the conversation lock, so within a chat commit order is `updated_at` order and a cursor never skips a change.
+- Without `since`, the history also answers `next_since` / `next_since_id`: the latest change of the chat
+  (`ChatHeader`, a `LATERAL` on the same index, `last_activity_at` / `0` for an empty chat). The header is read
+  **before** the page in that case (in parallel for a `since` read), so a change committed in between is after the
+  cursor rather than missed.
+- `GET /api/v1/?since=` keeps the chats whose `last_activity_at` is after the cursor (`GetChatsQueryView::page_since`,
+  the epoch when absent: no `QueryParam` holds an optional timestamp), same order and pagination. `ChatView` carries
+  `last_activity_at`; acknowledgements and member changes do not move it, and different chats are not committed in
+  date order, so clients pass the greatest value seen minus a few seconds.
+- `MessageView` carries `edited_at` (nullable), `updated_at` and `deleted` (additive fields).
 
 MAIR-507, what a client needs to display the list and to open a chat, in one query each:
 
@@ -182,11 +212,11 @@ Unread counters are only lowered by the explicit `POST /api/v1/{chat_id}/read/` 
 `{ "unread_count": k }`); `GET /api/v1/{chat_id}/` and `GET /api/v1/` never touch them, so polling is safe. The route is
 `endpoints::v1::id::read` and one call to the Postgres function `fn_acknowledge_read` (`database::chats::acknowledge_read`),
 which lives in `Devops/Database` (`releases/v1.5.0` + `repeatable/messages/`): it moves a per-agent cursor
-(`conversation_read_cursors`) forward only, recounts the messages after it, and answers "no row" (→ `404 Unknown message.`)
+(`conversation_read_cursors`) forward only, recounts the messages after it (tombstones excluded), and answers "no row" (→ `404 Unknown message.`)
 when the id belongs to another chat. Sends and acknowledgements of one conversation are serialized by a transaction advisory
 lock taken by a `BEFORE INSERT` trigger on `messages`, which also draws the message id after the lock so a single cursor is
 sound. **This API needs a Database image that ships that release, `releases/v1.8.0`** (MAIR-394: `created_by`,
-`reply_to_id`, `messaging_moderation_log`) **and `releases/v1.9.0`** (MAIR-478: direct chat pair): the compose files and
+`reply_to_id`, `messaging_moderation_log`) **and `releases/v1.9.0`** (MAIR-478: direct chat pair) **and `releases/v3.1.0`** (MAIR-524: change tracking): the compose files and
 `TEST_DB_VERSION` in `.cargo/config.toml` pin it, and both have to be bumped together when a newer Database image is
 needed. To try an unmerged Database branch, build `ghcr.io/mairie360/database:<tag>` and `…/liquibase-migrations:<tag>`
 from `Devops/Database` and run `TEST_DB_VERSION=<tag> cargo test`.
@@ -294,11 +324,18 @@ the container tests.
   subscription is only trusted once a `probe` payload published right after it comes back.
 - `main.rs` creates the `broadcast` channel, spawns `RedisRelay::run` and
   `event_manager::start_internal_event_listener` (with a cloned `SmartDatabase`).
-- Write endpoints do their DB write, then `sse_state.publish(ChatEvent { chat_id, sender_id })`: through Redis when the
-  relay is subscribed, straight on `internal_bus` otherwise (a duplicate signal only makes a client reload once more).
-- The listener, per event, queries the non-excluded chat members (`get_chat_users`) and pushes a serde-serialized
-  `ChatSignal` frame (`data: {...}\n\n`) to every connection of each online member (skipping the
-  sender). A `Lagged` bus error is logged and the loop resumes; only closed senders are removed.
+- Write endpoints commit, then `sse_state.publish(ChatEvent::…)` (MAIR-524: `message_created` on a post,
+  `message_edited` on a `PATCH`, `message_deleted` on a `DELETE`, `chat_read` on `POST /read/`, each with its
+  `message_id`, plus `unread_count` for a read): through Redis when the relay is subscribed, straight on `internal_bus`
+  otherwise (a duplicate signal only makes a client read once more). `ChatEvent.kind` / `message_id` /
+  `unread_count` are `#[serde(default)]`, so an event of an older replica reads as `MessageCreated`, and an older replica
+  ignores them (signals everything as `NEW_MSG`) during a rolling update.
+- The listener pushes a serde-serialized `ChatSignal` frame (`data: {...}\n\n`, `ChatSignal::from_event`): `type`
+  `NEW_MSG` / `MSG_EDITED` / `MSG_DELETED` to every connection of each online non-excluded member but the actor (one
+  `get_chat_users` query), `CHAT_READ` (with `unread_count`) to every connection of the reader only, no query. The frame
+  of a post stays `{"type":"NEW_MSG","chat_id":…}` plus the additive `message_id`. The table of the event contract is
+  the description of `GET /api/v1/stream` (what BFF_Message relays). A `Lagged` bus error is logged and the loop
+  resumes; only closed senders are removed.
 - `GET /api/v1/stream` registers a new connection for the caller and spawns a supervisor (`actix_web::rt::spawn`): 15 s
   keep-alive ping, `authenticate_token` again every 30 s (revoked session, deleted account), and a timer on the JWT
   `exp` when it is readable. Any failure notifies `close`, which ends the response (`take_until`); the connection is

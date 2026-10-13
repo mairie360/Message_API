@@ -41,7 +41,13 @@ async fn trigger_get_chats(
     query: ChatListQuery,
 ) -> Result<GetChatsResultView, GetChatsError> {
     let page = query.page();
-    let view = GetChatsQueryView::page(user_id, page.limit(), page.offset(), query.search());
+    let view = GetChatsQueryView::page_since(
+        user_id,
+        page.limit(),
+        page.offset(),
+        query.search(),
+        query.since(),
+    );
     let result: Vec<GetChatsQueryResultView> =
         state.get_smart_db().fetch_all(&view).await.map_err(|e| {
             unexpected("get chats", e);
@@ -72,7 +78,13 @@ async fn trigger_get_chats(
                    **Search:** `search` keeps the chats whose name contains the text, or in which a member other \
                    than the caller has a first name, last name or full name containing it. \"autoroute\" finds \
                    the chat \"Projet autoroute\"; \"Xavier Bertrand\" finds the direct chat with him and the group \
-                   chats he belongs to. The pagination applies to the filtered list.",
+                   chats he belongs to. The pagination applies to the filtered list.\n\n\
+                   **Incremental refresh** (MAIR-524, replaces reloading the whole list): `since` keeps the chats \
+                   whose `last_activity_at` (creation, or last message posted, edited or deleted) is after it; \
+                   combine it with the pagination and `search` as usual, an empty `chats` means nothing changed. \
+                   Pass the greatest `last_activity_at` seen minus a few seconds: changes of different chats are \
+                   not committed in date order. Acknowledgements and member changes do not move \
+                   `last_activity_at` (the caller's own reads come as `CHAT_READ` on `GET /api/v1/stream`).",
     responses(
         (
             status = 200,
@@ -80,16 +92,16 @@ async fn trigger_get_chats(
             body = GetChatsResultView,
             example = json!({
                 "chats": [
-                    { "id": 5, "name": "Service urbanisme", "kind": "group", "contact_id": null, "member_count": 8, "unread_count": 3 },
-                    { "id": 9, "name": "Xavier Bertrand", "kind": "direct", "contact_id": 42, "member_count": 2, "unread_count": 1 },
-                    { "id": 8, "name": "Astreinte week-end", "kind": "group", "contact_id": null, "member_count": 4, "unread_count": 0 }
+                    { "id": 5, "name": "Service urbanisme", "kind": "group", "contact_id": null, "member_count": 8, "unread_count": 3, "last_activity_at": "2026-09-16T09:12:00.482113Z" },
+                    { "id": 9, "name": "Xavier Bertrand", "kind": "direct", "contact_id": 42, "member_count": 2, "unread_count": 1, "last_activity_at": "2026-09-16T08:47:12.004518Z" },
+                    { "id": 8, "name": "Astreinte week-end", "kind": "group", "contact_id": null, "member_count": 4, "unread_count": 0, "last_activity_at": "2026-09-12T17:30:45.913204Z" }
                 ],
                 "has_more": false
             })
         ),
         (
             status = 400,
-            description = "`limit` not between 1 and 100, `offset` not between 0 and 2147483647, or `search` longer than 150 characters or containing a control character.",
+            description = "`limit` not between 1 and 100, `offset` not between 0 and 2147483647, `search` longer than 150 characters or containing a control character, or `since` not an RFC 3339 date-time (an unencoded `+` of an offset reads as a space).",
             body = String,
             content_type = "text/plain",
             example = json!("Invalid `limit`: must be between 1 and 100")

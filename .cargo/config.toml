@@ -17,7 +17,7 @@ cov_test = ["llvm-cov", "--workspace", "--ignore-filename-regex", "main\\.rs|lib
 cov = ["llvm-cov", "--workspace", "--ignore-filename-regex", "main\\.rs|lib\\.rs", "--fail-under-lines", "60", "--codecov", "--output-path", "codecov.json"]
 
 # Version of the ghcr.io/mairie360/database and liquibase-migrations images the tests start
-# (mairie360_api_lib::test_setup), kept equal to the compose files: Database v3.0.0. An exported
+# (mairie360_api_lib::test_setup), kept equal to the compose files: Database v3.1.0 (MAIR-524: message change tracking). An exported
 # TEST_DB_VERSION still wins.
 [env]
-TEST_DB_VERSION = "3.0.0"
+TEST_DB_VERSION = "3.1.0"

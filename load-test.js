@@ -19,7 +19,11 @@
 //   every call ends on a k6 timeout, which k6 logs as a warning: keeping it out of the 20 VUs
 //   keeps the CI log readable;
 // - `chats_rush`: `GET /api/v1/` as agents at the fixed arrival rate of the profile, failing if k6 has to drop
-//   iterations (the API no longer keeps up).
+//   iterations (the API no longer keeps up);
+// - `chat_poll` (MAIR-524): what replaced the 2 s reload of the open chat and of the list, at a
+//   fixed arrival rate: `GET /api/v1/{chat_id}/?since=` on one of the 100 busy chats (100
+//   messages, 5 tombstones) from its latest cursor (nothing changed, the common case) or, one
+//   time in four, from the beginning (catching up a full page), and `GET /api/v1/?since=`.
 import http from 'k6/http';
 import crypto from 'k6/crypto';
 import encoding from 'k6/encoding';
@@ -51,6 +55,9 @@ const HOT_CHAT_ID = 100000;
 const HOT_MEMBERS = 8; // agents 400001 + 250 * k
 const HOT_MESSAGES = 10000;
 const PAGE = 50;
+// Busy chats of init-perf.sql (MAIR-524): 100000 + r for r = 1..100, 100 messages each, agent
+// 400001 + r is a member.
+const BUSY_CHATS = { firstRank: 1, count: 100, messages: 100 };
 
 // Load profile (MAIR-474), K6_PROFILE:
 // - `ci` (default): what the CI runner holds with the same strict thresholds. The runner
@@ -58,8 +65,8 @@ const PAGE = 50;
 // - `stress`: the high load, run by hand (`K6_PROFILE=stress ./performance_test.sh`) to find
 //   the breaking point on a larger machine, not on every push.
 const PROFILES = {
-  ci: { readVus: 30, writeVus: 4, rushRate: 30 },
-  stress: { readVus: 100, writeVus: 10, rushRate: 100 },
+  ci: { readVus: 30, writeVus: 4, rushRate: 30, pollRate: 30 },
+  stress: { readVus: 100, writeVus: 10, rushRate: 100, pollRate: 100 },
 };
 const PROFILE = PROFILES[__ENV.K6_PROFILE || 'ci'];
 if (!PROFILE) throw new Error(`Unknown K6_PROFILE ${__ENV.K6_PROFILE}: ${Object.keys(PROFILES).join(', ')}`);
@@ -67,6 +74,10 @@ if (!PROFILE) throw new Error(`Unknown K6_PROFILE ${__ENV.K6_PROFILE}: ${Object.
 // Fixed-rate `GET /api/v1/` as agents.
 const CHATS_RUSH_RATE = PROFILE.rushRate; // requests per second
 const CHATS_RUSH_BUDGET_MS = 200;
+
+// Fixed-rate incremental reads (MAIR-524), as members of the busy chats.
+const POLL_RATE = PROFILE.pollRate; // iterations per second
+const POLL_BUDGET_MS = 200;
 
 const randomInt = (max) => Math.floor(Math.random() * max);
 
@@ -363,6 +374,16 @@ export const options = {
       preAllocatedVUs: 50,
       maxVUs: 200,
     },
+    chat_poll: {
+      executor: 'constant-arrival-rate',
+      exec: 'chatPollScenario',
+      startTime: '30s',
+      rate: POLL_RATE,
+      timeUnit: '1s',
+      duration: '2m',
+      preAllocatedVUs: 30,
+      maxVUs: 150,
+    },
   },
   thresholds: {
     ...reads.thresholds, // every operation exercised, no handler error (shared counters)
@@ -370,6 +391,8 @@ export const options = {
     ...latencyThresholds(stream, STREAM_BUDGET_MS),
     ...latencyThresholds(writes, WRITE_BUDGET_MS),
     'http_req_duration{op:chats_rush}': [`p(95)<${CHATS_RUSH_BUDGET_MS}`],
+    'http_req_duration{op:chat_since}': [`p(95)<${POLL_BUDGET_MS}`],
+    'http_req_duration{op:chats_since}': [`p(95)<${POLL_BUDGET_MS}`],
     dropped_iterations: ['count==0'], // the rush kept its rate
     // Strict (MAIR-474): one wrong status or one missing seeded row fails the run.
     checks: ['rate==1'],
@@ -377,12 +400,20 @@ export const options = {
   },
 };
 
-/** The newest message of the hot chat (its page cursor) and the sandbox of the writes. */
+/**
+ * The newest message of the hot chat (its page cursor), the latest change cursor of every busy
+ * chat (where its members poll from) and the sandbox of the writes.
+ */
 export function setup() {
   const page = fixture('GET', `/api/v1/${HOT_CHAT_ID}/?limit=1`).json();
   const hotNewestId = page.messages[page.messages.length - 1].id;
+  const busyCursors = {};
+  for (let rank = BUSY_CHATS.firstRank; rank < BUSY_CHATS.firstRank + BUSY_CHATS.count; rank += 1) {
+    const history = fixture('GET', `/api/v1/${GROUP_CHATS.first + rank}/?limit=1`).json();
+    busyCursors[rank] = { since: history.next_since, sinceId: history.next_since_id };
+  }
   const writeChatId = createChat('k6 write sandbox', [MEMBER_ID]);
-  return { hotNewestId, writeChatId };
+  return { hotNewestId, busyCursors, writeChatId, startedAt: new Date().toISOString() };
 }
 
 export function teardown(data) {
@@ -413,4 +444,32 @@ export function chatsRushScenario() {
 export function streamScenario(data) {
   stream.run({ headers: AUTH, data });
   sleep(4);
+}
+
+/**
+ * The polling that replaced the reloads (MAIR-524): one busy chat read since its latest cursor
+ * (empty, the cursor comes back unchanged) or from the beginning (a full page of changes,
+ * tombstones included), then the agent's chat list since the start of the run.
+ */
+export function chatPollScenario(data) {
+  const rank = BUSY_CHATS.firstRank + randomInt(BUSY_CHATS.count);
+  const chatId = GROUP_CHATS.first + rank;
+  const headers = agentAuth(AGENTS.first + rank);
+  const catchUp = randomInt(4) === 0;
+  const cursor = catchUp ? { since: '2000-01-01T00:00:00Z', sinceId: 0 } : data.busyCursors[rank];
+  const query = `since=${encodeURIComponent(cursor.since)}&since_id=${cursor.sinceId}&limit=${PAGE}`;
+  const res = http.get(`${BASE_URL}/api/v1/${chatId}/?${query}`, { headers, tags: { op: 'chat_since' } });
+  check(res, {
+    'chat since 200': (r) => r.status === 200,
+    'chat since pages the changes': (r) =>
+      r.status === 200 &&
+      (catchUp
+        ? r.json('messages').length === PAGE && r.json('has_more') === true
+        : r.json('next_since_id') >= cursor.sinceId && r.json('next_before') === null),
+  });
+  const list = http.get(`${BASE_URL}/api/v1/?since=${encodeURIComponent(data.startedAt)}`, {
+    headers,
+    tags: { op: 'chats_since' },
+  });
+  check(list, { 'chats since 200': (r) => r.status === 200 });
 }

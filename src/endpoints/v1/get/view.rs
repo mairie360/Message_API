@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use utoipa::{IntoParams, ToSchema};
 
 use crate::database::chats::get_chats::view::GetChatsQueryResultView;
@@ -55,6 +56,11 @@ pub struct ChatView {
     /// change it, only `POST /api/v1/{chat_id}/read/` does.
     #[schema(example = 3)]
     unread_count: i32,
+    /// Date of the creation of the chat or of the last change of one of its messages (posted,
+    /// edited, deleted). The cursor of `GET /api/v1/?since=`; read receipts and member changes do
+    /// not move it.
+    #[schema(value_type = String, format = DateTime, example = "2026-09-16T09:12:00.482113Z")]
+    last_activity_at: DateTime<Utc>,
 }
 
 impl ChatView {
@@ -65,6 +71,7 @@ impl ChatView {
         contact_id: Option<u64>,
         member_count: u32,
         unread_count: i32,
+        last_activity_at: DateTime<Utc>,
     ) -> Self {
         Self {
             id,
@@ -73,6 +80,7 @@ impl ChatView {
             contact_id,
             member_count,
             unread_count,
+            last_activity_at,
         }
     }
 
@@ -99,6 +107,10 @@ impl ChatView {
     pub fn unread_count(&self) -> i32 {
         self.unread_count
     }
+
+    pub fn last_activity_at(&self) -> DateTime<Utc> {
+        self.last_activity_at
+    }
 }
 
 impl From<GetChatsQueryResultView> for ChatView {
@@ -110,6 +122,7 @@ impl From<GetChatsQueryResultView> for ChatView {
             result.contact_id.map(id_from_sql),
             u32::try_from(result.member_count).unwrap_or_default(),
             result.unread_count,
+            result.last_activity_at,
         )
     }
 }
@@ -136,6 +149,14 @@ pub struct ChatListQuery {
     /// the filtered list.
     #[param(example = "Xavier Bertrand", max_length = 150)]
     search: Option<String>,
+    /// Incremental refresh (MAIR-524): only the chats whose `last_activity_at` is after this
+    /// date-time (RFC 3339, URL-encoded), i.e. created or with a message posted, edited or deleted
+    /// since. The order and the pagination stay the same. Changes of different chats are not
+    /// committed in date order: pass the greatest `last_activity_at` already seen minus a few
+    /// seconds (the overlap only returns some chats again). A chat the caller was added to keeps its
+    /// `last_activity_at`: reload the whole list when the stream reconnects.
+    #[param(value_type = Option<String>, format = DateTime, example = "2026-09-16T09:12:00Z")]
+    since: Option<DateTime<Utc>>,
 }
 
 impl ChatListQuery {
@@ -144,7 +165,18 @@ impl ChatListQuery {
             limit,
             offset,
             search,
+            since: None,
         }
+    }
+
+    /// The chats with activity after `since`.
+    pub fn with_since(mut self, since: Option<DateTime<Utc>>) -> Self {
+        self.since = since;
+        self
+    }
+
+    pub fn since(&self) -> Option<DateTime<Utc>> {
+        self.since
     }
 
     pub fn page(&self) -> PageQuery {

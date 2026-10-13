@@ -7,8 +7,10 @@
 --   8 members 400001 + (c + 250 * k) % 2000 (k = 0..7): every agent is in 16 chats, and agent
 --   400001 + r is a member of chat 100000 + r (k = 0);
 -- - 1 000 direct chats (ids 200000 + d) between agents 400001 + d and 401001 + d;
--- - 25 messages in every group chat and 10 000 in chat 100000 (the hot chat, read page by page),
---   written through the database triggers like real posts (unread counters included).
+-- - 25 messages in every group chat, 100 in the 100 busy chats 100001..100100 (MAIR-524: the
+--   incremental reads, one message in 20 of them deleted, i.e. a tombstone) and 10 000 in chat
+--   100000 (the hot chat, read page by page), written through the database triggers like real
+--   posts (unread counters, updated_at, last_activity_at included).
 -- load-test.js derives the same ids to read as an agent.
 --
 -- Fixed ids, ON CONFLICT DO NOTHING / NOT EXISTS: the file is idempotent, like init-test.sql.
@@ -49,8 +51,14 @@ ON CONFLICT DO NOTHING;
 INSERT INTO messages (conversation_id, owner_id, content, created_at)
 SELECT 100000 + c, 400001 + (c + 250 * (m % 8)) % 2000, 'Perf message ' || m,
        TIMESTAMPTZ '2026-01-01 00:00:00+00' + c * interval '1 hour' + m * interval '1 minute'
-FROM generate_series(0, 3999) AS c CROSS JOIN generate_series(1, 25) AS m
+FROM generate_series(0, 3999) AS c
+CROSS JOIN LATERAL generate_series(1, CASE WHEN c BETWEEN 1 AND 100 THEN 100 ELSE 25 END) AS m
 WHERE NOT EXISTS (SELECT 1 FROM messages WHERE conversation_id = 100001);
+
+-- Soft-deleted messages of the busy chats (Message_API deletes with this UPDATE, the trigger
+-- empties the content). Already deleted ones are left alone, so a second run changes nothing.
+UPDATE messages SET deleted_at = now()
+WHERE conversation_id BETWEEN 100001 AND 100100 AND id % 20 = 0 AND deleted_at IS NULL;
 
 INSERT INTO messages (conversation_id, owner_id, content, created_at)
 SELECT 100000, 400001 + 250 * (m % 8), 'Perf hot message ' || m,

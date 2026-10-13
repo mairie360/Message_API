@@ -42,7 +42,7 @@ x-service: &service-template
 
 services:
   postgres:
-    image: ghcr.io/mairie360/database:3.0.0
+    image: ghcr.io/mairie360/database:3.1.0
     restart: always
     container_name: mairie360-db-message-api
     environment:
@@ -62,7 +62,7 @@ services:
       retries: 5
 
   liquibase:
-    image: ghcr.io/mairie360/liquibase-migrations:3.0.0
+    image: ghcr.io/mairie360/liquibase-migrations:3.1.0
     container_name: mairie360-liquibase-message-api
     depends_on:
       postgres:
@@ -89,7 +89,7 @@ services:
         condition: service_completed_successfully
     volumes:
       - ./init-test.sql:/init-test.sql:ro
-      # Volume seed of the load test (MAIR-474): 2 000 agents, 5 000 chats, 110 000 messages.
+      # Volume seed of the load test (MAIR-474): 2 000 agents, 5 000 chats, 117 500 messages.
       - ./init-perf.sql:/init-perf.sql:ro
     # ON_ERROR_STOP: a failing fixture must fail the stack, not leave k6 running without its users.
     command: >
