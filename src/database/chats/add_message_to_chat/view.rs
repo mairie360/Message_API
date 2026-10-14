@@ -63,8 +63,14 @@ impl Display for PostMessageInChatQueryView {
 
 impl ApiRequestDto for PostMessageInChatQueryView {
     fn query_sql(&self) -> &'static str {
+        // A deleted message (tombstone, MAIR-524) cannot be quoted: no row is inserted then
+        // (`DbError::NotFound`). An unknown one still fails on `fk_messages_reply_to`.
         "INSERT INTO messages (conversation_id, owner_id, content, reply_to_id) \
-         VALUES ($1, $2, $3, NULLIF($4::bigint, 0)) RETURNING id"
+         SELECT $1, $2, $3, NULLIF($4::bigint, 0) \
+         WHERE $4::bigint = 0 OR NOT EXISTS ( \
+             SELECT 1 FROM messages q \
+             WHERE q.id = $4::bigint AND q.conversation_id = $1 AND q.deleted_at IS NOT NULL) \
+         RETURNING id"
     }
 
     fn query_params(&self) -> &[QueryParam] {

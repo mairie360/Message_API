@@ -45,8 +45,10 @@ Accounts and roles live in Core API.
 
 Writes are plain HTTP calls; the other members are told through `GET /api/v1/stream`, a **SSE** \
 channel (`text/event-stream`) each client keeps open. Each `data:` line holds a `ChatSignal` saying \
-*something happened* in a chat, without the message itself: the client then reloads \
-`GET /api/v1/{chat_id}/`.
+*something happened* in a chat (`NEW_MSG`, `MSG_EDITED`, `MSG_DELETED`, `CHAT_READ`), without the \
+message itself: the client then reads only what changed with \
+`GET /api/v1/{chat_id}/?since=<next_since>&since_id=<next_since_id>` (MAIR-524), deleted messages \
+included as tombstones (`deleted: true`). The event contract is described on `GET /api/v1/stream`.
 
 A `: ping` comment is sent every 15 seconds to keep the connection open through proxies; SSE \
 clients ignore it.

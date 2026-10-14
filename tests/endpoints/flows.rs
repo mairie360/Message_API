@@ -304,7 +304,9 @@ async fn direct_chat_is_reused_and_shown_again_by_a_message() {
     let chat = listed!(app, alice, chat_id);
     assert_eq!(chat["kind"], "direct");
     assert_eq!(chat["contact_id"], bob);
-    assert_eq!(chat["name"], "");
+    // The name of a direct chat is the other participant's (the test users are all "Chat Member").
+    assert_eq!(chat["name"], "Chat Member");
+    assert_eq!(chat["member_count"], 2);
     // Bob only sees it with the first message.
     assert!(listed!(app, bob, chat_id).is_null());
     let (status, _) = send!(
