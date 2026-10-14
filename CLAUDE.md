@@ -221,27 +221,10 @@ sound. **This API needs a Database image that ships that release, `releases/v1.8
 needed. To try an unmerged Database branch, build `ghcr.io/mairie360/database:<tag>` and `…/liquibase-migrations:<tag>`
 from `Devops/Database` and run `TEST_DB_VERSION=<tag> cargo test`.
 
-Logging (MAIR-421) goes through `tracing` (`src/logging.rs`, initialized first thing in `main`): JSON lines by
-default, `LOG_FORMAT=text` for readable lines (dev stack), level from `RUST_LOG` (default `info`). `TracingLogger`
-(`tracing-actix-web`) opens one span per request with its `request_id`, so a handler's log carries it. Database errors
-go through `endpoints::error::classify(operation, e)`: `NotFound` / `ForeignKey` / `Unique` come back for the
-handler to map to its documented `4xx`, anything else is logged at `error` with the operation and becomes `500`
-(`unexpected` logs unconditionally, for statements where no client error is possible). No `eprintln!`, no
-`.map_err(|_| …)`.
-
-Traces (MAIR-503, same approach as the Core API POC of MAIR-131): `src/telemetry.rs` installs the logging layer of
-`src/logging.rs` and, when `OTEL_EXPORTER_OTLP_ENDPOINT` (or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`) is set, exports
-the `TracingLogger` spans over OTLP/HTTP (protobuf) to the agent relaying to Scaleway Cockpit (e.g.
-`http://alloy:4318`, `/v1/traces` is appended). Nothing changes without it; `OTEL_SDK_DISABLED=true` forces it off;
-`OTEL_SERVICE_NAME` defaults to `message-api`; a failure to build the exporter is printed and never stops the API.
-Root spans are named `<METHOD> <route pattern>` and continue the BFF's `traceparent`; the SQL of
-`mairie360_api_lib` shows up as `db.statement` span events (placeholders, never the bound values). No personal data
-leaves (MAIR-290, MAIR-501): `telemetry::Redact` drops `http.client_ip` and the query string of `http.target`
-before the export, whatever the root span builder recorded; build providers with `telemetry::tracer_provider`,
-never `SdkTracerProvider::builder()` directly. The `opentelemetry*`, `tracing-opentelemetry` and
-`tracing-actix-web` versions are coupled (0.32 / 0.33 / 0.7 with `opentelemetry_0_32`): bump them together.
-`tests/endpoints/telemetry.rs` asserts the span, the continued trace id, the redaction and the SQL events against
-an in-memory exporter.
+Database errors go through `endpoints::error::classify(operation, e)`: `NotFound` / `ForeignKey` / `Unique` come
+back for the handler to map to its documented `4xx`, anything else is logged at `error` (through `tracing`, see
+"Logs and observability" below) with the operation and becomes `500` (`unexpected` logs unconditionally, for
+statements where no client error is possible). No `eprintln!`, no `.map_err(|_| …)`.
 
 Request bodies with text fields are extracted with `endpoints::validation::ValidatedJson` instead of `web::Json`:
 the view implements `Validate` (length matching the Postgres column, no control character) and an
@@ -377,10 +360,34 @@ sidecars and the dev healthcheck wait on `/ready`; the chart probes are in Deplo
 database, so `main` calls `ready::wait_for_postgres` and exits when Postgres does not answer within
 `DB_STARTUP_TIMEOUT` seconds (default 60). Neither probe is registered under `/api`.
 
+### Logs and observability (MAIR-503)
+
+Logs and traces come from `mairie360_api_lib::logging::telemetry` (feature `otel`), shared by every API: `main.rs`
+only calls `init_telemetry("message-api")` first thing and keeps the guard. There is no local logging or telemetry
+module any more; read the lib for the details.
+
+- Logs on stdout in the format of every API (same as Core API): coloured text (`RUST_LOG`, default `info`), one
+  JSON object per line with `LOG_FORMAT=json`. The request root span is hidden from them (it holds the client
+  address and query string). Log with `tracing::` macros, never `log::` or `eprintln!`.
+- Traces over OTLP/HTTP, opt-in: nothing is exported unless `OTEL_EXPORTER_OTLP_ENDPOINT` (or
+  `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`) is set, `OTEL_SDK_DISABLED=true` forces it off, a failing exporter is
+  logged and never stops the API. The endpoint is an agent relaying to Scaleway Cockpit (OTel Collector or Grafana
+  Alloy, e.g. `http://alloy:4318`); `OTEL_SERVICE_NAME` defaults to `message-api`.
+- `main.rs` wraps the app in the lib's `TracingLogger` (one span per request with its `request_id`, so a handler's
+  log carries it), so requests refused by `JwtMiddleware` or the rate limiter get a span too. Root spans are named
+  `<METHOD> <route pattern>` and continue the BFF's `traceparent`. The SQL appears as span **events**
+  (`db.statement` with `$n` placeholders, never the values). The lib's `Redact` drops `http.client_ip` and the
+  query string before export (MAIR-290, MAIR-501): build test providers with `telemetry::tracer_provider`, never
+  `SdkTracerProvider::builder()`.
+- Never add `opentelemetry*` / `tracing-actix-web` / `tracing-opentelemetry` to `Cargo.toml`: use the lib's
+  re-exports, their versions are coupled. `tracing-subscriber` is only a dev-dependency (the telemetry tests).
+- `tests/endpoints/telemetry.rs` asserts the span of a real route (status, route, continued trace id, no query
+  string nor client address, SQL events) and of a `401`; the redaction of logs and spans is tested in the lib.
+
 ### Config (env vars, all "critical" → process panics if unset)
 
 `REDIS_URL`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT`, `DB_NAME`, `HOST`, `PORT`,
-`JWT_SECRET`, `JWT_TIMEOUT`. Optional: `SWAGGER_ENABLED`, `DB_STARTUP_TIMEOUT`, `RATE_LIMIT_PER_SECOND`, `RATE_LIMIT_BURST`, `LOG_FORMAT`, `RUST_LOG`, the `OTEL_*` variables of the trace export. The Postgres URL is assembled by `database::pg_url::build_pg_url`,
+`JWT_SECRET`, `JWT_TIMEOUT`. Optional: `SWAGGER_ENABLED`, `DB_STARTUP_TIMEOUT`, `RATE_LIMIT_PER_SECOND`, `RATE_LIMIT_BURST`, `LOG_FORMAT` (`json` for JSON lines, coloured text otherwise), `RUST_LOG`, the `OTEL_*` variables of the trace export. The Postgres URL is assembled by `database::pg_url::build_pg_url`,
 which percent-encodes user, password and database name, so `DB_PASSWORD` may contain any
 character. `docker-compose.yml` supplies them for the dev stack (app on
 `:3003`, Postgres via `ghcr.io/mairie360/database`, Liquibase migrations, a `seeder` running

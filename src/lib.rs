@@ -9,9 +9,7 @@
 
 pub mod database;
 pub mod endpoints;
-pub mod logging;
 pub mod sse;
-pub mod telemetry;
 
 // pub fn add_event(chat_id: u64, sender_id: u64, message: &str) {
 //     sse::state::AppState::get().update(|state, _| {

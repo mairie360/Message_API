@@ -1,20 +1,20 @@
-//! OpenTelemetry tracing (MAIR-503): each request yields a root span carrying the route and the
-//! status, continues an incoming `traceparent`, carries the SQL it ran as span events, and is
-//! exported without the client address nor the query string.
+//! OpenTelemetry tracing (MAIR-503, `mairie360_api_lib::logging::telemetry`): each request of
+//! this API yields a root span carrying the route and the status, continues an incoming
+//! `traceparent`, carries the SQL it ran as span events, and is exported without the client
+//! address nor the query string. The redaction of the logs and spans themselves is tested in the
+//! lib.
 
 use actix_web::http::Method;
 use actix_web::test::TestRequest;
-use actix_web::{App, HttpResponse};
-use message_api::telemetry::{trace_layer, tracer_provider};
-use opentelemetry::global;
-use opentelemetry::Value;
-use opentelemetry_sdk::propagation::TraceContextPropagator;
-use opentelemetry_sdk::trace::{
+use actix_web::App;
+use mairie360_api_lib::logging::telemetry::opentelemetry::{global, Value};
+use mairie360_api_lib::logging::telemetry::opentelemetry_sdk::propagation::TraceContextPropagator;
+use mairie360_api_lib::logging::telemetry::opentelemetry_sdk::trace::{
     InMemorySpanExporter, SdkTracerProvider, SimpleSpanProcessor, SpanData,
 };
+use mairie360_api_lib::logging::telemetry::{trace_layer, tracer_provider, TracingLogger};
 use serial_test::serial;
 use tracing::subscriber::DefaultGuard;
-use tracing_actix_web::TracingLogger;
 use tracing_subscriber::layer::SubscriberExt;
 
 use super::harness::{admin_id, request, states};
@@ -40,12 +40,12 @@ macro_rules! traced_app {
     };
 }
 
-/// Provider exporting to memory through the redaction of `telemetry`, and the subscriber feeding
+/// Provider exporting to memory through the redaction of the lib's `tracer_provider`, and the subscriber feeding
 /// it, installed for the current thread.
 fn in_memory_tracing() -> (InMemorySpanExporter, SdkTracerProvider, DefaultGuard) {
     global::set_text_map_propagator(TraceContextPropagator::new());
     let exporter = InMemorySpanExporter::default();
-    let provider = tracer_provider(SimpleSpanProcessor::new(exporter.clone()));
+    let provider = tracer_provider(SimpleSpanProcessor::new(exporter.clone()), "message-api");
     let guard = tracing::subscriber::set_default(
         tracing_subscriber::registry().with(trace_layer(&provider)),
     );
@@ -136,42 +136,4 @@ async fn a_refused_request_still_gets_its_span() {
 
     let span = request_span(&exporter, &provider);
     assert_eq!(attribute(&span, "http.status_code"), Some(&Value::I64(401)));
-}
-
-#[actix_web::get("/api/v1/")]
-async fn logging_handler() -> HttpResponse {
-    tracing::error!("the handler logs an error");
-    HttpResponse::Ok().finish()
-}
-
-/// No database: the spans of a request carrying personal data in its query string and client
-/// address.
-#[actix_web::test]
-#[serial]
-async fn spans_carry_neither_the_query_string_nor_the_client_address() {
-    let (exporter, provider, _guard) = in_memory_tracing();
-    let app = actix_web::test::init_service(
-        App::new()
-            .wrap(TracingLogger::default())
-            .service(logging_handler),
-    )
-    .await;
-
-    let request = TestRequest::get()
-        .uri("/api/v1/?search=Dupont")
-        .insert_header(("x-forwarded-for", "203.0.113.7"))
-        .to_request();
-    drop(actix_web::test::call_service(&app, request).await);
-    provider.force_flush().expect("flush the spans");
-
-    let spans = format!("{:?}", exporter.get_finished_spans().unwrap());
-    assert!(spans.contains("the handler logs an error"), "{spans}");
-    assert!(
-        !spans.contains("Dupont"),
-        "query string in the spans: {spans}"
-    );
-    assert!(
-        !spans.contains("203.0.113.7"),
-        "client address in the spans: {spans}"
-    );
 }

@@ -148,9 +148,9 @@ services:
       JWT_TIMEOUT: 3600
       # Swagger UI on the dev stack; never set on a deployed instance (MAIR-424).
       SWAGGER_ENABLED: "true"
-      # Human-readable logs on the dev stack; JSON (the default) everywhere else.
-      LOG_FORMAT: text
-      # Traces OpenTelemetry (MAIR-503), off unless an OTLP/HTTP endpoint is set, e.g. a local
+      # Logs: coloured text by default, `LOG_FORMAT: json` for one JSON object per line (MAIR-503).
+      # LOG_FORMAT: json
+      # OpenTelemetry traces (MAIR-503), off unless an OTLP/HTTP endpoint is set, e.g. a local
       # collector listening on the host: OTEL_EXPORTER_OTLP_ENDPOINT=http://host.docker.internal:4318
       # OTEL_SERVICE_NAME: message-api
     depends_on:
