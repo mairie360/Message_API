@@ -9,6 +9,9 @@ use mairie360_api_lib::jwt_manager::{
 use mairie360_api_lib::security::AuthenticatedUser;
 use tokio::sync::mpsc::{self, error::TrySendError};
 
+/// First bytes of every stream (MAIR-561): actix only sends the head of a streaming response with
+/// its first chunk, so without it the client would wait for the first ping.
+const CONNECTED_COMMENT: &[u8] = b": connected\n\n";
 /// Interval of the `: ping` comment keeping the connection open through proxies.
 const PING_INTERVAL: Duration = Duration::from_secs(15);
 /// Interval at which the token of an open stream is checked again (expiry, revoked session,
@@ -45,7 +48,7 @@ fn time_left(exp: Option<usize>) -> Option<Duration> {
                    full buffer): reads since a cursor are idempotent, so read since the last cursor after a \
                    reconnection. `message_id` is only absent from a signal relayed by a replica older than \
                    MAIR-524 (then always `NEW_MSG`). Ignore an unknown `type`: new ones may be added.\n\n\
-                   A `: ping` comment is sent every 15 seconds to keep the connection open through proxies; SSE \
+                   A `: connected` comment opens the stream as soon as it is established, then a `: ping` comment is sent every 15 seconds to keep the connection open through proxies; SSE \
                    clients ignore it.\n\n\
                    **The server closes the stream** when the JWT expires, when its session is revoked or its \
                    account removed (checked every 30 seconds), and when the same user opens more than 5 streams \
@@ -141,7 +144,11 @@ async fn sse_stream_route(
     });
 
     // The response ends when the connection is told to close (eviction, expired or revoked token).
-    let stream = tokio_stream::wrappers::ReceiverStream::new(rx)
+    let connected = futures_util::stream::once(std::future::ready(Ok(
+        actix_web::web::Bytes::from_static(CONNECTED_COMMENT),
+    )));
+    let stream = connected
+        .chain(tokio_stream::wrappers::ReceiverStream::new(rx))
         .take_until(async move { close.notified().await })
         .map(|result| match result {
             Ok(bytes) => Ok::<actix_web::web::Bytes, actix_web::Error>(bytes),

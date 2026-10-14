@@ -333,7 +333,8 @@ the container tests.
   of a post stays `{"type":"NEW_MSG","chat_id":…}` plus the additive `message_id`. The table of the event contract is
   the description of `GET /api/v1/stream` (what BFF_Message relays). A `Lagged` bus error is logged and the loop
   resumes; only closed senders are removed.
-- `GET /api/v1/stream` registers a new connection for the caller and spawns a supervisor (`actix_web::rt::spawn`): 15 s
+- `GET /api/v1/stream` registers a new connection for the caller, opens the body with a `: connected` comment (MAIR-561:
+  actix sends the head of a streaming response with its first chunk only) and spawns a supervisor (`actix_web::rt::spawn`): 15 s
   keep-alive ping, `authenticate_token` again every 30 s (revoked session, deleted account), and a timer on the JWT
   `exp` when it is readable. Any failure notifies `close`, which ends the response (`take_until`); the connection is
   removed once its receiver is gone.
