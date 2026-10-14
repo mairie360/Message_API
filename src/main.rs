@@ -6,9 +6,9 @@ use message_api::database::pg_url::build_pg_url;
 use message_api::endpoints::rate_limit::{rate_limit_from_env, rate_limiter};
 use message_api::endpoints::swagger::{docs_config, swagger_enabled};
 use message_api::endpoints::{config, health, ready};
-use message_api::logging;
 
 use mairie360_api_lib::env_manager::{get_critical_env_var, get_env_var};
+use mairie360_api_lib::logging::telemetry::{init_telemetry, TracingLogger};
 use mairie360_api_lib::security::JwtMiddleware;
 use mairie360_api_lib::state::AppState;
 
@@ -22,7 +22,10 @@ const DEFAULT_DB_STARTUP_TIMEOUT: u64 = 60;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    logging::init();
+    // Logs on stdout in the format shared by every API (`RUST_LOG`, default `info`;
+    // `LOG_FORMAT=json` for JSON lines), plus the trace export when `OTEL_EXPORTER_OTLP_ENDPOINT`
+    // is set (MAIR-503); flushed on drop.
+    let _telemetry = init_telemetry("message-api");
     let redis_url = get_critical_env_var("REDIS_URL");
     let db_user = get_critical_env_var("DB_USER");
     let db_password = get_critical_env_var("DB_PASSWORD");
@@ -80,7 +83,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(data.clone())
             // One span per request (request id, method, route, status): the errors logged by the
             // handlers carry it.
-            .wrap(tracing_actix_web::TracingLogger::default())
+            .wrap(TracingLogger::default())
             // Every response is JSON, plain text or an event stream: forbid browsers from sniffing
             // it as HTML.
             .wrap(middleware::DefaultHeaders::new().add(("X-Content-Type-Options", "nosniff")))
