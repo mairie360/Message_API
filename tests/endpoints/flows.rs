@@ -223,6 +223,37 @@ async fn stream_opens_an_event_stream() {
     assert_eq!(sse.online_agents.get(&user).map(|c| c.len()), Some(1));
 }
 
+/// MAIR-561: the stream sends its first bytes at once, not with the first ping 15 s later, so the
+/// head of the response reaches the client (and the BFF) immediately.
+#[actix_web::test]
+#[serial]
+async fn stream_sends_its_first_bytes_within_a_second() {
+    let (state, sse) = states().await;
+    let app = test_app!(state, sse);
+    let (_container, url) = get_shared_db().await;
+    let db = get_smart_db(url).await;
+    let user = plain_user(&db).await;
+
+    let response = actix_web::test::call_service(
+        &app,
+        request(Method::GET, "/api/v1/stream", Some(user)).to_request(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut body = response.into_body();
+    let first = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        std::future::poll_fn(|cx| {
+            actix_web::body::MessageBody::poll_next(std::pin::Pin::new(&mut body), cx)
+        }),
+    )
+    .await
+    .expect("first chunk within a second")
+    .expect("a chunk, not the end of the stream")
+    .expect("a chunk, not an error");
+    assert_eq!(&first[..], b": connected\n\n");
+}
+
 /// MAIR-426: `<` and `>` are ordinary characters, stored and served back as sent (JSON with
 /// `nosniff`, escaping is the fronts' job).
 #[actix_web::test]
