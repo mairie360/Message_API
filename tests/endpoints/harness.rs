@@ -1,3 +1,4 @@
+use crate::common::message_db_url;
 use std::sync::{Arc, Once};
 
 use actix_web::http::Method;
@@ -36,8 +37,7 @@ pub async fn admin_id() -> u64 {
 /// state without Redis relay (events stay on the local bus).
 pub async fn states() -> (web::Data<AppState>, web::Data<SseState>) {
     set_jwt_env();
-    let (_container, url) = get_shared_db().await;
-    let state = AppState::new("redis://127.0.0.1:6379".to_string(), url.clone()).await;
+    let state = AppState::new("redis://127.0.0.1:6379".to_string(), message_db_url().await).await;
     let (bus, _) = tokio::sync::broadcast::channel(100);
     (
         web::Data::new(state),

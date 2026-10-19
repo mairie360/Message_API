@@ -17,7 +17,9 @@ cov_test = ["llvm-cov", "--workspace", "--ignore-filename-regex", "main\\.rs|lib
 cov = ["llvm-cov", "--workspace", "--ignore-filename-regex", "main\\.rs|lib\\.rs", "--fail-under-lines", "60", "--codecov", "--output-path", "codecov.json"]
 
 # Version of the ghcr.io/mairie360/database and liquibase-migrations images the tests start
-# (mairie360_api_lib::test_setup), kept equal to the compose files: Database v3.1.0 (MAIR-524: message change tracking; MAIR-531: the message_api role reads user names). An exported
+# (mairie360_api_lib::test_setup), kept equal to the compose files: Database dev-949384c (MAIR-556:
+# the API roles log in with -D<role>_password and every role reads users.email for the JWT
+# middleware; MAIR-524, MAIR-531 included). An exported
 # TEST_DB_VERSION still wins.
 [env]
-TEST_DB_VERSION = "dev-61be6d5"
+TEST_DB_VERSION = "dev-949384c"

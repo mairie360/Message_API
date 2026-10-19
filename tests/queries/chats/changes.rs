@@ -1,12 +1,13 @@
 //! MAIR-524: change tracking of the messages (Database 3.1.0). Reads since a cursor, soft delete
 //! (tombstones) and what every other read does with tombstones.
 
-use crate::common::{force_updated_at, get_smart_db, plain_user, unread_count, RawQuery};
+use crate::common::{
+    force_updated_at, get_fixture_db, get_smart_db, plain_user, unread_count, RawQuery,
+};
 use chrono::{DateTime, Duration, Utc};
 use mairie360_api_lib::database::error::DbError;
 use mairie360_api_lib::error::ApiLibError;
 use mairie360_api_lib::smart_db::SmartDatabase;
-use mairie360_api_lib::test_setup::queries_setup::get_shared_db;
 use message_api::database::chats::{
     acknowledge_read::view::AcknowledgeReadQueryView,
     add_message_to_chat::view::PostMessageInChatQueryView,
@@ -69,9 +70,9 @@ fn ids(rows: &[Message]) -> Vec<i64> {
 #[tokio::test]
 #[serial]
 async fn test_mair_524_since_returns_created_edited_and_deleted_messages_in_change_order() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
-    let author = plain_user(&db).await;
+    let db = get_smart_db().await;
+    let fixtures = get_fixture_db().await;
+    let author = plain_user(&fixtures).await;
     let chat_id = chat_with(&db, "Since", vec![author]).await;
 
     let before = Utc::now() - Duration::seconds(5);
@@ -108,9 +109,9 @@ async fn test_mair_524_since_returns_created_edited_and_deleted_messages_in_chan
 #[tokio::test]
 #[serial]
 async fn test_mair_524_since_pages_through_equal_timestamps_with_the_id() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
-    let author = plain_user(&db).await;
+    let db = get_smart_db().await;
+    let fixtures = get_fixture_db().await;
+    let author = plain_user(&fixtures).await;
     let chat_id = chat_with(&db, "Equal timestamps", vec![author]).await;
 
     let mut all = Vec::new();
@@ -119,7 +120,7 @@ async fn test_mair_524_since_pages_through_equal_timestamps_with_the_id() {
     }
     // Five changes at the very same instant: only the id tells them apart.
     let at = Utc::now() + Duration::seconds(1);
-    force_updated_at(&db, &all, at).await;
+    force_updated_at(&fixtures, &all, at).await;
 
     let page = |since, id| {
         let db = db.clone();
@@ -150,9 +151,9 @@ async fn test_mair_524_since_pages_through_equal_timestamps_with_the_id() {
 #[tokio::test]
 #[serial]
 async fn test_mair_524_since_is_scoped_to_its_chat() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
-    let author = plain_user(&db).await;
+    let db = get_smart_db().await;
+    let fixtures = get_fixture_db().await;
+    let author = plain_user(&fixtures).await;
     let chat_id = chat_with(&db, "Mine", vec![author]).await;
     let other = chat_with(&db, "Other", vec![author]).await;
     let since = Utc::now() - Duration::seconds(5);
@@ -165,9 +166,9 @@ async fn test_mair_524_since_is_scoped_to_its_chat() {
 #[tokio::test]
 #[serial]
 async fn test_mair_524_since_query_uses_the_change_index() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
-    let author = plain_user(&db).await;
+    let db = get_smart_db().await;
+    let fixtures = get_fixture_db().await;
+    let author = plain_user(&fixtures).await;
     let chat_id = chat_with(&db, "Explain", vec![author]).await;
     post(&db, chat_id, author, "Index").await;
 
@@ -197,9 +198,9 @@ async fn test_mair_524_since_query_uses_the_change_index() {
 #[tokio::test]
 #[serial]
 async fn test_mair_524_history_skips_tombstones_and_their_quotes() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
-    let author = plain_user(&db).await;
+    let db = get_smart_db().await;
+    let fixtures = get_fixture_db().await;
+    let author = plain_user(&fixtures).await;
     let chat_id = chat_with(&db, "Tombstones", vec![author]).await;
 
     let quoted = post(&db, chat_id, author, "Sera supprimé").await;
@@ -240,9 +241,9 @@ async fn test_mair_524_history_skips_tombstones_and_their_quotes() {
 #[tokio::test]
 #[serial]
 async fn test_mair_524_a_tombstone_is_neither_edited_deleted_again_nor_quoted() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
-    let author = plain_user(&db).await;
+    let db = get_smart_db().await;
+    let fixtures = get_fixture_db().await;
+    let author = plain_user(&fixtures).await;
     let chat_id = chat_with(&db, "Final tombstone", vec![author]).await;
     let message = post(&db, chat_id, author, "Adieu").await;
     delete(&db, chat_id, message, author).await.unwrap();
@@ -279,11 +280,11 @@ async fn test_mair_524_a_tombstone_is_neither_edited_deleted_again_nor_quoted() 
 #[tokio::test]
 #[serial]
 async fn test_mair_524_deleting_an_unread_message_lowers_the_unread_counter() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
-    let author = plain_user(&db).await;
-    let reader = plain_user(&db).await;
-    let late_reader = plain_user(&db).await;
+    let db = get_smart_db().await;
+    let fixtures = get_fixture_db().await;
+    let author = plain_user(&fixtures).await;
+    let reader = plain_user(&fixtures).await;
+    let late_reader = plain_user(&fixtures).await;
     let chat_id = chat_with(&db, "Unread", vec![author, reader]).await;
 
     let read = post(&db, chat_id, author, "Lu").await;
@@ -292,25 +293,25 @@ async fn test_mair_524_deleting_an_unread_message_lowers_the_unread_counter() {
     db.fetch_scalar::<i32, _>(&AcknowledgeReadQueryView::new(chat_id, reader, read as u64))
         .await
         .unwrap();
-    assert_eq!(unread_count(&db, chat_id, reader).await, 2);
+    assert_eq!(unread_count(&fixtures, chat_id, reader).await, 2);
     // Joined after the messages: counted none of them.
     db.execute(AddMembersToChatQueryView::new(chat_id, vec![late_reader]))
         .await
         .unwrap();
     let after_join = post(&db, chat_id, author, "Bienvenue").await;
-    assert_eq!(unread_count(&db, chat_id, late_reader).await, 1);
+    assert_eq!(unread_count(&fixtures, chat_id, late_reader).await, 1);
 
     // Deleting a message already read changes nothing, an unread one lowers the counter.
     delete(&db, chat_id, read, author).await.unwrap();
-    assert_eq!(unread_count(&db, chat_id, reader).await, 3);
+    assert_eq!(unread_count(&fixtures, chat_id, reader).await, 3);
     delete(&db, chat_id, unread, author).await.unwrap();
-    assert_eq!(unread_count(&db, chat_id, reader).await, 2);
+    assert_eq!(unread_count(&fixtures, chat_id, reader).await, 2);
     assert_eq!(
-        unread_count(&db, chat_id, late_reader).await,
+        unread_count(&fixtures, chat_id, late_reader).await,
         1,
         "a message posted before joining was never counted"
     );
-    assert_eq!(unread_count(&db, chat_id, author).await, 0);
+    assert_eq!(unread_count(&fixtures, chat_id, author).await, 0);
 
     // The recount of an acknowledgement agrees, and the list shows the same number.
     let recount = db
@@ -331,9 +332,9 @@ async fn test_mair_524_deleting_an_unread_message_lowers_the_unread_counter() {
 #[tokio::test]
 #[serial]
 async fn test_mair_524_header_carries_the_latest_change_cursor() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
-    let author = plain_user(&db).await;
+    let db = get_smart_db().await;
+    let fixtures = get_fixture_db().await;
+    let author = plain_user(&fixtures).await;
     let chat_id = chat_with(&db, "Cursor", vec![author]).await;
 
     let empty = db
@@ -370,9 +371,9 @@ async fn test_mair_524_header_carries_the_latest_change_cursor() {
 #[tokio::test]
 #[serial]
 async fn test_mair_524_chat_list_since_keeps_the_chats_with_activity() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
-    let user = plain_user(&db).await;
+    let db = get_smart_db().await;
+    let fixtures = get_fixture_db().await;
+    let user = plain_user(&fixtures).await;
     let quiet = chat_with(&db, "Calme", vec![user]).await;
     let busy = chat_with(&db, "Animé", vec![user]).await;
     let cursor = db

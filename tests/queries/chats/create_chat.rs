@@ -1,7 +1,6 @@
-use crate::common::{get_smart_db, plain_user};
+use crate::common::{get_fixture_db, get_smart_db, plain_user};
 use mairie360_api_lib::database::error::DbError;
 use mairie360_api_lib::error::ApiLibError;
-use mairie360_api_lib::test_setup::queries_setup::get_shared_db;
 use message_api::database::chats::{
     access::view::{ChatAccess, ChatAccessQueryView},
     create_chat::view::CreateChatQueryView,
@@ -12,8 +11,7 @@ use serial_test::serial;
 #[tokio::test]
 #[serial]
 async fn test_create_chat_success() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
+    let db = get_smart_db().await;
 
     let view = CreateChatQueryView::new("Test Chat", None);
 
@@ -26,8 +24,7 @@ async fn test_create_chat_success() {
 #[tokio::test]
 #[serial]
 async fn test_create_chat_by_group() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
+    let db = get_smart_db().await;
 
     let view = CreateChatQueryView::new("Test Chat by Group", Some(1));
 
@@ -40,8 +37,7 @@ async fn test_create_chat_by_group() {
 #[tokio::test]
 #[serial]
 async fn test_create_chat_by_group_unknown_group() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
+    let db = get_smart_db().await;
 
     let view = CreateChatQueryView::new("Test Chat by Group", Some(999));
 
@@ -53,10 +49,10 @@ async fn test_create_chat_by_group_unknown_group() {
 #[tokio::test]
 #[serial]
 async fn test_create_chat_with_members_records_the_creator() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
-    let creator = plain_user(&db).await;
-    let member = plain_user(&db).await;
+    let db = get_smart_db().await;
+    let fixtures = get_fixture_db().await;
+    let creator = plain_user(&fixtures).await;
+    let member = plain_user(&fixtures).await;
 
     let chat_id = db
         .fetch_scalar::<i32, _>(&CreateChatQueryView::with_members(
@@ -92,9 +88,9 @@ async fn test_create_chat_with_members_records_the_creator() {
 #[tokio::test]
 #[serial]
 async fn test_create_chat_with_an_unknown_member_creates_nothing() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
-    let creator = plain_user(&db).await;
+    let db = get_smart_db().await;
+    let fixtures = get_fixture_db().await;
+    let creator = plain_user(&fixtures).await;
 
     let view =
         CreateChatQueryView::with_members("Atomic", None, Some(creator), &[creator, 999_999_999]);

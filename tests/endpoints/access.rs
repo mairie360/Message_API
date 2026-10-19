@@ -5,8 +5,7 @@ use serde_json::json;
 use serial_test::serial;
 
 use super::harness::{admin_id, request, states};
-use crate::common::{get_smart_db, plain_user};
-use mairie360_api_lib::test_setup::queries_setup::get_shared_db;
+use crate::common::{get_fixture_db, plain_user};
 
 #[actix_web::test]
 #[serial]
@@ -67,8 +66,7 @@ macro_rules! seeded_chat {
 async fn outsiders_get_the_same_404_as_for_an_unknown_chat() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
-    let (_container, url) = get_shared_db().await;
-    let db = get_smart_db(url).await;
+    let db = get_fixture_db().await;
     let (creator, member, outsider) = (
         plain_user(&db).await,
         plain_user(&db).await,
@@ -147,8 +145,7 @@ async fn outsiders_get_the_same_404_as_for_an_unknown_chat() {
 async fn url_encoded_chat_id_is_checked_like_the_plain_one() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
-    let (_container, url) = get_shared_db().await;
-    let db = get_smart_db(url).await;
+    let db = get_fixture_db().await;
     let (creator, member, outsider) = (
         plain_user(&db).await,
         plain_user(&db).await,
@@ -179,8 +176,7 @@ async fn url_encoded_chat_id_is_checked_like_the_plain_one() {
 async fn members_only_manage_themselves_and_their_own_messages() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
-    let (_container, url) = get_shared_db().await;
-    let db = get_smart_db(url).await;
+    let db = get_fixture_db().await;
     let (creator, member, outsider) = (
         plain_user(&db).await,
         plain_user(&db).await,
@@ -268,8 +264,7 @@ async fn members_only_manage_themselves_and_their_own_messages() {
 async fn administrators_moderate_but_do_not_take_part() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
-    let (_container, url) = get_shared_db().await;
-    let db = get_smart_db(url).await;
+    let db = get_fixture_db().await;
     let (creator, member) = (plain_user(&db).await, plain_user(&db).await);
     let admin = admin_id().await;
     let (chat, message, _) = seeded_chat!(app, creator, member);
@@ -309,8 +304,7 @@ async fn administrators_moderate_but_do_not_take_part() {
 async fn ids_from_another_chat_are_refused() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
-    let (_container, url) = get_shared_db().await;
-    let db = get_smart_db(url).await;
+    let db = get_fixture_db().await;
     let (author, other) = (plain_user(&db).await, plain_user(&db).await);
     let (chat_a, _, _) = seeded_chat!(app, author, other);
     let (_, message_b, _) = seeded_chat!(app, author, other);
@@ -363,8 +357,7 @@ async fn ids_from_another_chat_are_refused() {
 async fn invalid_bodies_are_refused_before_any_write() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
-    let (_container, url) = get_shared_db().await;
-    let db = get_smart_db(url).await;
+    let db = get_fixture_db().await;
     let user = plain_user(&db).await;
 
     for body in [
@@ -433,8 +426,7 @@ async fn invalid_bodies_are_refused_before_any_write() {
 async fn out_of_range_ids_do_not_alias_another_row() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
-    let (_container, url) = get_shared_db().await;
-    let db = get_smart_db(url).await;
+    let db = get_fixture_db().await;
     let (creator, member) = (plain_user(&db).await, plain_user(&db).await);
     let (chat, message, _) = seeded_chat!(app, creator, member);
     let chat_alias = chat + (1u64 << 32);
@@ -481,8 +473,7 @@ async fn out_of_range_ids_do_not_alias_another_row() {
 async fn direct_chat_keeps_its_two_participants() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
-    let (_container, url) = get_shared_db().await;
-    let db = get_smart_db(url).await;
+    let db = get_fixture_db().await;
     let (alice, bob, carol) = (
         plain_user(&db).await,
         plain_user(&db).await,
@@ -531,8 +522,7 @@ async fn direct_chat_keeps_its_two_participants() {
 async fn direct_chat_needs_another_known_agent() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
-    let (_container, url) = get_shared_db().await;
-    let db = get_smart_db(url).await;
+    let db = get_fixture_db().await;
     let alice = plain_user(&db).await;
 
     for (body, expected) in [

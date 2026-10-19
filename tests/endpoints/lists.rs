@@ -9,16 +9,14 @@ use serde_json::json;
 use serial_test::serial;
 
 use super::harness::{request, states};
-use crate::common::{get_smart_db, plain_user};
-use mairie360_api_lib::test_setup::queries_setup::get_shared_db;
+use crate::common::{get_fixture_db, plain_user};
 
 #[actix_web::test]
 #[serial]
 async fn chats_and_members_are_paginated() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
-    let (_container, url) = get_shared_db().await;
-    let db = get_smart_db(url).await;
+    let db = get_fixture_db().await;
     let user = plain_user(&db).await;
     let (second, third) = (plain_user(&db).await, plain_user(&db).await);
 
@@ -99,8 +97,7 @@ async fn rate_limit_is_per_user() {
             ),
     )
     .await;
-    let (_container, url) = get_shared_db().await;
-    let db = get_smart_db(url).await;
+    let db = get_fixture_db().await;
     let (busy, other) = (plain_user(&db).await, plain_user(&db).await);
 
     for _ in 0..2 {
@@ -138,8 +135,7 @@ async fn the_production_budget_refuses_a_user_past_its_burst() {
             ),
     )
     .await;
-    let (_container, url) = get_shared_db().await;
-    let db = get_smart_db(url).await;
+    let db = get_fixture_db().await;
     let (busy, other) = (plain_user(&db).await, plain_user(&db).await);
 
     let started = std::time::Instant::now();

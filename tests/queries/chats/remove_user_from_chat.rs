@@ -1,5 +1,4 @@
 use crate::common::get_smart_db;
-use mairie360_api_lib::test_setup::queries_setup::get_shared_db;
 use message_api::database::chats::{
     add_users_to_chat::view::AddMembersToChatQueryView, create_chat::view::CreateChatQueryView,
     remove_user_from_chat::view::RemoveMemberFromChatQueryView,
@@ -9,8 +8,7 @@ use serial_test::serial;
 #[tokio::test]
 #[serial]
 async fn test_remove_user_from_chat_success() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
+    let db = get_smart_db().await;
 
     let view = CreateChatQueryView::new("Test Chat", None);
     let chat_id = db.fetch_scalar::<i32, _>(&view).await.unwrap() as u64;
@@ -27,8 +25,7 @@ async fn test_remove_user_from_chat_success() {
 #[tokio::test]
 #[serial]
 async fn test_remove_user_from_chat_success_unknow_chat() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
+    let db = get_smart_db().await;
 
     let view = AddMembersToChatQueryView::new(999, vec![1]);
     let result = db.execute(view).await;
@@ -39,8 +36,7 @@ async fn test_remove_user_from_chat_success_unknow_chat() {
 #[tokio::test]
 #[serial]
 async fn test_remove_user_from_chat_success_unknow_user() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
+    let db = get_smart_db().await;
 
     let view = CreateChatQueryView::new("Test Chat", None);
     let chat_id = db.fetch_scalar::<i32, _>(&view).await.unwrap() as u64;
@@ -55,8 +51,7 @@ async fn test_remove_user_from_chat_success_unknow_user() {
 #[tokio::test]
 #[serial]
 async fn test_remove_user_from_chat_success_unknow_user_and_chat() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
+    let db = get_smart_db().await;
 
     let view = RemoveMemberFromChatQueryView::new(999, 999);
     let result = db.fetch_scalar::<i32, _>(&view).await;

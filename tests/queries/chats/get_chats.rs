@@ -1,5 +1,4 @@
-use crate::common::{get_smart_db, plain_user};
-use mairie360_api_lib::test_setup::queries_setup::get_shared_db;
+use crate::common::{get_fixture_db, get_smart_db, plain_user};
 use message_api::database::chats::{
     add_users_to_chat::view::AddMembersToChatQueryView,
     create_chat::view::CreateChatQueryView,
@@ -10,8 +9,7 @@ use serial_test::serial;
 #[tokio::test]
 #[serial]
 async fn test_get_chats_success() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
+    let db = get_smart_db().await;
 
     for _ in 0..2 {
         let view = CreateChatQueryView::new("Test Chat", None);
@@ -31,11 +29,11 @@ async fn test_get_chats_success() {
 #[tokio::test]
 #[serial]
 async fn test_get_chats_no_chat() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
+    let db = get_smart_db().await;
+    let fixtures = get_fixture_db().await;
 
     // A fresh account: the seeded ones may have joined chats in other tests.
-    let user = plain_user(&db).await;
+    let user = plain_user(&fixtures).await;
     let view = GetChatsQueryView::new(user);
     let result = db.fetch_all::<GetChatsQueryResultView, _>(&view).await;
 
@@ -46,8 +44,7 @@ async fn test_get_chats_no_chat() {
 #[tokio::test]
 #[serial]
 async fn test_get_chats_unknown_user() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
+    let db = get_smart_db().await;
 
     let view = GetChatsQueryView::new(999);
     let result = db.fetch_all::<GetChatsQueryResultView, _>(&view).await;

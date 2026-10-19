@@ -1,9 +1,8 @@
-use crate::common::{get_smart_db, plain_user};
+use crate::common::{get_fixture_db, get_smart_db, plain_user};
 use mairie360_api_lib::database::db_interface::{ApiRequestDto, QueryParam};
 use mairie360_api_lib::database::error::DbError;
 use mairie360_api_lib::error::ApiLibError;
 use mairie360_api_lib::smart_db::SmartDatabase;
-use mairie360_api_lib::test_setup::queries_setup::get_shared_db;
 use message_api::database::chats::{
     acknowledge_read::view::AcknowledgeReadQueryView,
     add_message_to_chat::view::PostMessageInChatQueryView,
@@ -122,10 +121,10 @@ async fn listed_unread(db: &SmartDatabase, chat_id: u64, user_id: u64) -> i32 {
 #[tokio::test]
 #[serial]
 async fn test_acknowledge_read_only_clears_up_to_the_cursor() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
-    let sender = plain_user(&db).await;
-    let reader = plain_user(&db).await;
+    let db = get_smart_db().await;
+    let fixtures = get_fixture_db().await;
+    let sender = plain_user(&fixtures).await;
+    let reader = plain_user(&fixtures).await;
     let chat_id = chat_with(&db, vec![sender, reader]).await;
     let first = post(&db, chat_id, sender).await;
     let second = post(&db, chat_id, sender).await;
@@ -148,10 +147,10 @@ async fn test_acknowledge_read_only_clears_up_to_the_cursor() {
 #[tokio::test]
 #[serial]
 async fn test_stale_acknowledgement_cannot_clear_a_new_message() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
-    let sender = plain_user(&db).await;
-    let reader = plain_user(&db).await;
+    let db = get_smart_db().await;
+    let fixtures = get_fixture_db().await;
+    let sender = plain_user(&fixtures).await;
+    let reader = plain_user(&fixtures).await;
     let chat_id = chat_with(&db, vec![sender, reader]).await;
     let displayed = post(&db, chat_id, sender).await;
 
@@ -181,10 +180,10 @@ async fn test_stale_acknowledgement_cannot_clear_a_new_message() {
 #[tokio::test]
 #[serial]
 async fn test_acknowledge_read_refuses_a_message_of_another_chat() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
-    let sender = plain_user(&db).await;
-    let reader = plain_user(&db).await;
+    let db = get_smart_db().await;
+    let fixtures = get_fixture_db().await;
+    let sender = plain_user(&fixtures).await;
+    let reader = plain_user(&fixtures).await;
     let chat_id = chat_with(&db, vec![sender, reader]).await;
     let other_chat_id = chat_with(&db, vec![sender, reader]).await;
     post(&db, chat_id, sender).await;
@@ -209,10 +208,10 @@ async fn test_acknowledge_read_refuses_a_message_of_another_chat() {
 #[tokio::test]
 #[serial]
 async fn test_acknowledge_read_never_counts_own_or_removed_members() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
-    let sender = plain_user(&db).await;
-    let removed = plain_user(&db).await;
+    let db = get_smart_db().await;
+    let fixtures = get_fixture_db().await;
+    let sender = plain_user(&fixtures).await;
+    let removed = plain_user(&fixtures).await;
     let chat_id = chat_with(&db, vec![sender, removed]).await;
     db.execute(RemoveMemberFromChatQueryView::new(chat_id, removed))
         .await
@@ -233,19 +232,17 @@ async fn test_acknowledge_read_never_counts_own_or_removed_members() {
 #[tokio::test]
 #[serial]
 async fn test_acknowledge_read_races_with_new_messages() {
-    let (_container, host) = get_shared_db().await;
-    let host = host.to_string();
-    let db = get_smart_db(&host).await;
-    let sender = plain_user(&db).await;
-    let reader = plain_user(&db).await;
+    let db = get_smart_db().await;
+    let fixtures = get_fixture_db().await;
+    let sender = plain_user(&fixtures).await;
+    let reader = plain_user(&fixtures).await;
     let chat_id = chat_with(&db, vec![sender, reader]).await;
     post(&db, chat_id, sender).await;
 
     let senders: Vec<_> = (0..4)
         .map(|_| {
-            let host = host.clone();
             tokio::spawn(async move {
-                let db = get_smart_db(&host).await;
+                let db = get_smart_db().await;
                 for _ in 0..25 {
                     post(&db, chat_id, sender).await;
                 }
@@ -253,9 +250,8 @@ async fn test_acknowledge_read_races_with_new_messages() {
         })
         .collect();
     let reader_task = {
-        let host = host.clone();
         tokio::spawn(async move {
-            let db = get_smart_db(&host).await;
+            let db = get_smart_db().await;
             for _ in 0..60 {
                 // The agent acknowledges the newest message it can see.
                 let last = db
