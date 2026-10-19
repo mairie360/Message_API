@@ -8,8 +8,7 @@ use serial_test::serial;
 use tokio::sync::broadcast;
 
 use super::harness::{request, states};
-use crate::common::{get_smart_db, plain_user};
-use mairie360_api_lib::test_setup::queries_setup::get_shared_db;
+use crate::common::{get_fixture_db, plain_user};
 
 /// The cursor of a `GET /api/v1/{chat_id}/` response, as query parameters.
 fn cursor_of(body: &Value) -> String {
@@ -42,8 +41,7 @@ async fn next_event(rx: &mut broadcast::Receiver<ChatEvent>) -> Option<ChatEvent
 async fn mair_524_open_chat_is_polled_from_a_cursor() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
-    let (_container, url) = get_shared_db().await;
-    let db = get_smart_db(url).await;
+    let db = get_fixture_db().await;
     let author = plain_user(&db).await;
     let member = plain_user(&db).await;
     let mut events = sse.internal_bus.subscribe();
@@ -194,8 +192,7 @@ async fn mair_524_open_chat_is_polled_from_a_cursor() {
 async fn mair_524_tombstones_are_final() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
-    let (_container, url) = get_shared_db().await;
-    let db = get_smart_db(url).await;
+    let db = get_fixture_db().await;
     let author = plain_user(&db).await;
     let mut events = sse.internal_bus.subscribe();
 
@@ -249,8 +246,7 @@ async fn mair_524_tombstones_are_final() {
 async fn mair_524_since_refusals() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
-    let (_container, url) = get_shared_db().await;
-    let db = get_smart_db(url).await;
+    let db = get_fixture_db().await;
     let member = plain_user(&db).await;
     let outsider = plain_user(&db).await;
     let (_, body) = send_json!(
@@ -311,8 +307,7 @@ async fn mair_524_since_refusals() {
 async fn mair_524_chat_list_since() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
-    let (_container, url) = get_shared_db().await;
-    let db = get_smart_db(url).await;
+    let db = get_fixture_db().await;
     let user = plain_user(&db).await;
     let mut chats = Vec::new();
     for name in ["Calme", "Animé"] {

@@ -8,8 +8,7 @@ use serial_test::serial;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use super::harness::{admin_id, request, states};
-use crate::common::{get_smart_db, named_user};
-use mairie360_api_lib::test_setup::queries_setup::get_shared_db;
+use crate::common::{get_fixture_db, named_user};
 
 /// A name no other test user has, so that searches only find what the test created (the test
 /// database is shared and keeps every user).
@@ -36,8 +35,7 @@ fn names(body: &Value) -> Vec<String> {
 async fn list_names_a_direct_chat_after_the_other_participant_and_counts_members() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
-    let (_container, url) = get_shared_db().await;
-    let db = get_smart_db(url).await;
+    let db = get_fixture_db().await;
     let (last_a, last_b) = (unique("Martin"), unique("Bertrand"));
     let alice = named_user(&db, "Alice", &last_a).await;
     let bob = named_user(&db, "Xavier", &last_b).await;
@@ -93,8 +91,7 @@ async fn list_names_a_direct_chat_after_the_other_participant_and_counts_members
 async fn search_finds_chats_by_their_name_or_by_a_member_name() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
-    let (_container, url) = get_shared_db().await;
-    let db = get_smart_db(url).await;
+    let db = get_fixture_db().await;
     let (last_a, last_b, last_c) = (unique("Martin"), unique("Bertrand"), unique("Durand"));
     let alice = named_user(&db, "Alice", &last_a).await;
     let xavier = named_user(&db, "Xavier", &last_b).await;
@@ -192,8 +189,7 @@ async fn search_finds_chats_by_their_name_or_by_a_member_name() {
 async fn search_only_sees_the_chats_of_the_caller_and_paginates_the_result() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
-    let (_container, url) = get_shared_db().await;
-    let db = get_smart_db(url).await;
+    let db = get_fixture_db().await;
     let last = unique("Bertrand");
     let alice = named_user(&db, "Alice", &unique("Martin")).await;
     let stranger = named_user(&db, "Sam", &unique("Leroy")).await;
@@ -241,8 +237,7 @@ async fn search_only_sees_the_chats_of_the_caller_and_paginates_the_result() {
 async fn members_come_with_their_names() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
-    let (_container, url) = get_shared_db().await;
-    let db = get_smart_db(url).await;
+    let db = get_fixture_db().await;
     let (last_a, last_b) = (unique("Martin"), unique("Bertrand"));
     let alice = named_user(&db, "Alice", &last_a).await;
     let xavier = named_user(&db, "Xavier", &last_b).await;
@@ -276,8 +271,7 @@ async fn members_come_with_their_names() {
 async fn opening_a_chat_returns_its_header_and_the_quotes_with_their_excerpt() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
-    let (_container, url) = get_shared_db().await;
-    let db = get_smart_db(url).await;
+    let db = get_fixture_db().await;
     let (last_a, last_b) = (unique("Martin"), unique("Bertrand"));
     let alice = named_user(&db, "Alice", &last_a).await;
     let xavier = named_user(&db, "Xavier", &last_b).await;
@@ -346,8 +340,7 @@ async fn opening_a_chat_returns_its_header_and_the_quotes_with_their_excerpt() {
 async fn an_administrator_outside_a_direct_chat_sees_both_names() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
-    let (_container, url) = get_shared_db().await;
-    let db = get_smart_db(url).await;
+    let db = get_fixture_db().await;
     let (last_a, last_b) = (unique("Martin"), unique("Bertrand"));
     let alice = named_user(&db, "Alice", &last_a).await;
     let xavier = named_user(&db, "Xavier", &last_b).await;

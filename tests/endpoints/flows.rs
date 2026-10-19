@@ -5,16 +5,14 @@ use serde_json::json;
 use serial_test::serial;
 
 use super::harness::{admin_id, request, states};
-use crate::common::{get_smart_db, grant_chat_delete, plain_user};
-use mairie360_api_lib::test_setup::queries_setup::get_shared_db;
+use crate::common::{get_fixture_db, grant_chat_delete, plain_user};
 
 #[actix_web::test]
 #[serial]
 async fn chat_lifecycle_through_every_route() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
-    let (_container, url) = get_shared_db().await;
-    let db = get_smart_db(url).await;
+    let db = get_fixture_db().await;
     let creator = plain_user(&db).await;
     let member = plain_user(&db).await;
     let newcomer = plain_user(&db).await;
@@ -171,8 +169,7 @@ async fn chat_lifecycle_through_every_route() {
 async fn last_member_leaving_deletes_the_chat() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
-    let (_container, url) = get_shared_db().await;
-    let db = get_smart_db(url).await;
+    let db = get_fixture_db().await;
     let alone = plain_user(&db).await;
     let admin = admin_id().await;
 
@@ -205,8 +202,7 @@ async fn last_member_leaving_deletes_the_chat() {
 async fn stream_opens_an_event_stream() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
-    let (_container, url) = get_shared_db().await;
-    let db = get_smart_db(url).await;
+    let db = get_fixture_db().await;
     let user = plain_user(&db).await;
 
     // The body never ends: only the head of the response is read.
@@ -230,8 +226,7 @@ async fn stream_opens_an_event_stream() {
 async fn stream_sends_its_first_bytes_within_a_second() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
-    let (_container, url) = get_shared_db().await;
-    let db = get_smart_db(url).await;
+    let db = get_fixture_db().await;
     let user = plain_user(&db).await;
 
     let response = actix_web::test::call_service(
@@ -261,8 +256,7 @@ async fn stream_sends_its_first_bytes_within_a_second() {
 async fn angle_brackets_are_accepted_in_free_text() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
-    let (_container, url) = get_shared_db().await;
-    let db = get_smart_db(url).await;
+    let db = get_fixture_db().await;
     let user = plain_user(&db).await;
 
     let name = "Budget > 10 000 € -> <validé>";
@@ -319,8 +313,7 @@ macro_rules! listed {
 async fn direct_chat_is_reused_and_shown_again_by_a_message() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
-    let (_container, url) = get_shared_db().await;
-    let db = get_smart_db(url).await;
+    let db = get_fixture_db().await;
     let (alice, bob) = (plain_user(&db).await, plain_user(&db).await);
 
     let (status, body) = send_json!(
@@ -439,8 +432,7 @@ async fn direct_chat_is_reused_and_shown_again_by_a_message() {
 async fn group_chat_is_deleted_by_its_creator_or_an_agent_granted_the_right() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
-    let (_container, url) = get_shared_db().await;
-    let db = get_smart_db(url).await;
+    let db = get_fixture_db().await;
     let (creator, member, granted) = (
         plain_user(&db).await,
         plain_user(&db).await,

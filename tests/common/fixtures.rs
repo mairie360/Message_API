@@ -1,6 +1,7 @@
 //! Test-only queries on tables the API never reads (moderation log) or writes (ACLs, granted by the
-//! platform), and on `is_excluded` of a group chat, which the API only sets on direct chats. The
-//! tests connect as the Postgres superuser, so the grants of `message_api` do not apply.
+//! platform), and on `is_excluded` of a group chat, which the API only sets on direct chats. They run
+//! on `get_fixture_db()` (the Postgres superuser), so the grants of `message_api` do not apply;
+//! the API's own queries run on `get_smart_db()`, as `message_api` (MAIR-556).
 
 use mairie360_api_lib::database::db_interface::{ApiRequestDto, QueryParam};
 use mairie360_api_lib::smart_db::SmartDatabase;

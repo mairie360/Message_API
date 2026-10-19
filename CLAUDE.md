@@ -11,15 +11,15 @@ real-time message notifications. It was bootstrapped from a "Rust API Template" 
 `docker-compose.yml` and `nginx.conf` are template residue, not TODOs for a fresh rename.
 
 Most cross-cutting behavior (DB + cache access, auth, env access, query trait, test harness)
-lives in the external crate **`mairie360_api_lib`** (crates.io, `1.2.2`, pinned in
-`Cargo.lock`). Read its source under `~/.cargo/registry/src/*/mairie360_api_lib-1.2.2/`
+lives in the external crate **`mairie360_api_lib`** (crates.io, `4.2.0`, pinned in
+`Cargo.lock`). Read its source under `~/.cargo/registry/src/*/mairie360_api_lib-4.2.0/`
 when in doubt — the API surface used here is: `state::AppState`
 (`get_smart_db()` / `get_redis()`), `smart_db::SmartDatabase`
 (`fetch_one` / `fetch_all` / `fetch_scalar` / `execute`),
 `database::db_interface::{ApiRequestDto, QueryParam}`,
 `database::error::DbError`, `error::ApiLibError`,
 `security::{JwtMiddleware, AuthenticatedUser}`, `env_manager::get_critical_env_var`,
-`test_setup::queries_setup::get_shared_db`. This crate owns `sqlx` — the API itself has
+`test_setup::queries_setup::{get_shared_db, get_shared_db_as}`. This crate owns `sqlx` — the API itself has
 no direct `sqlx` dependency.
 
 ## Commands
@@ -51,11 +51,20 @@ and `lists.rs` checks the production quota of `rate_limit_from_env()` (`429` pas
 least 1 s).
 They are plain `#[tokio::test]` + `#[serial]` (`serial_test`) and use `mairie360_api_lib`'s
 `get_shared_db()`, which spins up **real Docker containers via testcontainers** —
-`ghcr.io/mairie360/database:dev-61be6d5` (pinned in `.cargo/config.toml` through `TEST_DB_VERSION`, which overrides the lib default) plus a Liquibase
+`ghcr.io/mairie360/database:dev-949384c` (pinned in `.cargo/config.toml` through `TEST_DB_VERSION`, which overrides the lib default) plus a Liquibase
 migration container, with Postgres published on a random host port (tests must still stay
 `#[serial]`). A running Docker daemon and pull access to `ghcr.io/mairie360/*` are required.
 
-`tests/common::get_smart_db(db_url)` builds a `SmartDatabase` over that Postgres. It also
+`get_shared_db()` hands back the **superuser** URL, used by the fixtures only
+(`tests/common::get_fixture_db()`: users, ACLs, moderation log reads). Everything that runs Message's code connects
+as the `message_api` role, like in staging (MAIR-556): `tests/common::get_smart_db()` (query views, SSE listener) and
+`AppState::new(…, message_db_url().await)` (endpoints, `tests/endpoints/harness.rs`), both through the lib's
+`get_shared_db_as("message_api")`. A query outside the grants of Database's `api_grants.sql` then fails the test with
+`permission denied` (SQLSTATE `42501`): add the grant there, never connect the code under test as the superuser.
+`tests/queries/db_role.rs` guards this. The compose stacks connect `message` as `message_api` too
+(`-Dmessage_api_password` passed to Liquibase); postgres, liquibase and the seeder keep the superuser.
+
+`tests/common::smart_db_at(db_url)` builds a `SmartDatabase` over any URL. It also
 constructs a `Redis` pointing at `localhost:6379`, but no chat `QueryView` declares a
 `cache_key`, so Redis is never actually contacted by the queries. Only `tests/sse/relay.rs` needs Redis: it starts
 its own containers (`redis` image through testcontainers, one of them with the platform ACL of the `message-api` role).
@@ -216,7 +225,7 @@ which lives in `Devops/Database` (`releases/v1.5.0` + `repeatable/messages/`): i
 when the id belongs to another chat. Sends and acknowledgements of one conversation are serialized by a transaction advisory
 lock taken by a `BEFORE INSERT` trigger on `messages`, which also draws the message id after the lock so a single cursor is
 sound. **This API needs a Database image that ships that release, `releases/v1.8.0`** (MAIR-394: `created_by`,
-`reply_to_id`, `messaging_moderation_log`) **and `releases/v1.9.0`** (MAIR-478: direct chat pair) **and `releases/v3.1.0`** (MAIR-524: change tracking): the compose files and
+`reply_to_id`, `messaging_moderation_log`) **and `releases/v1.9.0`** (MAIR-478: direct chat pair) **and `releases/v3.1.0`** (MAIR-524: change tracking) **and the MAIR-556 role passwords** (`dev-949384c`): the compose files and
 `TEST_DB_VERSION` in `.cargo/config.toml` pin it, and both have to be bumped together when a newer Database image is
 needed. To try an unmerged Database branch, build `ghcr.io/mairie360/database:<tag>` and `…/liquibase-migrations:<tag>`
 from `Devops/Database` and run `TEST_DB_VERSION=<tag> cargo test`.

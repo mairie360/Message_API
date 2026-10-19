@@ -1,5 +1,4 @@
-use crate::common::{get_smart_db, moderation_log_count, plain_user};
-use mairie360_api_lib::test_setup::queries_setup::get_shared_db;
+use crate::common::{get_fixture_db, get_smart_db, moderation_log_count, plain_user};
 use message_api::database::chats::{
     add_message_to_chat::view::PostMessageInChatQueryView, create_chat::view::CreateChatQueryView,
     delete_message_from_chat::view::DeleteMessageQueryView,
@@ -9,8 +8,8 @@ use serial_test::serial;
 #[tokio::test]
 #[serial]
 async fn test_delete_message_success() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
+    let db = get_smart_db().await;
+    let fixtures = get_fixture_db().await;
 
     let view = CreateChatQueryView::new("Test Chat", None);
     let chat_id = db.fetch_scalar::<i32, _>(&view).await.unwrap() as u64;
@@ -25,7 +24,7 @@ async fn test_delete_message_success() {
     assert_eq!(result.unwrap(), message_id);
     // The author deleting their own message is not moderation.
     assert_eq!(
-        moderation_log_count(&db, chat_id, "DELETE_MESSAGE", 1).await,
+        moderation_log_count(&fixtures, chat_id, "DELETE_MESSAGE", 1).await,
         0
     );
 }
@@ -33,8 +32,7 @@ async fn test_delete_message_success() {
 #[tokio::test]
 #[serial]
 async fn test_delete_message_unknown_message() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
+    let db = get_smart_db().await;
 
     let view = DeleteMessageQueryView::new(1, 999, 1);
     let result = db.fetch_scalar::<i64, _>(&view).await;
@@ -45,8 +43,7 @@ async fn test_delete_message_unknown_message() {
 #[tokio::test]
 #[serial]
 async fn test_delete_message_is_scoped_to_its_chat() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
+    let db = get_smart_db().await;
 
     let chat_id = db
         .fetch_scalar::<i32, _>(&CreateChatQueryView::new("Owner chat", None))
@@ -73,9 +70,9 @@ async fn test_delete_message_is_scoped_to_its_chat() {
 #[tokio::test]
 #[serial]
 async fn test_moderating_a_message_is_logged() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
-    let author = plain_user(&db).await;
+    let db = get_smart_db().await;
+    let fixtures = get_fixture_db().await;
+    let author = plain_user(&fixtures).await;
 
     let chat_id = db
         .fetch_scalar::<i32, _>(&CreateChatQueryView::new("Moderated", None))
@@ -91,7 +88,7 @@ async fn test_moderating_a_message_is_logged() {
         .await
         .unwrap();
     assert_eq!(
-        moderation_log_count(&db, chat_id, "DELETE_MESSAGE", 1).await,
+        moderation_log_count(&fixtures, chat_id, "DELETE_MESSAGE", 1).await,
         1
     );
 }

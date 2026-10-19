@@ -6,7 +6,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use actix_web::web::Bytes;
-use mairie360_api_lib::test_setup::queries_setup::get_shared_db;
 use message_api::database::chats::{
     add_users_to_chat::view::AddMembersToChatQueryView, create_chat::view::CreateChatQueryView,
 };
@@ -22,13 +21,14 @@ type SseChannel = (
     mpsc::Receiver<Result<Bytes, String>>,
 );
 
-async fn spawn_listener(db_url: &str) -> (Arc<AppState>, broadcast::Sender<ChatEvent>) {
-    let db = get_smart_db(db_url).await;
+/// Starts the SSE event listener on a `SmartDatabase` connected as `message_api` (MAIR-556).
+async fn spawn_listener() -> (Arc<AppState>, broadcast::Sender<ChatEvent>) {
+    let db = get_smart_db().await;
     let (bus_tx, _) = broadcast::channel(16);
     let state = Arc::new(AppState::new(bus_tx.clone(), None));
 
     tokio::spawn(start_internal_event_listener(state.clone(), db));
-    // Laisse le temps au listener de s'abonner au bus avant le premier `send`.
+    // Gives the listener time to subscribe to the bus before the first `send`.
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     (state, bus_tx)
@@ -37,8 +37,7 @@ async fn spawn_listener(db_url: &str) -> (Arc<AppState>, broadcast::Sender<ChatE
 #[tokio::test]
 #[serial]
 async fn test_event_manager_notifies_online_members_except_sender() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
+    let db = get_smart_db().await;
 
     let chat_id = db
         .fetch_scalar::<i32, _>(&CreateChatQueryView::new("SSE Chat", None))
@@ -48,7 +47,7 @@ async fn test_event_manager_notifies_online_members_except_sender() {
         .await
         .unwrap();
 
-    let (state, bus_tx) = spawn_listener(host).await;
+    let (state, bus_tx) = spawn_listener().await;
 
     // L'expéditeur (1) et le destinataire (2) sont tous les deux en ligne.
     let (sender_tx, mut sender_rx): SseChannel = mpsc::channel(16);
@@ -85,9 +84,7 @@ async fn test_event_manager_notifies_online_members_except_sender() {
 #[tokio::test]
 #[serial]
 async fn test_event_manager_ignores_unknown_chat() {
-    let (_container, host) = get_shared_db().await;
-
-    let (state, bus_tx) = spawn_listener(host).await;
+    let (state, bus_tx) = spawn_listener().await;
 
     let (agent_tx, mut agent_rx): SseChannel = mpsc::channel(16);
     state.register_connection(1, agent_tx);
@@ -106,8 +103,7 @@ async fn test_event_manager_ignores_unknown_chat() {
 #[tokio::test]
 #[serial]
 async fn test_event_manager_notifies_every_connection_of_a_user() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
+    let db = get_smart_db().await;
 
     let chat_id = db
         .fetch_scalar::<i32, _>(&CreateChatQueryView::new("SSE Multi", None))
@@ -117,7 +113,7 @@ async fn test_event_manager_notifies_every_connection_of_a_user() {
         .await
         .unwrap();
 
-    let (state, bus_tx) = spawn_listener(host).await;
+    let (state, bus_tx) = spawn_listener().await;
 
     let (first_tx, mut first_rx): SseChannel = mpsc::channel(16);
     let (second_tx, mut second_rx): SseChannel = mpsc::channel(16);
@@ -148,8 +144,7 @@ async fn test_event_manager_notifies_every_connection_of_a_user() {
 #[tokio::test]
 #[serial]
 async fn test_event_manager_prunes_only_closed_connections() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
+    let db = get_smart_db().await;
 
     let chat_id = db
         .fetch_scalar::<i32, _>(&CreateChatQueryView::new("SSE Prune", None))
@@ -159,7 +154,7 @@ async fn test_event_manager_prunes_only_closed_connections() {
         .await
         .unwrap();
 
-    let (state, bus_tx) = spawn_listener(host).await;
+    let (state, bus_tx) = spawn_listener().await;
 
     let (dead_tx, dead_rx): SseChannel = mpsc::channel(16);
     let (live_tx, mut live_rx): SseChannel = mpsc::channel(16);
@@ -182,8 +177,7 @@ async fn test_event_manager_prunes_only_closed_connections() {
 #[tokio::test]
 #[serial]
 async fn test_event_manager_survives_a_lagged_receiver() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
+    let db = get_smart_db().await;
 
     let chat_id = db
         .fetch_scalar::<i32, _>(&CreateChatQueryView::new("SSE Lagged", None))
@@ -236,8 +230,7 @@ async fn nothing_received(rx: &mut mpsc::Receiver<Result<Bytes, String>>) -> boo
 #[tokio::test]
 #[serial]
 async fn test_mair_524_edits_and_deletions_reach_the_members_but_the_actor() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
+    let db = get_smart_db().await;
     let chat_id = db
         .fetch_scalar::<i32, _>(&CreateChatQueryView::new("SSE kinds", None))
         .await
@@ -245,7 +238,7 @@ async fn test_mair_524_edits_and_deletions_reach_the_members_but_the_actor() {
     db.execute(AddMembersToChatQueryView::new(chat_id, vec![1, 2]))
         .await
         .unwrap();
-    let (state, bus_tx) = spawn_listener(host).await;
+    let (state, bus_tx) = spawn_listener().await;
     let (actor_tx, mut actor_rx): SseChannel = mpsc::channel(16);
     let (member_tx, mut member_rx): SseChannel = mpsc::channel(16);
     state.register_connection(1, actor_tx);
@@ -281,8 +274,7 @@ async fn test_mair_524_edits_and_deletions_reach_the_members_but_the_actor() {
 #[tokio::test]
 #[serial]
 async fn test_mair_524_a_read_acknowledgement_only_reaches_the_reader() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
+    let db = get_smart_db().await;
     let chat_id = db
         .fetch_scalar::<i32, _>(&CreateChatQueryView::new("SSE read", None))
         .await
@@ -290,7 +282,7 @@ async fn test_mair_524_a_read_acknowledgement_only_reaches_the_reader() {
     db.execute(AddMembersToChatQueryView::new(chat_id, vec![1, 2]))
         .await
         .unwrap();
-    let (state, bus_tx) = spawn_listener(host).await;
+    let (state, bus_tx) = spawn_listener().await;
     let (phone_tx, mut phone_rx): SseChannel = mpsc::channel(16);
     let (desktop_tx, mut desktop_rx): SseChannel = mpsc::channel(16);
     let (other_tx, mut other_rx): SseChannel = mpsc::channel(16);

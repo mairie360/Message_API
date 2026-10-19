@@ -1,8 +1,7 @@
-use crate::common::{get_smart_db, plain_user};
+use crate::common::{get_fixture_db, get_smart_db, plain_user};
 use mairie360_api_lib::database::error::DbError;
 use mairie360_api_lib::error::ApiLibError;
 use mairie360_api_lib::smart_db::SmartDatabase;
-use mairie360_api_lib::test_setup::queries_setup::get_shared_db;
 use message_api::database::chats::{
     access::view::{ChatAccess, ChatAccessQueryView},
     add_message_to_chat::view::PostMessageInChatQueryView,
@@ -34,10 +33,10 @@ async fn access(db: &SmartDatabase, chat_id: u64, user_id: u64) -> ChatAccess {
 #[tokio::test]
 #[serial]
 async fn test_chat_access_tells_members_outsiders_and_admins_apart() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
-    let member = plain_user(&db).await;
-    let outsider = plain_user(&db).await;
+    let db = get_smart_db().await;
+    let fixtures = get_fixture_db().await;
+    let member = plain_user(&fixtures).await;
+    let outsider = plain_user(&fixtures).await;
     let chat_id = chat_with(&db, vec![member]).await;
 
     let member_access = access(&db, chat_id, member).await;
@@ -57,9 +56,9 @@ async fn test_chat_access_tells_members_outsiders_and_admins_apart() {
 #[tokio::test]
 #[serial]
 async fn test_chat_access_on_an_unknown_chat() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
-    let user = plain_user(&db).await;
+    let db = get_smart_db().await;
+    let fixtures = get_fixture_db().await;
+    let user = plain_user(&fixtures).await;
 
     let unknown = access(&db, 999_999, user).await;
     assert!(!unknown.chat_exists && !unknown.is_member);
@@ -68,9 +67,9 @@ async fn test_chat_access_on_an_unknown_chat() {
 #[tokio::test]
 #[serial]
 async fn test_message_owner_is_scoped_to_the_chat() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
-    let author = plain_user(&db).await;
+    let db = get_smart_db().await;
+    let fixtures = get_fixture_db().await;
+    let author = plain_user(&fixtures).await;
     let chat_id = chat_with(&db, vec![author]).await;
     let other_chat = chat_with(&db, vec![author]).await;
     let message_id = db
@@ -96,10 +95,10 @@ async fn test_message_owner_is_scoped_to_the_chat() {
 #[tokio::test]
 #[serial]
 async fn test_chat_is_deleted_with_its_last_member() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
-    let first = plain_user(&db).await;
-    let second = plain_user(&db).await;
+    let db = get_smart_db().await;
+    let fixtures = get_fixture_db().await;
+    let first = plain_user(&fixtures).await;
+    let second = plain_user(&fixtures).await;
     let chat_id = chat_with(&db, vec![first, second]).await;
 
     db.fetch_scalar::<i32, _>(&RemoveMemberFromChatQueryView::new(chat_id, first))
@@ -122,10 +121,10 @@ async fn test_chat_is_deleted_with_its_last_member() {
 #[tokio::test]
 #[serial]
 async fn test_chat_access_tells_the_creator_apart() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
-    let creator = plain_user(&db).await;
-    let member = plain_user(&db).await;
+    let db = get_smart_db().await;
+    let fixtures = get_fixture_db().await;
+    let creator = plain_user(&fixtures).await;
+    let member = plain_user(&fixtures).await;
     let chat_id = db
         .fetch_scalar::<i32, _>(&CreateChatQueryView::with_members(
             "Creator",
@@ -150,11 +149,11 @@ async fn test_chat_access_tells_the_creator_apart() {
 #[tokio::test]
 #[serial]
 async fn test_locking_access_answers_like_the_plain_one() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
-    let creator = plain_user(&db).await;
-    let member = plain_user(&db).await;
-    let outsider = plain_user(&db).await;
+    let db = get_smart_db().await;
+    let fixtures = get_fixture_db().await;
+    let creator = plain_user(&fixtures).await;
+    let member = plain_user(&fixtures).await;
+    let outsider = plain_user(&fixtures).await;
     let chat_id = db
         .fetch_scalar::<i32, _>(&CreateChatQueryView::with_members(
             "Locking",
@@ -202,9 +201,9 @@ async fn test_locking_access_answers_like_the_plain_one() {
 #[tokio::test]
 #[serial]
 async fn test_locking_access_holds_the_membership_until_the_write_ends() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
-    let member = plain_user(&db).await;
+    let db = get_smart_db().await;
+    let fixtures = get_fixture_db().await;
+    let member = plain_user(&fixtures).await;
     let chat_id = chat_with(&db, vec![member]).await;
 
     let mut tx = db.begin().await.unwrap();
