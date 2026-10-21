@@ -427,3 +427,11 @@ Since `mairie360_api_lib` 3.4.0, `Database` reads three optional env vars throug
 pause no longer reconnects), `DB_POOL_MAX_CONNECTIONS` (default 10) and `DB_POOL_IDLE_TIMEOUT_SECS` (default 600). An
 invalid value falls back to its default with a `warn!`. Per-instance values are set by the `Deploiment` chart
 (`APIs.dbPool`); the compose stacks set none and use the defaults.
+
+## Promotion to staging and prod (MAIR-494)
+
+A push to `main` only releases dev (`cicd.yml` stops at `release-dev`). Staging and prod are manual:
+`gh workflow run promote-staging.yml -R mairie360/Message_API [-f sha=<sha>]`, then `promote-prod.yml`
+(environments `Staging` / `Prod`). Staging refuses a commit without `dev-<sha>` and a green main run, and runs
+the integration, ZAP and k6 stacks on that image; prod refuses one without `staging-<sha>` and tags the version semantic-release computes
+for that commit. `cicd.yml`, `promote-staging.yml` and `promote-prod.yml` pin the same mairie360/CICD release.
