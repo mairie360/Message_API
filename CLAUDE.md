@@ -431,7 +431,7 @@ invalid value falls back to its default with a `warn!`. Per-instance values are 
 ## Promotion to staging and prod (MAIR-494)
 
 A push to `main` only releases dev (`cicd.yml` stops at `release-dev`). Staging and prod are manual:
-`gh workflow run promote-staging.yml -R mairie360/Message_API [-f sha=<sha>]`, then `promote-prod.yml`
+`gh workflow run promote-staging.yml -R mairie360/Message_API` (main's newest commit) or `gh workflow run promote-staging.yml -R mairie360/Message_API -f sha=SHA` (a given commit), then the same with `promote-prod.yml`
 (environments `Staging` / `Prod`). Staging refuses a commit without `dev-<sha>` and a green main run, and runs
 the integration, ZAP and k6 stacks on that image; prod refuses one without `staging-<sha>` and tags the version semantic-release computes
 for that commit. `cicd.yml`, `promote-staging.yml` and `promote-prod.yml` pin the same mairie360/CICD release.
