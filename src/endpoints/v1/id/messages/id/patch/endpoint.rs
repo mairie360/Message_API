@@ -19,7 +19,7 @@ use crate::endpoints::validation::ValidatedJson;
 #[derive(Debug, Clone, PartialEq)]
 pub enum PatchMessageError {
     DatabaseError,
-    UnknownEvent,
+    UnknownMessage,
     UnknownChat,
     Forbidden,
     /// The message is a tombstone (MAIR-524): it is never edited back.
@@ -34,9 +34,7 @@ impl std::fmt::Display for PatchMessageError {
             PatchMessageError::DatabaseError => {
                 write!(f, "An error occurred while accessing the database.")
             }
-            PatchMessageError::UnknownEvent => {
-                write!(f, "Unknown event.")
-            }
+            PatchMessageError::UnknownMessage => write!(f, "Unknown message."),
             PatchMessageError::DeletedMessage => write!(f, "Unknown message."),
         }
     }
@@ -50,7 +48,7 @@ impl ResponseError for PatchMessageError {
                 StatusCode::NOT_FOUND
             }
             PatchMessageError::DatabaseError => StatusCode::INTERNAL_SERVER_ERROR,
-            PatchMessageError::UnknownEvent => StatusCode::BAD_REQUEST,
+            PatchMessageError::UnknownMessage => StatusCode::BAD_REQUEST,
         }
     }
 
@@ -98,10 +96,10 @@ async fn trigger_patch_message(
         ),
         (
             status = 400,
-            description = "Malformed JSON body, URL segment not an integer, `content` breaking its rules (`content` not blank, at most 5000 characters, no control character other than line breaks and tabs), or unknown message (`Unknown event.`).",
+            description = "Malformed JSON body, URL segment not an integer, `content` breaking its rules (`content` not blank, at most 5000 characters, no control character other than line breaks and tabs), or no message with this id in the chat (`Unknown message.`).",
             body = String,
             content_type = "text/plain",
-            example = json!("Unknown event.")
+            example = json!("Unknown message.")
         ),
         (
             status = 401,
@@ -184,7 +182,7 @@ impl From<AccessDenied> for PatchMessageError {
 impl From<MessageDenied> for PatchMessageError {
     fn from(denied: MessageDenied) -> Self {
         match denied {
-            MessageDenied::NotFound => PatchMessageError::UnknownEvent,
+            MessageDenied::NotFound => PatchMessageError::UnknownMessage,
             MessageDenied::Forbidden => PatchMessageError::Forbidden,
             MessageDenied::DatabaseError => PatchMessageError::DatabaseError,
         }
