@@ -89,9 +89,8 @@ async fn main() -> std::io::Result<()> {
             .wrap(middleware::from_fn(restore_query))
             .wrap(TracingLogger::<RedactedRootSpanBuilder>::new())
             .wrap(middleware::from_fn(hide_query))
-            // Every response is JSON, plain text or an event stream: forbid browsers from sniffing
-            // it as HTML.
-            .wrap(middleware::DefaultHeaders::new().add(("X-Content-Type-Options", "nosniff")))
+            // nosniff, and text/plain on the plain-text answers (MAIR-262).
+            .wrap(message_api::endpoints::headers::default_headers())
             // 1. Swagger UI and the OpenAPI document, only when SWAGGER_ENABLED is set (never in
             // production).
             .configure(|cfg| docs_config(cfg, swagger))
