@@ -268,6 +268,30 @@ yourself. The scenario creates
 its own chat and deletes it at the end, so it is replayable against a persistent database. `GET /api/v1/stream`
 is only checked unauthenticated (401): newman cannot consume an open SSE stream.
 
+Split of the tests (MAIR-262): `cargo test` (unit and handler tests) validates the code, newman validates that the
+running image works. The collection holds, for **every operation of the spec**, its success case and one case per
+documented `400` / `401` / `403` / `404` / `409`, chained in business journeys (group chat → messages, edits,
+deletions, incremental reads → acknowledgements → members → direct chat → refusals → cleanup), each case checking
+the status and what the front relies on. The `429` / `500` cannot be produced on purpose on a healthy stack and stay
+in the handler tests. Three collection-level scripts, identical in every API collection, back it:
+
+- the collection pre-request loads `/api-docs/openapi.json` once (the integration stack sets
+  `SWAGGER_ENABLED=true`), and the collection test checks every answer against it: documented operation,
+  documented status, content type, and the JSON body against the response schema (`$ref`s inlined);
+- `Every secured operation refuses a missing JWT` replays every `jwt`-secured operation of the spec without a token
+  and expects a documented `401 text/plain`;
+- `OpenAPI coverage`, the last request, fails when an operation has no success case or a documented status above
+  was never answered, and when an entry of the collection variable `openapi_coverage_exceptions` (`"METHOD /path
+  STATUS": "reason"`, `2xx` for the success) is no longer needed. The only one is the `200` of `GET /api/v1/stream`
+  (tested by `tests/endpoints/flows.rs` and the k6 `stream` scenario).
+
+A new endpoint therefore fails the integration stack until the collection tests it.
+
+A path id that is not an integer answers `400 text/plain` `Invalid path: ids are integers.` (`endpoints::config`
+registers a `PathConfig`, MAIR-262; the `DELETE` routes answered actix's `404`), and every operation with a path id
+documents that `400`: `tests/endpoints/path_ids.rs` walks the contract. Plain-text answers without a content type get
+`text/plain; charset=utf-8` from `endpoints::headers::default_headers()` (with `nosniff`), wired in `main.rs`.
+
 ## Architecture
 
 ### Routing mirrors the URL tree on the filesystem
@@ -290,8 +314,8 @@ three in sync when adding an endpoint: register it in the parent `config()`, add
 and `__path_*` to the parent `doc.rs`, then regenerate `openapi.json`.
 
 `src/main.rs` mounts `/health` (liveness) + `/ready` (readiness) publicly, Swagger UI + `/api-docs/openapi.json`
-only when `SWAGGER_ENABLED=true` (`swagger::docs_config`, MAIR-424: set by the dev, ZAP and k6 stacks, never on a
-deployed instance nor on the integration stack, whose Postman collection checks the `404`), and everything else under
+only when `SWAGGER_ENABLED=true` (`swagger::docs_config`, MAIR-424: set by the dev, integration, ZAP and k6 stacks,
+never on a deployed instance; `tests/endpoints/docs.rs` checks the `404` without it), and everything else under
 `web::scope("/api").wrap(JwtMiddleware)`. `JwtMiddleware` (from the lib) additionally
 whitelists `/`, `/swagger-ui*`, `/api-docs*`, and any path containing `/auth`. On success it
 inserts an `AuthenticatedUser { id }` into request extensions; handlers get it via the

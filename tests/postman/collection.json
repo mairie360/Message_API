@@ -20,7 +20,140 @@
           "const exp = Math.floor(Date.now() / 1000) + 3600;",
           "const payload = b64url(cryptoJs.enc.Utf8.parse(JSON.stringify({ sub: String(pm.environment.get('admin_user_id') || '1'), role: 'admin', exp })));",
           "const secret = cryptoJs.lib.WordArray.random(32);",
-          "pm.environment.set('jwt_hs256', `${header}.${payload}.${b64url(cryptoJs.HmacSHA256(`${header}.${payload}`, secret))}`);"
+          "pm.environment.set('jwt_hs256', `${header}.${payload}.${b64url(cryptoJs.HmacSHA256(`${header}.${payload}`, secret))}`);",
+          "",
+          "// OpenAPI contract (MAIR-262), identical in every API collection: the spec served by the API",
+          "// under test is loaded once per run, every response is then checked against it (collection test",
+          "// script) and the last request fails when an operation or a documented status was never tested.",
+          "if (!pm.collectionVariables.get('openapi_spec')) {",
+          "    pm.sendRequest(`${pm.environment.get('baseUrl')}/api-docs/openapi.json`, (err, res) => {",
+          "        if (err || res.code !== 200) {",
+          "            throw new Error(`OpenAPI spec unavailable (${err || res.code}): the stack must set SWAGGER_ENABLED=true`);",
+          "        }",
+          "        pm.collectionVariables.set('openapi_spec', res.text());",
+          "        pm.collectionVariables.set('openapi_covered', '[]');",
+          "    });",
+          "}"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// OpenAPI contract (MAIR-262), identical in every API collection: the answer of every request",
+          "// must be documented by the spec of the API under test (operation, status, content type, body",
+          "// schema), and the (operation, status) pair is recorded for the coverage check of the last request.",
+          "const openapi = {",
+          "    spec: () => JSON.parse(pm.collectionVariables.get('openapi_spec')),",
+          "    // The operation of `method path`, literal segments winning over path parameters",
+          "    // (`/formations/catalog/` before `/formations/{formation_id}/`).",
+          "    find: (spec, method, path) => {",
+          "        const candidates = Object.keys(spec.paths)",
+          "            .filter((template) => spec.paths[template][method])",
+          "            .filter((template) => new RegExp(`^${template.replace(/[.*+?^$()|[\\]\\\\]/g, '\\\\$&').replace(/\\{[^}]+\\}/g, '[^/]+')}$`).test(path))",
+          "            .sort((a, b) => (a.match(/\\{/g) || []).length - (b.match(/\\{/g) || []).length);",
+          "        return candidates.length ? { template: candidates[0], operation: spec.paths[candidates[0]][method] } : null;",
+          "    },",
+          "    // JSON schema keywords the validator understands; `$ref`s are inlined, the rest (`format`,",
+          "    // `example`, `description`...) is dropped so unknown formats such as `int64` never fail.",
+          "    clean: (spec, schema, depth = 0) => {",
+          "        if (!schema || typeof schema !== 'object' || depth > 32) return {};",
+          "        if (schema.$ref) {",
+          "            return openapi.clean(spec, schema.$ref.split('/').slice(1).reduce((node, key) => node[key], spec), depth + 1);",
+          "        }",
+          "        const out = {};",
+          "        ['type', 'required', 'enum', 'const', 'minimum', 'maximum', 'minLength', 'maxLength', 'pattern', 'minItems', 'maxItems']",
+          "            .filter((key) => key in schema).forEach((key) => { out[key] = schema[key]; });",
+          "        if (schema.properties) {",
+          "            out.properties = {};",
+          "            Object.keys(schema.properties).forEach((key) => { out.properties[key] = openapi.clean(spec, schema.properties[key], depth + 1); });",
+          "        }",
+          "        if (schema.items) out.items = openapi.clean(spec, schema.items, depth + 1);",
+          "        if (typeof schema.additionalProperties === 'object') out.additionalProperties = openapi.clean(spec, schema.additionalProperties, depth + 1);",
+          "        ['oneOf', 'anyOf', 'allOf'].filter((key) => schema[key]).forEach((key) => { out[key] = schema[key].map((s) => openapi.clean(spec, s, depth + 1)); });",
+          "        return out;",
+          "    },",
+          "    record: (key) => {",
+          "        const covered = JSON.parse(pm.collectionVariables.get('openapi_covered') || '[]');",
+          "        if (!covered.includes(key)) covered.push(key);",
+          "        pm.collectionVariables.set('openapi_covered', JSON.stringify(covered));",
+          "    },",
+          "    // Checks one answer against the spec and records the (operation, status) pair.",
+          "    check: (spec, method, path, code, contentType, text) => {",
+          "        const found = openapi.find(spec, method, path);",
+          "        pm.test(`Contract: ${method.toUpperCase()} ${path} is a documented operation`, () => {",
+          "            pm.expect(found, 'operation in the OpenAPI spec').to.be.an('object');",
+          "        });",
+          "        if (!found) return;",
+          "        const response = found.operation.responses[String(code)];",
+          "        pm.test(`Contract: ${code} is documented for ${method.toUpperCase()} ${found.template}`, () => {",
+          "            pm.expect(Object.keys(found.operation.responses)).to.include(String(code));",
+          "        });",
+          "        if (!response) return;",
+          "        openapi.record(`${method.toUpperCase()} ${found.template} ${code}`);",
+          "        const media = Object.keys(response.content || {});",
+          "        if (!media.length) return;",
+          "        pm.test(`Contract: ${code} answers ${media.join(' or ')}`, () => {",
+          "            pm.expect(media.some((type) => (contentType || '').startsWith(type)), `content-type ${contentType}`).to.be.true;",
+          "        });",
+          "        const json = response.content['application/json'];",
+          "        if (json && json.schema && (contentType || '').startsWith('application/json')) {",
+          "            pm.test(`Contract: ${code} body matches the schema of ${method.toUpperCase()} ${found.template}`, () => {",
+          "                const schema = openapi.clean(spec, json.schema);",
+          "                const errors = [];",
+          "                const validate = (value, s, at) => {",
+          "                    const matches = (o) => { const before = errors.length; validate(value, o, at); const ok = errors.length === before; errors.length = before; return ok; };",
+          "                    if (s.oneOf && s.oneOf.filter(matches).length !== 1) errors.push(`${at}: does not match exactly one oneOf`);",
+          "                    if (s.anyOf && !s.anyOf.some(matches)) errors.push(`${at}: matches no anyOf`);",
+          "                    if (s.allOf) s.allOf.forEach((o) => validate(value, o, at));",
+          "                    const types = s.type === undefined ? null : [].concat(s.type);",
+          "                    const typeOf = value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value === 'number' && Number.isInteger(value) ? 'integer' : typeof value;",
+          "                    if (types && !types.includes(typeOf) && !(typeOf === 'integer' && types.includes('number'))) { errors.push(`${at}: ${typeOf} instead of ${types.join('|')}`); return; }",
+          "                    if (s.enum && !s.enum.some((e) => JSON.stringify(e) === JSON.stringify(value))) errors.push(`${at}: ${JSON.stringify(value)} not in ${JSON.stringify(s.enum)}`);",
+          "                    if (s.const !== undefined && JSON.stringify(s.const) !== JSON.stringify(value)) errors.push(`${at}: not ${JSON.stringify(s.const)}`);",
+          "                    if (typeof value === 'number') {",
+          "                        if (s.minimum !== undefined && value < s.minimum) errors.push(`${at}: ${value} < ${s.minimum}`);",
+          "                        if (s.maximum !== undefined && value > s.maximum) errors.push(`${at}: ${value} > ${s.maximum}`);",
+          "                    }",
+          "                    if (typeof value === 'string') {",
+          "                        if (s.minLength !== undefined && value.length < s.minLength) errors.push(`${at}: shorter than ${s.minLength}`);",
+          "                        if (s.maxLength !== undefined && value.length > s.maxLength) errors.push(`${at}: longer than ${s.maxLength}`);",
+          "                        if (s.pattern && !new RegExp(s.pattern, 'u').test(value)) errors.push(`${at}: does not match ${s.pattern}`);",
+          "                    }",
+          "                    if (Array.isArray(value)) {",
+          "                        if (s.minItems !== undefined && value.length < s.minItems) errors.push(`${at}: fewer than ${s.minItems} items`);",
+          "                        if (s.maxItems !== undefined && value.length > s.maxItems) errors.push(`${at}: more than ${s.maxItems} items`);",
+          "                        if (s.items) value.forEach((v, i) => validate(v, s.items, `${at}[${i}]`));",
+          "                    }",
+          "                    if (typeOf === 'object') {",
+          "                        (s.required || []).filter((key) => !(key in value)).forEach((key) => errors.push(`${at}.${key}: required`));",
+          "                        Object.keys(value).forEach((key) => {",
+          "                            if (s.properties && s.properties[key]) validate(value[key], s.properties[key], `${at}.${key}`);",
+          "                            else if (s.additionalProperties) validate(value[key], s.additionalProperties, `${at}.${key}`);",
+          "                        });",
+          "                    }",
+          "                };",
+          "                validate(JSON.parse(text), schema, '$');",
+          "                pm.expect(errors, errors.join('\\n')).to.be.empty;",
+          "            });",
+          "        }",
+          "    },",
+          "};",
+          "// A request may opt out with `pm.variables.set('openapi_contract', 'skip')` in its pre-request",
+          "// script, saying why (API_template checks its JWT gate on an undocumented scope).",
+          "if (pm.collectionVariables.get('openapi_spec') && !pm.request.url.getPath().startsWith('/api-docs')",
+          "    && pm.variables.get('openapi_contract') !== 'skip') {",
+          "    openapi.check(",
+          "        openapi.spec(),",
+          "        pm.request.method.toLowerCase(),",
+          "        pm.variables.replaceIn(pm.request.url.getPath()),",
+          "        pm.response.code,",
+          "        pm.response.headers.get('Content-Type'),",
+          "        pm.response.text(),",
+          "    );",
+          "}"
         ]
       }
     }
@@ -96,7 +229,25 @@
           "response": []
         },
         {
-          "name": "OpenAPI document is not served in production",
+          "name": "OpenAPI document",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Document is an OpenAPI spec with paths\", function () {",
+                  "    const doc = pm.response.json();",
+                  "    pm.expect(doc.openapi).to.be.a(\"string\");",
+                  "    pm.expect(Object.keys(doc.paths)).to.include(\"/api/v1/\");",
+                  "});"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "GET",
             "header": [],
@@ -110,22 +261,75 @@
                 "openapi.json"
               ]
             }
-          },
+          }
+        }
+      ]
+    },
+    {
+      "name": "Every secured operation refuses a missing JWT",
+      "item": [
+        {
+          "name": "Every secured operation refuses a missing JWT",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// SWAGGER_ENABLED is not set on this stack, like on the deployed instances (MAIR-424).",
-                  "pm.test(\"Status is 404\", function () {",
-                  "    pm.response.to.have.status(404);",
+                  "// Every operation declaring `security((\"jwt\" = []))` answers 401 text/plain without a token",
+                  "// (MAIR-262): a new secured endpoint is covered as soon as it is documented. Path parameters take",
+                  "// the spec's example, or 1; the guard answers before the handler reads the path or the body.",
+                  "const spec = JSON.parse(pm.collectionVariables.get('openapi_spec'));",
+                  "const covered = JSON.parse(pm.collectionVariables.get('openapi_covered') || '[]');",
+                  "const operations = [];",
+                  "Object.keys(spec.paths).forEach((template) => {",
+                  "    Object.keys(spec.paths[template]).filter((method) => ['get', 'post', 'put', 'patch', 'delete'].includes(method)).forEach((method) => {",
+                  "        const operation = spec.paths[template][method];",
+                  "        if (!(operation.security || spec.security || []).some((requirement) => 'jwt' in requirement)) return;",
+                  "        const params = {};",
+                  "        (operation.parameters || []).filter((p) => p.in === 'path').forEach((p) => { params[p.name] = p.example !== undefined ? p.example : 1; });",
+                  "        const path = template.replace(/\\{([^}]+)\\}/g, (_, name) => encodeURIComponent(params[name] !== undefined ? params[name] : 1));",
+                  "        operations.push({ method: method.toUpperCase(), template, path, documented: Object.keys(operation.responses) });",
+                  "    });",
+                  "});",
+                  "let pending = operations.length;",
+                  "if (pending === 0) console.log('The spec declares no jwt-secured operation.');",
+                  "operations.forEach((op) => {",
+                  "    pm.sendRequest({",
+                  "        url: `${pm.environment.get('baseUrl')}${op.path}`,",
+                  "        method: op.method,",
+                  "        header: { 'Content-Type': 'application/json' },",
+                  "        body: ['POST', 'PUT', 'PATCH'].includes(op.method) ? { mode: 'raw', raw: '{}' } : undefined,",
+                  "    }, (err, res) => {",
+                  "        pm.test(`${op.method} ${op.template} without JWT answers a documented 401 text/plain`, () => {",
+                  "            pm.expect(err).to.not.be.ok;",
+                  "            pm.expect(res.code).to.eql(401);",
+                  "            pm.expect(op.documented).to.include('401');",
+                  "            pm.expect(res.headers.get('Content-Type') || '').to.match(/^text\\/plain/);",
+                  "        });",
+                  "        if (!err && res.code === 401) covered.push(`${op.method} ${op.template} 401`);",
+                  "        pending -= 1;",
+                  "        if (pending === 0) pm.collectionVariables.set('openapi_covered', JSON.stringify([...new Set(covered)]));",
+                  "    });",
                   "});"
                 ]
               }
             }
           ],
-          "response": []
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "Replays every jwt-secured operation of the served spec without a token and expects 401."
+          }
         }
       ]
     },
@@ -496,6 +700,48 @@
           "response": []
         },
         {
+          "name": "A chat list with a page size out of range is rejected",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_agent}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/?limit=0",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "0"
+                }
+              ]
+            }
+          }
+        },
+        {
           "name": "The invited user sees the chat too",
           "request": {
             "method": "GET",
@@ -621,6 +867,50 @@
             }
           ],
           "response": []
+        },
+        {
+          "name": "A member list with a page size out of range is rejected",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_admin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/{{chat_id}}/users/?limit=0",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "{{chat_id}}",
+                "users",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "0"
+                }
+              ]
+            }
+          }
         }
       ]
     },
@@ -1236,6 +1526,56 @@
           "response": []
         },
         {
+          "name": "The refusal names the unknown message",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "pm.test(\"Body matches the expected text\", function () {",
+                  "    pm.expect(pm.response.text()).to.eql(\"Unknown message.\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_admin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/{{chat_id}}/messages/2147483647/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "{{chat_id}}",
+                "messages",
+                "2147483647",
+                ""
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"Message corrigé\"\n}"
+            }
+          }
+        },
+        {
           "name": "Edit without content is rejected",
           "request": {
             "method": "PATCH",
@@ -1414,6 +1754,95 @@
             }
           ],
           "response": []
+        },
+        {
+          "name": "A deleted message cannot be edited",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 404\", function () {",
+                  "    pm.response.to.have.status(404);",
+                  "});",
+                  "pm.test(\"Body matches the expected text\", function () {",
+                  "    pm.expect(pm.response.text()).to.eql(\"Unknown message.\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_agent}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/{{chat_id}}/messages/{{reply_id}}/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "{{chat_id}}",
+                "messages",
+                "{{reply_id}}",
+                ""
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"Réponse corrigée\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Deleting a message with an id that is not an integer is rejected",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_admin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/{{chat_id}}/messages/abc/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "{{chat_id}}",
+                "messages",
+                "abc",
+                ""
+              ]
+            }
+          }
         },
         {
           "name": "Conversation no longer lists the reply",
@@ -2546,6 +2975,121 @@
             }
           ],
           "response": []
+        },
+        {
+          "name": "Removing a member with an id that is not an integer is rejected",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_admin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/{{chat_id}}/users/abc/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "{{chat_id}}",
+                "users",
+                "abc",
+                ""
+              ]
+            }
+          }
+        },
+        {
+          "name": "Removing a member of an unknown chat answers 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 404\", function () {",
+                  "    pm.response.to.have.status(404);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_admin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/2147483647/users/{{agent_user_id}}/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "2147483647",
+                "users",
+                "{{agent_user_id}}",
+                ""
+              ]
+            }
+          }
+        },
+        {
+          "name": "Deleting a chat with an id that is not an integer is rejected",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_admin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/abc/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "abc",
+                ""
+              ]
+            }
+          }
         }
       ]
     },
@@ -4004,6 +4548,52 @@
           "response": []
         },
         {
+          "name": "An administrator who is not a member cannot post",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 403\", function () {",
+                  "    pm.response.to.have.status(403);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_admin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/{{solo_chat_id}}/messages/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "{{solo_chat_id}}",
+                "messages",
+                ""
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"Message de l'administrateur\"\n}"
+            }
+          }
+        },
+        {
           "name": "The last member leaves the chat",
           "request": {
             "method": "DELETE",
@@ -4208,6 +4798,84 @@
           "response": []
         }
       ]
+    },
+    {
+      "name": "OpenAPI coverage",
+      "item": [
+        {
+          "name": "OpenAPI coverage",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// OpenAPI coverage (MAIR-262), last request of the collection: every documented operation has",
+                  "// at least one success case, and each documented 400/401/403/404/409/412 has a case of its own.",
+                  "// 429, 500, 502 and 503 cannot be produced on purpose on a healthy stack: the handler tests",
+                  "// (`cargo test`) cover them. Any other gap is listed in the collection variable",
+                  "// `openapi_coverage_exceptions` ({ \"METHOD /template STATUS\": \"reason\" }, `2xx` for the success",
+                  "// case); an exception that is covered or no longer documented fails too, so it never goes stale.",
+                  "const spec = JSON.parse(pm.collectionVariables.get('openapi_spec'));",
+                  "const covered = JSON.parse(pm.collectionVariables.get('openapi_covered') || '[]');",
+                  "const exceptions = JSON.parse(pm.collectionVariables.get('openapi_coverage_exceptions') || '{}');",
+                  "const required = [];",
+                  "Object.keys(spec.paths).forEach((template) => {",
+                  "    Object.keys(spec.paths[template]).filter((method) => ['get', 'post', 'put', 'patch', 'delete'].includes(method)).forEach((method) => {",
+                  "        const op = `${method.toUpperCase()} ${template}`;",
+                  "        const statuses = Object.keys(spec.paths[template][method].responses);",
+                  "        if (statuses.some((s) => s.startsWith('2'))) {",
+                  "            required.push({ key: `${op} 2xx`, covered: statuses.some((s) => s.startsWith('2') && covered.includes(`${op} ${s}`)) });",
+                  "        }",
+                  "        statuses.filter((s) => ['400', '401', '403', '404', '409', '412'].includes(s))",
+                  "            .forEach((s) => required.push({ key: `${op} ${s}`, covered: covered.includes(`${op} ${s}`) }));",
+                  "    });",
+                  "});",
+                  "const missing = required.filter((r) => !r.covered && !(r.key in exceptions)).map((r) => r.key);",
+                  "const stale = Object.keys(exceptions).filter((key) => !required.some((r) => r.key === key && !r.covered));",
+                  "pm.test(`Every documented operation and status is tested (${covered.length} covered)`, () => {",
+                  "    pm.expect(missing, `not tested:\\n${missing.join('\\n')}`).to.be.empty;",
+                  "});",
+                  "pm.test('Every coverage exception is still needed', () => {",
+                  "    pm.expect(stale, `stale exceptions:\\n${stale.join('\\n')}`).to.be.empty;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "Fails when a documented operation or status was never tested by this collection."
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "openapi_spec",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "openapi_covered",
+      "value": "[]",
+      "type": "string"
+    },
+    {
+      "key": "openapi_coverage_exceptions",
+      "value": "{\n  \"GET /api/v1/stream 2xx\": \"newman cannot consume an SSE stream that never ends: the 200 and its first frame are tested in tests/endpoints/flows.rs (stream_opens_an_event_stream, MAIR-561), and by the k6 stream scenario\"\n}",
+      "type": "string"
     }
   ]
 }
