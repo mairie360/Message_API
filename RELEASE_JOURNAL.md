@@ -1,27 +1,27 @@
 # Journal des releases — Message_API
 
-<!-- release-journal-state {"dev": "df749ae1126e5a100e61f95bd3500bea94be662d", "prod": "71dd8d10cc668813b5012bb27c9aefc962ba30d9", "prod_tag": "v2.1.0", "staging": "71dd8d10cc668813b5012bb27c9aefc962ba30d9", "updated": {"dev": "2026-10-22 03:40 UTC", "prod": "2026-10-21 09:10 UTC", "staging": "2026-10-21 03:20 UTC"}} -->
+<!-- release-journal-state {"dev": "4cd62043b5f79b794d1ed9b907b09b7c9db0b242", "prod": "71dd8d10cc668813b5012bb27c9aefc962ba30d9", "prod_tag": "v2.1.0", "staging": "71dd8d10cc668813b5012bb27c9aefc962ba30d9", "updated": {"dev": "2026-10-22 23:04 UTC", "prod": "2026-10-21 09:10 UTC", "staging": "2026-10-21 03:20 UTC"}} -->
 > Tenu à jour par la CI (`mairie360/CICD`, action `release/release-journal`) à chaque passage en dev, staging et prod. Ne pas modifier à la main : le fichier est réécrit au passage suivant.
 
 | Environnement | Version | Commit | Mis à jour |
 | --- | --- | --- | --- |
 | prod | v2.1.0 | `71dd8d1` | 2026-10-21 09:10 UTC |
 | staging | — | `71dd8d1` | 2026-10-21 03:20 UTC |
-| dev | — | `df749ae` | 2026-10-22 03:40 UTC |
+| dev | — | `4cd6204` | 2026-10-22 23:04 UTC |
 
 ## Ajouté sur main depuis la dernière release prod (v2.1.0)
 
 #### Technique
-- Image de développement : `development.Dockerfile` épinglé sur `rust:1.99-bookworm` au digest `edaa2a8` (après `5c1a173`). Seul l'image de dev change, pas l'API livrée. (Renovate, [#201](https://github.com/mairie360/Message_API/pull/201), [#206](https://github.com/mairie360/Message_API/pull/206))
-- Mise à jour de `tokio` de 1.54.0 à 1.54.1. Le diff de ce commit est vide dans les données : ce point repose seulement sur le titre et la description de la PR. ([#205](https://github.com/mairie360/Message_API/pull/205))
-- Montée de la CICD `v4.4.0` → `v4.4.1` → `v4.4.2` → `v4.4.3` dans `cicd.yml`, `promote-staging.yml` et `promote-prod.yml`, pour corriger la création du tag et de la release lors de la promotion en prod (MAIR-612, [#198](https://github.com/mairie360/Message_API/pull/198), [#200](https://github.com/mairie360/Message_API/pull/200), [#203](https://github.com/mairie360/Message_API/pull/203)). Pas d'effet sur le comportement de l'API.
+- Image de développement (`development.Dockerfile`) : la base `rust:1.99-bookworm` est épinglée au digest `48b7f43`, après les étapes `e12566d` → `5c1a173` puis `edaa2a8`. (Renovate, [#201](https://github.com/mairie360/Message_API/pull/201), [#206](https://github.com/mairie360/Message_API/pull/206), [#207](https://github.com/mairie360/Message_API/pull/207))
+- Pins `mairie360/CICD` passés de v4.4.0 à v4.4.3 dans `cicd.yml`, `promote-staging.yml` et `promote-prod.yml`. Les versions intermédiaires corrigent la création du tag et de la release dans `promote-prod`. (MAIR-612, [#198](https://github.com/mairie360/Message_API/pull/198), [#200](https://github.com/mairie360/Message_API/pull/200), [#203](https://github.com/mairie360/Message_API/pull/203))
+- Mise à jour de tokio annoncée de 1.54.0 à 1.54.1 ([#205](https://github.com/mairie360/Message_API/pull/205)). Le diff n'est pas fourni, donc le changement de `Cargo.toml` ou `Cargo.lock` n'est pas vérifié.
 
 ## Différence dev → staging (en dev, pas encore en staging)
 
 #### Technique
-- Seul changement propre à dev : l'image de développement `development.Dockerfile` est épinglée sur `rust:1.99-bookworm` au digest `edaa2a8` (après `5c1a173`). Le Dockerfile de production n'est pas touché dans cette plage. ([#201](https://github.com/mairie360/Message_API/pull/201), [#206](https://github.com/mairie360/Message_API/pull/206))
-- Mise à jour de `tokio` de 1.54.0 à 1.54.1, d'après la PR seulement (diff vide dans les données). ([#205](https://github.com/mairie360/Message_API/pull/205))
-- Montée de la CICD jusqu'à `v4.4.3` dans les workflows `cicd.yml`, `promote-staging.yml` et `promote-prod.yml` (MAIR-612, [#198](https://github.com/mairie360/Message_API/pull/198), [#200](https://github.com/mairie360/Message_API/pull/200), [#203](https://github.com/mairie360/Message_API/pull/203)). Ces changements touchent le pipeline de release et ne modifient pas le comportement de l'API.
+- Image de développement (`development.Dockerfile`) : la base `rust:1.99-bookworm` est épinglée au digest `48b7f43`, après les étapes `e12566d` → `5c1a173` puis `edaa2a8`. (Renovate, [#201](https://github.com/mairie360/Message_API/pull/201), [#206](https://github.com/mairie360/Message_API/pull/206), [#207](https://github.com/mairie360/Message_API/pull/207))
+- Pins `mairie360/CICD` passés de v4.4.0 à v4.4.3 dans `cicd.yml`, `promote-staging.yml` et `promote-prod.yml`. Les versions intermédiaires corrigent la création du tag et de la release dans `promote-prod`. (MAIR-612, [#198](https://github.com/mairie360/Message_API/pull/198), [#200](https://github.com/mairie360/Message_API/pull/200), [#203](https://github.com/mairie360/Message_API/pull/203))
+- Mise à jour de tokio annoncée de 1.54.0 à 1.54.1 ([#205](https://github.com/mairie360/Message_API/pull/205)). Le diff n'est pas fourni, donc le changement de `Cargo.toml` ou `Cargo.lock` n'est pas vérifié.
 
 ## Différence staging → prod (en staging, pas encore en prod)
 
@@ -32,6 +32,7 @@ _Rien._
 <!-- release-journal-history:start -->
 | Date | Environnement | Version | Commit | Run |
 | --- | --- | --- | --- | --- |
+| 2026-10-22 23:04 UTC | dev | — | `4cd6204` | [run](https://github.com/mairie360/Message_API/actions/runs/39868457608) |
 | 2026-10-22 03:40 UTC | dev | — | `df749ae` | [run](https://github.com/mairie360/Message_API/actions/runs/39717315791) |
 | 2026-10-21 22:20 UTC | dev | — | `0505cab` | [run](https://github.com/mairie360/Message_API/actions/runs/39683997595) |
 | 2026-10-21 09:11 UTC | dev | — | `d74a645` | [run](https://github.com/mairie360/Message_API/actions/runs/39573914704) |
