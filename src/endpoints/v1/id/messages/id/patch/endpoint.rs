@@ -4,6 +4,8 @@ use mairie360_api_lib::security::AuthenticatedUser;
 use mairie360_api_lib::smart_db::SmartTransaction;
 use mairie360_api_lib::state::AppState;
 
+use crate::sse::state::ChatEvent;
+
 use crate::endpoints::v1::id::access::{
     begin, commit, require_chat_access_in, require_message_author_in, AccessDenied, MessageDenied,
 };
@@ -20,6 +22,8 @@ pub enum PatchMessageError {
     UnknownEvent,
     UnknownChat,
     Forbidden,
+    /// The message is a tombstone (MAIR-524): it is never edited back.
+    DeletedMessage,
 }
 
 impl std::fmt::Display for PatchMessageError {
@@ -33,6 +37,7 @@ impl std::fmt::Display for PatchMessageError {
             PatchMessageError::UnknownEvent => {
                 write!(f, "Unknown event.")
             }
+            PatchMessageError::DeletedMessage => write!(f, "Unknown message."),
         }
     }
 }
@@ -41,7 +46,9 @@ impl ResponseError for PatchMessageError {
     fn status_code(&self) -> StatusCode {
         match self {
             PatchMessageError::Forbidden => StatusCode::FORBIDDEN,
-            PatchMessageError::UnknownChat => StatusCode::NOT_FOUND,
+            PatchMessageError::UnknownChat | PatchMessageError::DeletedMessage => {
+                StatusCode::NOT_FOUND
+            }
             PatchMessageError::DatabaseError => StatusCode::INTERNAL_SERVER_ERROR,
             PatchMessageError::UnknownEvent => StatusCode::BAD_REQUEST,
         }
@@ -62,7 +69,8 @@ async fn trigger_patch_message(
     tx.fetch_scalar::<i64, _>(&view)
         .await
         .map_err(|e| match classify("patch message", e) {
-            DbFailure::NotFound => PatchMessageError::UnknownEvent,
+            // The author check found the message: no row left to update means it is deleted.
+            DbFailure::NotFound => PatchMessageError::DeletedMessage,
             _ => PatchMessageError::DatabaseError,
         })?;
 
@@ -75,8 +83,10 @@ async fn trigger_patch_message(
     summary = "Edit a message",
     description = "Replaces the content of a message. `content` is required: this `PATCH` is not a partial update, \
                    it overwrites the text.\n\n \
-                   Unlike posting, no `ChatSignal` is pushed on the SSE stream: the other members only see the edit \
-                   when they reload the chat.\n\n \
+                   Once committed, a `MSG_EDITED` `ChatSignal` (with `message_id`) is pushed on the SSE stream of \
+                   every other connected member, who reads the new content with `GET /api/v1/{chat_id}/?since=` \
+                   (the message comes again with its `edited_at`).\n\n \
+                   A deleted message cannot be edited (`404`).\n\n \
                    **Only the author of the message may edit it**, administrators included: anyone else gets \
                    `403` (an administrator may delete a message, never rewrite it). A caller who is neither a \
                    member of the chat nor an administrator gets the same `404` as for an unknown chat. \
@@ -109,7 +119,7 @@ async fn trigger_patch_message(
         ),
         (
             status = 404,
-            description = "No chat matches `chat_id`, or the caller is neither one of its members nor an administrator (both cases are deliberately indistinguishable).",
+            description = "No chat matches `chat_id`, or the caller is neither one of its members nor an administrator (both cases are deliberately indistinguishable, body `Unknown chat.`); or the message was deleted (body `Unknown message.`).",
             body = String,
             content_type = "text/plain",
             example = json!("Unknown chat.")
@@ -138,6 +148,7 @@ async fn trigger_patch_message(
 #[patch("/")]
 pub async fn patch_message(
     state: web::Data<AppState>,
+    sse_state: web::Data<crate::sse::state::AppState>,
     auth_user: AuthenticatedUser,
     params: web::Path<MessagePathParams>,
     view: ValidatedJson<PatchMessageView>,
@@ -150,6 +161,14 @@ pub async fn patch_message(
     let view = view.into_inner();
     trigger_patch_message(&mut tx, params.chat_id(), message_id, view).await?;
     commit(tx).await?;
+    // Only once committed: the members read the edit as soon as they get the signal.
+    sse_state
+        .publish(ChatEvent::message_edited(
+            params.chat_id(),
+            auth_user.id,
+            message_id,
+        ))
+        .await;
     Ok(HttpResponse::Ok().finish())
 }
 

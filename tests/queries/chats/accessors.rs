@@ -93,7 +93,9 @@ fn test_delete_message_view_accessors() {
     assert_eq!(view.message_id(), 42);
     assert_eq!(view.performed_by(), 1);
     assert!(format!("{view}").contains("chat_id=7 message_id=42 performed_by=1"));
-    assert!(view.query_sql().contains("DELETE FROM messages"));
+    // MAIR-524: a soft delete, the message stays as a tombstone.
+    assert!(view.query_sql().contains("SET deleted_at = now()"));
+    assert!(!view.query_sql().contains("DELETE FROM messages"));
     assert!(view.query_sql().contains("messaging_moderation_log"));
     assert_eq!(view.query_params().len(), 3);
 }
@@ -128,7 +130,8 @@ fn test_get_chats_view_accessors() {
     assert_eq!(view.user_id(), 42);
     assert!(format!("{view}").contains("user_id=42"));
     assert!(view.query_sql().contains("FROM conversations"));
-    assert_eq!(view.query_params().len(), 3);
+    // MAIR-524: the `since` cursor on `last_activity_at`.
+    assert_eq!(view.query_params().len(), 5);
 }
 
 #[test]

@@ -1,5 +1,4 @@
 use crate::common::get_smart_db;
-use mairie360_api_lib::test_setup::queries_setup::get_shared_db;
 use message_api::database::chats::{
     add_message_to_chat::view::PostMessageInChatQueryView,
     create_chat::view::CreateChatQueryView,
@@ -10,8 +9,7 @@ use serial_test::serial;
 #[tokio::test]
 #[serial]
 async fn test_get_chat_success() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
+    let db = get_smart_db().await;
 
     let view = CreateChatQueryView::new("Test Chat", None);
     let chat_id = db.fetch_scalar::<i32, _>(&view).await.unwrap() as u64;
@@ -31,8 +29,7 @@ async fn test_get_chat_success() {
 #[tokio::test]
 #[serial]
 async fn test_get_chat_unknown_chat() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
+    let db = get_smart_db().await;
 
     let view = GetChatQueryView::new(999, None, 50);
     let result = db.fetch_all::<Message, _>(&view).await;
@@ -44,8 +41,7 @@ async fn test_get_chat_unknown_chat() {
 #[tokio::test]
 #[serial]
 async fn test_get_chat_pages_newest_first_with_a_cursor() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
+    let db = get_smart_db().await;
 
     let chat_id = db
         .fetch_scalar::<i32, _>(&CreateChatQueryView::new("Pages", None))
@@ -88,8 +84,7 @@ async fn test_get_chat_pages_newest_first_with_a_cursor() {
 #[tokio::test]
 #[serial]
 async fn test_get_chat_reads_the_citation_back() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
+    let db = get_smart_db().await;
 
     let chat_id = db
         .fetch_scalar::<i32, _>(&CreateChatQueryView::new("Citations", None))

@@ -5,16 +5,14 @@ use serde_json::json;
 use serial_test::serial;
 
 use super::harness::{admin_id, request, states};
-use crate::common::{get_smart_db, grant_chat_delete, plain_user};
-use mairie360_api_lib::test_setup::queries_setup::get_shared_db;
+use crate::common::{get_fixture_db, grant_chat_delete, plain_user};
 
 #[actix_web::test]
 #[serial]
 async fn chat_lifecycle_through_every_route() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
-    let (_container, url) = get_shared_db().await;
-    let db = get_smart_db(url).await;
+    let db = get_fixture_db().await;
     let creator = plain_user(&db).await;
     let member = plain_user(&db).await;
     let newcomer = plain_user(&db).await;
@@ -171,8 +169,7 @@ async fn chat_lifecycle_through_every_route() {
 async fn last_member_leaving_deletes_the_chat() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
-    let (_container, url) = get_shared_db().await;
-    let db = get_smart_db(url).await;
+    let db = get_fixture_db().await;
     let alone = plain_user(&db).await;
     let admin = admin_id().await;
 
@@ -205,8 +202,7 @@ async fn last_member_leaving_deletes_the_chat() {
 async fn stream_opens_an_event_stream() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
-    let (_container, url) = get_shared_db().await;
-    let db = get_smart_db(url).await;
+    let db = get_fixture_db().await;
     let user = plain_user(&db).await;
 
     // The body never ends: only the head of the response is read.
@@ -223,6 +219,36 @@ async fn stream_opens_an_event_stream() {
     assert_eq!(sse.online_agents.get(&user).map(|c| c.len()), Some(1));
 }
 
+/// MAIR-561: the stream sends its first bytes at once, not with the first ping 15 s later, so the
+/// head of the response reaches the client (and the BFF) immediately.
+#[actix_web::test]
+#[serial]
+async fn stream_sends_its_first_bytes_within_a_second() {
+    let (state, sse) = states().await;
+    let app = test_app!(state, sse);
+    let db = get_fixture_db().await;
+    let user = plain_user(&db).await;
+
+    let response = actix_web::test::call_service(
+        &app,
+        request(Method::GET, "/api/v1/stream", Some(user)).to_request(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut body = response.into_body();
+    let first = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        std::future::poll_fn(|cx| {
+            actix_web::body::MessageBody::poll_next(std::pin::Pin::new(&mut body), cx)
+        }),
+    )
+    .await
+    .expect("first chunk within a second")
+    .expect("a chunk, not the end of the stream")
+    .expect("a chunk, not an error");
+    assert_eq!(&first[..], b": connected\n\n");
+}
+
 /// MAIR-426: `<` and `>` are ordinary characters, stored and served back as sent (JSON with
 /// `nosniff`, escaping is the fronts' job).
 #[actix_web::test]
@@ -230,8 +256,7 @@ async fn stream_opens_an_event_stream() {
 async fn angle_brackets_are_accepted_in_free_text() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
-    let (_container, url) = get_shared_db().await;
-    let db = get_smart_db(url).await;
+    let db = get_fixture_db().await;
     let user = plain_user(&db).await;
 
     let name = "Budget > 10 000 € -> <validé>";
@@ -288,8 +313,7 @@ macro_rules! listed {
 async fn direct_chat_is_reused_and_shown_again_by_a_message() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
-    let (_container, url) = get_shared_db().await;
-    let db = get_smart_db(url).await;
+    let db = get_fixture_db().await;
     let (alice, bob) = (plain_user(&db).await, plain_user(&db).await);
 
     let (status, body) = send_json!(
@@ -304,7 +328,9 @@ async fn direct_chat_is_reused_and_shown_again_by_a_message() {
     let chat = listed!(app, alice, chat_id);
     assert_eq!(chat["kind"], "direct");
     assert_eq!(chat["contact_id"], bob);
-    assert_eq!(chat["name"], "");
+    // The name of a direct chat is the other participant's (the test users are all "Chat Member").
+    assert_eq!(chat["name"], "Chat Member");
+    assert_eq!(chat["member_count"], 2);
     // Bob only sees it with the first message.
     assert!(listed!(app, bob, chat_id).is_null());
     let (status, _) = send!(
@@ -406,8 +432,7 @@ async fn direct_chat_is_reused_and_shown_again_by_a_message() {
 async fn group_chat_is_deleted_by_its_creator_or_an_agent_granted_the_right() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
-    let (_container, url) = get_shared_db().await;
-    let db = get_smart_db(url).await;
+    let db = get_fixture_db().await;
     let (creator, member, granted) = (
         plain_user(&db).await,
         plain_user(&db).await,

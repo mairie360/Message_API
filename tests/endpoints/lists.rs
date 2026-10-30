@@ -9,16 +9,14 @@ use serde_json::json;
 use serial_test::serial;
 
 use super::harness::{request, states};
-use crate::common::{get_smart_db, plain_user};
-use mairie360_api_lib::test_setup::queries_setup::get_shared_db;
+use crate::common::{get_fixture_db, plain_user};
 
 #[actix_web::test]
 #[serial]
 async fn chats_and_members_are_paginated() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
-    let (_container, url) = get_shared_db().await;
-    let db = get_smart_db(url).await;
+    let db = get_fixture_db().await;
     let user = plain_user(&db).await;
     let (second, third) = (plain_user(&db).await, plain_user(&db).await);
 
@@ -53,17 +51,28 @@ async fn chats_and_members_are_paginated() {
     // Members by increasing id.
     let uri = format!("/api/v1/{}/users/?limit=2", chats[0]);
     let (_, body) = send_json!(app, request(Method::GET, &uri, Some(user)));
-    assert_eq!(body["users"], json!([{ "id": user }, { "id": second }]));
+    assert_eq!(
+        body["users"],
+        json!([
+            { "id": user, "first_name": "Chat", "last_name": "Member" },
+            { "id": second, "first_name": "Chat", "last_name": "Member" }
+        ])
+    );
     assert_eq!(body["has_more"], true);
     let uri = format!("/api/v1/{}/users/?limit=2&offset=2", chats[0]);
     let (_, body) = send_json!(app, request(Method::GET, &uri, Some(user)));
-    assert_eq!(body["users"], json!([{ "id": third }]));
+    assert_eq!(
+        body["users"],
+        json!([{ "id": third, "first_name": "Chat", "last_name": "Member" }])
+    );
     assert_eq!(body["has_more"], false);
 
     for uri in [
         "/api/v1/?limit=0".to_string(),
         "/api/v1/?limit=101".to_string(),
         "/api/v1/?offset=-1".to_string(),
+        format!("/api/v1/?search={}", "a".repeat(151)),
+        "/api/v1/?search=a%00b".to_string(),
         format!("/api/v1/{}/users/?limit=101", chats[0]),
     ] {
         let (status, _) = send!(app, request(Method::GET, &uri, Some(user)));
@@ -88,8 +97,7 @@ async fn rate_limit_is_per_user() {
             ),
     )
     .await;
-    let (_container, url) = get_shared_db().await;
-    let db = get_smart_db(url).await;
+    let db = get_fixture_db().await;
     let (busy, other) = (plain_user(&db).await, plain_user(&db).await);
 
     for _ in 0..2 {
@@ -127,8 +135,7 @@ async fn the_production_budget_refuses_a_user_past_its_burst() {
             ),
     )
     .await;
-    let (_container, url) = get_shared_db().await;
-    let db = get_smart_db(url).await;
+    let db = get_fixture_db().await;
     let (busy, other) = (plain_user(&db).await, plain_user(&db).await);
 
     let started = std::time::Instant::now();

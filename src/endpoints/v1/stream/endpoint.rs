@@ -9,6 +9,9 @@ use mairie360_api_lib::jwt_manager::{
 use mairie360_api_lib::security::AuthenticatedUser;
 use tokio::sync::mpsc::{self, error::TrySendError};
 
+/// First bytes of every stream (MAIR-561): actix only sends the head of a streaming response with
+/// its first chunk, so without it the client would wait for the first ping.
+const CONNECTED_COMMENT: &[u8] = b": connected\n\n";
 /// Interval of the `: ping` comment keeping the connection open through proxies.
 const PING_INTERVAL: Duration = Duration::from_secs(15);
 /// Interval at which the token of an open stream is checked again (expiry, revoked session,
@@ -29,11 +32,23 @@ fn time_left(exp: Option<usize>) -> Option<Duration> {
     summary = "Open the real-time notification stream",
     description = "Opens an **SSE** channel (`text/event-stream`) the client keeps open to be told about the \
                    activity of its chats, without polling the API.\n\n\
-                   Each `data:` line carries a `ChatSignal` saying *that something happened* in a chat; the \
-                   message itself is not in it: the client then reloads `GET /api/v1/{chat_id}/`. Only the \
-                   (not excluded) members of the chat other than the author are signalled, whichever replica \
-                   of the API they are connected to.\n\n\
-                   A `: ping` comment is sent every 15 seconds to keep the connection open through proxies; SSE \
+                   Each `data:` line carries one `ChatSignal` (JSON) saying *that something happened* in a chat; \
+                   the content itself is not in it. Signals are pushed once the change is committed, to the \
+                   connections of every replica of the API (Redis pub/sub). **Event contract** (MAIR-524):\n\n\
+                   | `type` | When | Fields | Delivered to |\n\
+                   | --- | --- | --- | --- |\n\
+                   | `NEW_MSG` | a message was posted | `chat_id`, `message_id` | the (not excluded) members but the author |\n\
+                   | `MSG_EDITED` | a message was edited | `chat_id`, `message_id` | the members but the editor |\n\
+                   | `MSG_DELETED` | a message was deleted (tombstone) | `chat_id`, `message_id` | the members but the deleting user |\n\
+                   | `CHAT_READ` | the user acknowledged the chat (`POST /api/v1/{chat_id}/read/`) | `chat_id`, `message_id` (`readUntilMessageId`), `unread_count` | every stream of that user only (other tabs and devices, the calling one included) |\n\n\
+                   On `NEW_MSG`, `MSG_EDITED` or `MSG_DELETED`, read the changes with \
+                   `GET /api/v1/{chat_id}/?since=<next_since>&since_id=<next_since_id>` (and refresh the list line \
+                   with `GET /api/v1/?since=`); on `CHAT_READ`, set the chat's unread badge to `unread_count`. \
+                   A signal may exceptionally arrive twice (relay reconnection) or be lost (stream reconnection, \
+                   full buffer): reads since a cursor are idempotent, so read since the last cursor after a \
+                   reconnection. `message_id` is only absent from a signal relayed by a replica older than \
+                   MAIR-524 (then always `NEW_MSG`). Ignore an unknown `type`: new ones may be added.\n\n\
+                   A `: connected` comment opens the stream as soon as it is established, then a `: ping` comment is sent every 15 seconds to keep the connection open through proxies; SSE \
                    clients ignore it.\n\n\
                    **The server closes the stream** when the JWT expires, when its session is revoked or its \
                    account removed (checked every 30 seconds), and when the same user opens more than 5 streams \
@@ -45,10 +60,10 @@ fn time_left(exp: Option<usize>) -> Option<Duration> {
     responses(
         (
             status = 200,
-            description = "SSE stream established. The connection stays open; each `data:` line carries a `ChatSignal`.",
+            description = "SSE stream established. The connection stays open; each `data:` line carries a `ChatSignal` (`NEW_MSG`, `MSG_EDITED`, `MSG_DELETED` or `CHAT_READ`, see the table above). Example of a `CHAT_READ`: `{\"type\":\"CHAT_READ\",\"chat_id\":5,\"message_id\":118,\"unread_count\":0}`.",
             content_type = "text/event-stream",
             body = ChatSignal,
-            example = json!({ "type": "NEW_MSG", "chat_id": 5 })
+            example = json!({ "type": "NEW_MSG", "chat_id": 5, "message_id": 118 })
         ),
         (
             status = 401,
@@ -129,7 +144,11 @@ async fn sse_stream_route(
     });
 
     // The response ends when the connection is told to close (eviction, expired or revoked token).
-    let stream = tokio_stream::wrappers::ReceiverStream::new(rx)
+    let connected = futures_util::stream::once(std::future::ready(Ok(
+        actix_web::web::Bytes::from_static(CONNECTED_COMMENT),
+    )));
+    let stream = connected
+        .chain(tokio_stream::wrappers::ReceiverStream::new(rx))
         .take_until(async move { close.notified().await })
         .map(|result| match result {
             Ok(bytes) => Ok::<actix_web::web::Bytes, actix_web::Error>(bytes),

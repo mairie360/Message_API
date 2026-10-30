@@ -8,9 +8,12 @@ use crate::endpoints::v1::id::access::{
     begin, commit, require_chat_access_in, require_message_author_in, AccessDenied, MessageDenied,
 };
 
-use crate::database::chats::delete_message_from_chat::view::DeleteMessageQueryView;
-use crate::endpoints::error::{classify, DbFailure};
+use crate::database::chats::delete_message_from_chat::view::{
+    DeleteMessageQueryView, LockChatMessagesQueryView,
+};
+use crate::endpoints::error::{classify, unexpected, DbFailure};
 use crate::endpoints::v1::id::messages::id::MessagePathParams;
+use crate::sse::state::ChatEvent;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DeleteMessageError {
@@ -55,6 +58,13 @@ async fn trigger_delete_message(
     message_id: u64,
     performed_by: u64,
 ) -> Result<(), DeleteMessageError> {
+    // The unread counters it lowers must not race an acknowledgement of the chat.
+    tx.execute(&LockChatMessagesQueryView::new(chat_id))
+        .await
+        .map_err(|e| {
+            unexpected("lock chat messages", e);
+            DeleteMessageError::DatabaseError
+        })?;
     // Logs the deletion in messaging_moderation_log when the message is someone else's.
     let view = DeleteMessageQueryView::new(chat_id, message_id, performed_by);
     tx.fetch_scalar::<i64, _>(&view)
@@ -71,9 +81,13 @@ async fn trigger_delete_message(
     delete,
     path = "",
     summary = "Delete a message",
-    description = "Permanently deletes a message of a chat.\n\n \
-                   No `ChatSignal` is pushed on the SSE stream: the other members still see the message until they \
-                   reload the chat.\n\n \
+    description = "Deletes a message of a chat. The message becomes a **tombstone** (MAIR-524): its content is erased, \
+                   the history (`GET /api/v1/{chat_id}/`) no longer returns it nor its excerpt in the messages that \
+                   quote it, it cannot be edited, quoted nor deleted again (`404`), and the unread counters that \
+                   still counted it are lowered. The incremental read `GET /api/v1/{chat_id}/?since=` returns it \
+                   once as `deleted: true` so that the clients remove it.\n\n \
+                   Once committed, a `MSG_DELETED` `ChatSignal` (with `message_id`) is pushed on the SSE stream of \
+                   every other connected member.\n\n \
                    Only the author of the message may delete it (`403` for another member). Administrators may \
                    delete any message, even in a chat they are not a member of (moderation): the deletion of a \
                    message written by someone else is recorded, with its content, in the moderation log.",
@@ -105,7 +119,7 @@ async fn trigger_delete_message(
         ),
         (
             status = 404,
-            description = "No message `message_id` in this chat, or the caller is neither a member of the chat nor an administrator.",
+            description = "No message `message_id` in this chat, the message is already deleted, or the caller is neither a member of the chat nor an administrator.",
             body = String,
             content_type = "text/plain",
             example = json!("Unknown message.")
@@ -129,6 +143,7 @@ async fn trigger_delete_message(
 #[delete("/")]
 pub async fn delete_message(
     state: web::Data<AppState>,
+    sse_state: web::Data<crate::sse::state::AppState>,
     auth_user: AuthenticatedUser,
     params: web::Path<MessagePathParams>,
 ) -> Result<impl Responder, DeleteMessageError> {
@@ -145,6 +160,14 @@ pub async fn delete_message(
     .await?;
     trigger_delete_message(&mut tx, params.chat_id(), message_id, auth_user.id).await?;
     commit(tx).await?;
+    // Only once committed: the members drop the message as soon as they get the signal.
+    sse_state
+        .publish(ChatEvent::message_deleted(
+            params.chat_id(),
+            auth_user.id,
+            message_id,
+        ))
+        .await;
     Ok(HttpResponse::NoContent().finish())
 }
 

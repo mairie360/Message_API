@@ -5,8 +5,11 @@
 #[macro_use]
 mod harness;
 mod access;
+mod changes;
+mod chat_list;
 mod docs;
 mod flows;
 mod lists;
 mod ready;
+mod telemetry;
 mod token_refusals;

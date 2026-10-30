@@ -11,15 +11,15 @@ real-time message notifications. It was bootstrapped from a "Rust API Template" 
 `docker-compose.yml` and `nginx.conf` are template residue, not TODOs for a fresh rename.
 
 Most cross-cutting behavior (DB + cache access, auth, env access, query trait, test harness)
-lives in the external crate **`mairie360_api_lib`** (crates.io, `1.2.2`, pinned in
-`Cargo.lock`). Read its source under `~/.cargo/registry/src/*/mairie360_api_lib-1.2.2/`
+lives in the external crate **`mairie360_api_lib`** (crates.io, `4.2.0`, pinned in
+`Cargo.lock`). Read its source under `~/.cargo/registry/src/*/mairie360_api_lib-4.2.0/`
 when in doubt — the API surface used here is: `state::AppState`
 (`get_smart_db()` / `get_redis()`), `smart_db::SmartDatabase`
 (`fetch_one` / `fetch_all` / `fetch_scalar` / `execute`),
 `database::db_interface::{ApiRequestDto, QueryParam}`,
 `database::error::DbError`, `error::ApiLibError`,
 `security::{JwtMiddleware, AuthenticatedUser}`, `env_manager::get_critical_env_var`,
-`test_setup::queries_setup::get_shared_db`. This crate owns `sqlx` — the API itself has
+`test_setup::queries_setup::{get_shared_db, get_shared_db_as}`. This crate owns `sqlx` — the API itself has
 no direct `sqlx` dependency.
 
 ## Commands
@@ -51,11 +51,20 @@ and `lists.rs` checks the production quota of `rate_limit_from_env()` (`429` pas
 least 1 s).
 They are plain `#[tokio::test]` + `#[serial]` (`serial_test`) and use `mairie360_api_lib`'s
 `get_shared_db()`, which spins up **real Docker containers via testcontainers** —
-`ghcr.io/mairie360/database:3.0.0` (pinned in `.cargo/config.toml` through `TEST_DB_VERSION`, which overrides the lib default) plus a Liquibase
+`ghcr.io/mairie360/database:dev-949384c` (pinned in `.cargo/config.toml` through `TEST_DB_VERSION`, which overrides the lib default) plus a Liquibase
 migration container, with Postgres published on a random host port (tests must still stay
 `#[serial]`). A running Docker daemon and pull access to `ghcr.io/mairie360/*` are required.
 
-`tests/common::get_smart_db(db_url)` builds a `SmartDatabase` over that Postgres. It also
+`get_shared_db()` hands back the **superuser** URL, used by the fixtures only
+(`tests/common::get_fixture_db()`: users, ACLs, moderation log reads). Everything that runs Message's code connects
+as the `message_api` role, like in staging (MAIR-556): `tests/common::get_smart_db()` (query views, SSE listener) and
+`AppState::new(…, message_db_url().await)` (endpoints, `tests/endpoints/harness.rs`), both through the lib's
+`get_shared_db_as("message_api")`. A query outside the grants of Database's `api_grants.sql` then fails the test with
+`permission denied` (SQLSTATE `42501`): add the grant there, never connect the code under test as the superuser.
+`tests/queries/db_role.rs` guards this. The compose stacks connect `message` as `message_api` too
+(`-Dmessage_api_password` passed to Liquibase); postgres, liquibase and the seeder keep the superuser.
+
+`tests/common::smart_db_at(db_url)` builds a `SmartDatabase` over any URL. It also
 constructs a `Redis` pointing at `localhost:6379`, but no chat `QueryView` declares a
 `cache_key`, so Redis is never actually contacted by the queries. Only `tests/sse/relay.rs` needs Redis: it starts
 its own containers (`redis` image through testcontainers, one of them with the platform ACL of the `message-api` role).
@@ -103,12 +112,15 @@ Both the ZAP and k6 stacks carry the OpenAPI coverage gate (MAIR-194) from mairi
 never reached, or when an operation declaring `security(("jwt" = []))` only got 401/403. `load-test.js` is built on
 `coverage.js` and covers every operation (MAIR-195), under a high load on a volume seed (MAIR-474): the performance
 stack's `seeder` also runs `init-perf.sql` (2 000 agents `400001`-`402000` in 16 group chats each, 1 000 direct
-chats, 25 messages per group chat and 10 000 in the hot chat `100000`; agent `400001 + r` is a member of chat
-`100000 + r`). GET handlers run in the `reads` scenario (up to 100 VUs) as a random seeded agent (tokens signed in k6
+chats, 25 messages per group chat, 100 in the busy chats `100001`-`100100` (one in 20 soft-deleted, MAIR-524) and
+10 000 in the hot chat `100000`; agent `400001 + r` is a member of chat `100000 + r`). GET handlers run in the `reads` scenario (up to 100 VUs) as a random seeded agent (tokens signed in k6
 with the run's `JWT_SECRET`, which the compose file passes): their chat list at a random offset, one of their chats
 (the hot one at a random `before`, a third of the time) and its members. The other methods run in the `writes`
 scenario (10 VUs) as the Admin, each handler creating and deleting its own chat or message so they are
-order-independent; a `chats_rush` scenario sends `GET /api/v1/` at a fixed 100 req/s. `GET /api/v1/stream` has its own 1-VU `stream`
+order-independent; a `chats_rush` scenario sends `GET /api/v1/` at a fixed 100 req/s; a `chat_poll`
+scenario (MAIR-524) sends the incremental reads that replaced the 2 s reloads at a fixed rate (`op:chat_since`
+`GET /api/v1/{chat_id}/?since=` on a busy chat, from its cursor read in `setup()` or, one time in four, from 2000 for a
+full page; `op:chats_since` `GET /api/v1/?since=`), each with a 200 ms `p(95)`. `GET /api/v1/stream` has its own 1-VU `stream`
 scenario: the SSE response never ends, so k6 cuts it after 1 s (error 1050), a timeout marked expected with
 `responseCallback: http.expectedStatuses(0, 200)` so it stays out of `http_req_failed`. One `p(95)` threshold per
 `op` tag (200 ms reads, 500 ms writes, 1.5 s stream), `checks == 100%` (status and seeded rows), `dropped_iterations == 0` and
@@ -125,9 +137,13 @@ rules (MAIR-394):
 
 - posting a message is for members only (`ChatRole::require_member`): an administrator who is not a member gets `403`;
 - editing a message is for its author only, administrators included (`require_message_author(.., false)`);
-- deleting a message: its author, or an administrator (moderation). `DeleteMessageQueryView` writes a
-  `DELETE_MESSAGE` row with the content in `messaging_moderation_log` in the same statement when the message is
-  someone else's; `DELETE /{chat_id}/` logs `DELETE_CONVERSATION` the same way, whoever deletes;
+- deleting a message: its author, or an administrator (moderation). It is a **soft delete** (MAIR-524):
+  `DeleteMessageQueryView` sets `deleted_at` (Database `fn_track_message_change` empties the content), writes a
+  `DELETE_MESSAGE` row with the content read before the update in `messaging_moderation_log` when the message is
+  someone else's, and lowers the `unread_counters` that still counted it (recipients but the author whose read cursor
+  is before it and who joined before it), all in one statement run after `LockChatMessagesQueryView` (the conversation
+  advisory lock, so no acknowledgement races the adjustment). A tombstone is final: `PATCH` answers `404 Unknown
+  message.`, `DELETE` `404`, quoting it `400`; `DELETE /{chat_id}/` logs `DELETE_CONVERSATION` the same way, whoever deletes;
 - `DELETE /{chat_id}/` (MAIR-478, `access::chat_access_in` + `ChatDeleteRightQueryView`): a group chat by its
   creator while still a member, an administrator, or anyone `check_access(user, 'conversations', 'delete', chat)`
   grants (global `delete_all`, individual or group ACL), member or not; a direct chat by an administrator or
@@ -161,27 +177,63 @@ query fetches `limit + 1` rows newest first, `GetChatResultView::from_newest_fir
 `has_more` / `next_before` and returns the page oldest first. `citation` is stored in `messages.reply_to_id`, whose
 composite foreign key `(conversation_id, reply_to_id)` rejects a message of another chat (mapped to `400`).
 No `QueryParam` holds an optional BIGINT, so an absent `before` / `citation` travels as `0` (`NULLIF`).
+The history (`GetChatQueryView`) skips tombstones, and hides the quote (`citation` and `quoted` `null`) of a deleted
+message.
+
+MAIR-524, incremental reads (they replace the front's 2 s reload of the list and of the open chat; **this API needs
+Database `releases/v3.1.0`**: `messages.updated_at` / `edited_at` / `deleted_at`, `conversations.last_activity_at`,
+`idx_messages_conversation_updated`):
+
+- `GET /api/v1/{chat_id}/?since=<RFC 3339>&since_id=<id, default 0>&limit=` (`GetChatChangesQueryView`): the messages
+  posted, edited or deleted after the cursor, keyset `(m.updated_at, m.id) > ($since, $since_id)` ordered by
+  `(updated_at, id)` (served by `idx_messages_conversation_updated`, checked by an `EXPLAIN` test), tombstones included
+  as `deleted: true` with an empty `content`. `GetChatResultView::from_changes` trims the `limit + 1` row into
+  `has_more` and moves `next_since` / `next_since_id` to the last row (echoes the input when empty). `since` with
+  `before`, or `since_id` without `since`, is a `400`. The trigger stamps `updated_at` with `clock_timestamp()` under
+  the conversation lock, so within a chat commit order is `updated_at` order and a cursor never skips a change.
+- Without `since`, the history also answers `next_since` / `next_since_id`: the latest change of the chat
+  (`ChatHeader`, a `LATERAL` on the same index, `last_activity_at` / `0` for an empty chat). The header is read
+  **before** the page in that case (in parallel for a `since` read), so a change committed in between is after the
+  cursor rather than missed.
+- `GET /api/v1/?since=` keeps the chats whose `last_activity_at` is after the cursor (`GetChatsQueryView::page_since`,
+  the epoch when absent: no `QueryParam` holds an optional timestamp), same order and pagination. `ChatView` carries
+  `last_activity_at`; acknowledgements and member changes do not move it, and different chats are not committed in
+  date order, so clients pass the greatest value seen minus a few seconds.
+- `MessageView` carries `edited_at` (nullable), `updated_at` and `deleted` (additive fields).
+
+MAIR-507, what a client needs to display the list and to open a chat, in one query each:
+
+- `GET /api/v1/` returns per chat `name` (the title of a group chat; the other participant's "Prénom Nom" for a
+  direct chat, joined from `users` in the same statement), `kind`, `contact_id`, `member_count` (a direct chat always
+  has 2) and `unread_count`. `?search=` (`ChatListQuery`, at most 150 characters, no control character) keeps the
+  chats whose title matches, or whose contact (direct chat) or a member other than the caller (group chat) has a
+  first name, last name or full name (both orders) matching, `ILIKE '%term%'` with `%`, `_` and `\` escaped by
+  `search_pattern`. It is case-insensitive but not accent-insensitive (the schema has no `unaccent`), and the pagination
+  applies to the filtered list. The user-name branches use the trigram indexes of Database 3.0.0.
+- `GET /api/v1/{chat_id}/users/` returns `id`, `first_name`, `last_name` (`GetChatUsersQueryView`, a join with `users`);
+  the SSE fan-out keeps using the ids-only `GetChatMembersQueryView::new`.
+- `GET /api/v1/{chat_id}/` returns `chat` (the same fields as a list line, `GetChatHeaderQueryView`, read in parallel
+  with the page; an administrator who is not a participant of a direct chat gets both names and no `contact_id`) and,
+  for each message that quotes another, `quoted` (`id`, `sender_id`, first 100 characters), joined in the page query so
+  it is there even when the quoted message is older than the page.
 
 Unread counters are only lowered by the explicit `POST /api/v1/{chat_id}/read/` (`{ "readUntilMessageId": n }`, answers
 `{ "unread_count": k }`); `GET /api/v1/{chat_id}/` and `GET /api/v1/` never touch them, so polling is safe. The route is
 `endpoints::v1::id::read` and one call to the Postgres function `fn_acknowledge_read` (`database::chats::acknowledge_read`),
 which lives in `Devops/Database` (`releases/v1.5.0` + `repeatable/messages/`): it moves a per-agent cursor
-(`conversation_read_cursors`) forward only, recounts the messages after it, and answers "no row" (→ `404 Unknown message.`)
+(`conversation_read_cursors`) forward only, recounts the messages after it (tombstones excluded), and answers "no row" (→ `404 Unknown message.`)
 when the id belongs to another chat. Sends and acknowledgements of one conversation are serialized by a transaction advisory
 lock taken by a `BEFORE INSERT` trigger on `messages`, which also draws the message id after the lock so a single cursor is
 sound. **This API needs a Database image that ships that release, `releases/v1.8.0`** (MAIR-394: `created_by`,
-`reply_to_id`, `messaging_moderation_log`) **and `releases/v1.9.0`** (MAIR-478: direct chat pair): the compose files and
+`reply_to_id`, `messaging_moderation_log`) **and `releases/v1.9.0`** (MAIR-478: direct chat pair) **and `releases/v3.1.0`** (MAIR-524: change tracking) **and the MAIR-556 role passwords** (`dev-949384c`): the compose files and
 `TEST_DB_VERSION` in `.cargo/config.toml` pin it, and both have to be bumped together when a newer Database image is
 needed. To try an unmerged Database branch, build `ghcr.io/mairie360/database:<tag>` and `…/liquibase-migrations:<tag>`
 from `Devops/Database` and run `TEST_DB_VERSION=<tag> cargo test`.
 
-Logging (MAIR-421) goes through `tracing` (`src/logging.rs`, initialized first thing in `main`): JSON lines by
-default, `LOG_FORMAT=text` for readable lines (dev stack), level from `RUST_LOG` (default `info`). `TracingLogger`
-(`tracing-actix-web`) opens one span per request with its `request_id`, so a handler's log carries it. Database errors
-go through `endpoints::error::classify(operation, e)`: `NotFound` / `ForeignKey` / `Unique` come back for the
-handler to map to its documented `4xx`, anything else is logged at `error` with the operation and becomes `500`
-(`unexpected` logs unconditionally, for statements where no client error is possible). No `eprintln!`, no
-`.map_err(|_| …)`.
+Database errors go through `endpoints::error::classify(operation, e)`: `NotFound` / `ForeignKey` / `Unique` come
+back for the handler to map to its documented `4xx`, anything else is logged at `error` (through `tracing`, see
+"Logs and observability" below) with the operation and becomes `500` (`unexpected` logs unconditionally, for
+statements where no client error is possible). No `eprintln!`, no `.map_err(|_| …)`.
 
 Request bodies with text fields are extracted with `endpoints::validation::ValidatedJson` instead of `web::Json`:
 the view implements `Validate` (length matching the Postgres column, no control character) and an
@@ -278,12 +330,20 @@ the container tests.
   subscription is only trusted once a `probe` payload published right after it comes back.
 - `main.rs` creates the `broadcast` channel, spawns `RedisRelay::run` and
   `event_manager::start_internal_event_listener` (with a cloned `SmartDatabase`).
-- Write endpoints do their DB write, then `sse_state.publish(ChatEvent { chat_id, sender_id })`: through Redis when the
-  relay is subscribed, straight on `internal_bus` otherwise (a duplicate signal only makes a client reload once more).
-- The listener, per event, queries the non-excluded chat members (`get_chat_users`) and pushes a serde-serialized
-  `ChatSignal` frame (`data: {...}\n\n`) to every connection of each online member (skipping the
-  sender). A `Lagged` bus error is logged and the loop resumes; only closed senders are removed.
-- `GET /api/v1/stream` registers a new connection for the caller and spawns a supervisor (`actix_web::rt::spawn`): 15 s
+- Write endpoints commit, then `sse_state.publish(ChatEvent::…)` (MAIR-524: `message_created` on a post,
+  `message_edited` on a `PATCH`, `message_deleted` on a `DELETE`, `chat_read` on `POST /read/`, each with its
+  `message_id`, plus `unread_count` for a read): through Redis when the relay is subscribed, straight on `internal_bus`
+  otherwise (a duplicate signal only makes a client read once more). `ChatEvent.kind` / `message_id` /
+  `unread_count` are `#[serde(default)]`, so an event of an older replica reads as `MessageCreated`, and an older replica
+  ignores them (signals everything as `NEW_MSG`) during a rolling update.
+- The listener pushes a serde-serialized `ChatSignal` frame (`data: {...}\n\n`, `ChatSignal::from_event`): `type`
+  `NEW_MSG` / `MSG_EDITED` / `MSG_DELETED` to every connection of each online non-excluded member but the actor (one
+  `get_chat_users` query), `CHAT_READ` (with `unread_count`) to every connection of the reader only, no query. The frame
+  of a post stays `{"type":"NEW_MSG","chat_id":…}` plus the additive `message_id`. The table of the event contract is
+  the description of `GET /api/v1/stream` (what BFF_Message relays). A `Lagged` bus error is logged and the loop
+  resumes; only closed senders are removed.
+- `GET /api/v1/stream` registers a new connection for the caller, opens the body with a `: connected` comment (MAIR-561:
+  actix sends the head of a streaming response with its first chunk only) and spawns a supervisor (`actix_web::rt::spawn`): 15 s
   keep-alive ping, `authenticate_token` again every 30 s (revoked session, deleted account), and a timer on the JWT
   `exp` when it is readable. Any failure notifies `close`, which ends the response (`take_until`); the connection is
   removed once its receiver is gone.
@@ -310,10 +370,34 @@ sidecars and the dev healthcheck wait on `/ready`; the chart probes are in Deplo
 database, so `main` calls `ready::wait_for_postgres` and exits when Postgres does not answer within
 `DB_STARTUP_TIMEOUT` seconds (default 60). Neither probe is registered under `/api`.
 
+### Logs and observability (MAIR-503)
+
+Logs and traces come from `mairie360_api_lib::logging::telemetry` (feature `otel`), shared by every API: `main.rs`
+only calls `init_telemetry("message-api")` first thing and keeps the guard. There is no local logging or telemetry
+module any more; read the lib for the details.
+
+- Logs on stdout in the format of every API (same as Core API): coloured text (`RUST_LOG`, default `info`), one
+  JSON object per line with `LOG_FORMAT=json`. The request root span is hidden from them (it holds the client
+  address and query string). Log with `tracing::` macros, never `log::` or `eprintln!`.
+- Traces over OTLP/HTTP, opt-in: nothing is exported unless `OTEL_EXPORTER_OTLP_ENDPOINT` (or
+  `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`) is set, `OTEL_SDK_DISABLED=true` forces it off, a failing exporter is
+  logged and never stops the API. The endpoint is an agent relaying to Scaleway Cockpit (OTel Collector or Grafana
+  Alloy, e.g. `http://alloy:4318`); `OTEL_SERVICE_NAME` defaults to `message-api`.
+- `main.rs` wraps the app in the lib's `TracingLogger` (one span per request with its `request_id`, so a handler's
+  log carries it), so requests refused by `JwtMiddleware` or the rate limiter get a span too. Root spans are named
+  `<METHOD> <route pattern>` and continue the BFF's `traceparent`. The SQL appears as span **events**
+  (`db.statement` with `$n` placeholders, never the values). The lib's `Redact` drops `http.client_ip` and the
+  query string before export (MAIR-290, MAIR-501): build test providers with `telemetry::tracer_provider`, never
+  `SdkTracerProvider::builder()`.
+- Never add `opentelemetry*` / `tracing-actix-web` / `tracing-opentelemetry` to `Cargo.toml`: use the lib's
+  re-exports, their versions are coupled. `tracing-subscriber` is only a dev-dependency (the telemetry tests).
+- `tests/endpoints/telemetry.rs` asserts the span of a real route (status, route, continued trace id, no query
+  string nor client address, SQL events) and of a `401`; the redaction of logs and spans is tested in the lib.
+
 ### Config (env vars, all "critical" → process panics if unset)
 
 `REDIS_URL`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT`, `DB_NAME`, `HOST`, `PORT`,
-`JWT_SECRET`, `JWT_TIMEOUT`. Optional: `SWAGGER_ENABLED`, `DB_STARTUP_TIMEOUT`, `RATE_LIMIT_PER_SECOND`, `RATE_LIMIT_BURST`, `LOG_FORMAT`, `RUST_LOG`. The Postgres URL is assembled by `database::pg_url::build_pg_url`,
+`JWT_SECRET`, `JWT_TIMEOUT`. Optional: `SWAGGER_ENABLED`, `DB_STARTUP_TIMEOUT`, `RATE_LIMIT_PER_SECOND`, `RATE_LIMIT_BURST`, `LOG_FORMAT` (`json` for JSON lines, coloured text otherwise), `RUST_LOG`, the `OTEL_*` variables of the trace export. The Postgres URL is assembled by `database::pg_url::build_pg_url`,
 which percent-encodes user, password and database name, so `DB_PASSWORD` may contain any
 character. `docker-compose.yml` supplies them for the dev stack (app on
 `:3003`, Postgres via `ghcr.io/mairie360/database`, Liquibase migrations, a `seeder` running
@@ -335,3 +419,19 @@ one builds the dependencies in a cached layer, then the crate, both with `--lock
 ## Pull request reviewers
 
 Every PR requests a review from the whole team, minus its author: `CarolinHugo`, `LAURETbenjamin`, `MathTek` and `Quentintnrl` (`gh pr create … --reviewer CarolinHugo,LAURETbenjamin,MathTek`). `.github/CODEOWNERS` makes GitHub request them automatically as well.
+
+## Postgres pool settings (MAIR-565)
+
+Since `mairie360_api_lib` 3.4.0, `Database` reads three optional env vars through `DbPoolConfig::from_env`:
+`DB_POOL_MIN_CONNECTIONS` (default 1, sqlx's was 0: the API keeps one connection open, so the first request after a
+pause no longer reconnects), `DB_POOL_MAX_CONNECTIONS` (default 10) and `DB_POOL_IDLE_TIMEOUT_SECS` (default 600). An
+invalid value falls back to its default with a `warn!`. Per-instance values are set by the `Deploiment` chart
+(`APIs.dbPool`); the compose stacks set none and use the defaults.
+
+## Promotion to staging and prod (MAIR-494)
+
+A push to `main` only releases dev (`cicd.yml` stops at `release-dev`). Staging and prod are manual:
+`gh workflow run promote-staging.yml -R mairie360/Message_API` (main's newest commit) or `gh workflow run promote-staging.yml -R mairie360/Message_API -f sha=SHA` (a given commit), then the same with `promote-prod.yml`
+(environments `Staging` / `Prod`). Staging refuses a commit without `dev-<sha>` and a green main run, and runs
+the integration, ZAP and k6 stacks on that image; prod refuses one without `staging-<sha>` and tags the version semantic-release computes
+for that commit. `cicd.yml`, `promote-staging.yml` and `promote-prod.yml` pin the same mairie360/CICD release.

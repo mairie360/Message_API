@@ -21,7 +21,7 @@
     {
       "customType": "regex",
       "managerFilePatterns": [
-        "/^\\.github/workflows/cicd\\.yml$/"
+        "/^\\.github/workflows/(cicd|promote-staging|promote-prod)\\.yml$/"
       ],
       "matchStrings": [
         "cicd_version:\\s*(?<currentValue>v\\d+\\.\\d+\\.\\d+)"

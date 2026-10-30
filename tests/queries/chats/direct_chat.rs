@@ -1,10 +1,9 @@
 //! Direct chats (MAIR-478): one per pair, hidden instead of left, shown again by a message.
 
-use crate::common::{get_smart_db, grant_chat_delete, plain_user};
+use crate::common::{get_fixture_db, get_smart_db, grant_chat_delete, plain_user};
 use mairie360_api_lib::database::error::DbError;
 use mairie360_api_lib::error::ApiLibError;
 use mairie360_api_lib::smart_db::SmartDatabase;
-use mairie360_api_lib::test_setup::queries_setup::get_shared_db;
 use message_api::database::chats::{
     access::view::{ChatAccess, ChatAccessQueryView},
     create_chat::view::CreateChatQueryView,
@@ -35,9 +34,9 @@ async fn listed(db: &SmartDatabase, user: u64, chat_id: i32) -> Option<GetChatsQ
 #[tokio::test]
 #[serial]
 async fn test_a_pair_has_a_single_direct_chat() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
-    let (alice, bob) = (plain_user(&db).await, plain_user(&db).await);
+    let db = get_smart_db().await;
+    let fixtures = get_fixture_db().await;
+    let (alice, bob) = (plain_user(&fixtures).await, plain_user(&fixtures).await);
 
     let first = open(&db, alice, bob).await;
     assert!(first.created);
@@ -56,15 +55,15 @@ async fn test_a_pair_has_a_single_direct_chat() {
 #[tokio::test]
 #[serial]
 async fn test_direct_chat_lists_its_contact_on_both_sides() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
-    let (alice, bob) = (plain_user(&db).await, plain_user(&db).await);
+    let db = get_smart_db().await;
+    let fixtures = get_fixture_db().await;
+    let (alice, bob) = (plain_user(&fixtures).await, plain_user(&fixtures).await);
     let chat = open(&db, alice, bob).await.id;
 
     let for_alice = listed(&db, alice, chat).await.unwrap();
     assert_eq!(for_alice.kind, "direct");
     assert_eq!(for_alice.contact_id, Some(bob as i32));
-    assert_eq!(for_alice.title, None);
+    assert_eq!(for_alice.title.as_deref(), Some("Chat Member"));
     // A new chat stays hidden for the contact until a message is posted in it.
     assert!(listed(&db, bob, chat).await.is_none());
 
@@ -78,9 +77,9 @@ async fn test_direct_chat_lists_its_contact_on_both_sides() {
 #[tokio::test]
 #[serial]
 async fn test_hidden_direct_chat_keeps_its_contact_until_revealed() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
-    let (alice, bob) = (plain_user(&db).await, plain_user(&db).await);
+    let db = get_smart_db().await;
+    let fixtures = get_fixture_db().await;
+    let (alice, bob) = (plain_user(&fixtures).await, plain_user(&fixtures).await);
     let chat = open(&db, alice, bob).await.id;
     db.execute(RevealDirectChatQueryView::new(chat as u64))
         .await
@@ -115,9 +114,9 @@ async fn test_hidden_direct_chat_keeps_its_contact_until_revealed() {
 #[tokio::test]
 #[serial]
 async fn test_direct_chat_hidden_by_both_is_deleted() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
-    let (alice, bob) = (plain_user(&db).await, plain_user(&db).await);
+    let db = get_smart_db().await;
+    let fixtures = get_fixture_db().await;
+    let (alice, bob) = (plain_user(&fixtures).await, plain_user(&fixtures).await);
     let chat = open(&db, alice, bob).await.id as u64;
 
     db.fetch_scalar::<i32, _>(&HideDirectChatQueryView::new(chat, alice))
@@ -139,9 +138,9 @@ async fn test_direct_chat_hidden_by_both_is_deleted() {
 #[tokio::test]
 #[serial]
 async fn test_direct_chat_with_an_unknown_user_is_refused() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
-    let alice = plain_user(&db).await;
+    let db = get_smart_db().await;
+    let fixtures = get_fixture_db().await;
+    let alice = plain_user(&fixtures).await;
 
     let result = db
         .fetch_one::<OpenDirectChatQueryResultView, _>(&OpenDirectChatQueryView::new(
@@ -158,9 +157,9 @@ async fn test_direct_chat_with_an_unknown_user_is_refused() {
 #[tokio::test]
 #[serial]
 async fn test_reveal_does_not_touch_a_group_chat() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
-    let member = plain_user(&db).await;
+    let db = get_smart_db().await;
+    let fixtures = get_fixture_db().await;
+    let member = plain_user(&fixtures).await;
     let chat = db
         .fetch_scalar::<i32, _>(&CreateChatQueryView::with_members(
             "Service urbanisme",
@@ -170,7 +169,7 @@ async fn test_reveal_does_not_touch_a_group_chat() {
         ))
         .await
         .unwrap();
-    crate::common::exclude_member(&db, chat as u64, member).await;
+    crate::common::exclude_member(&fixtures, chat as u64, member).await;
 
     db.execute(RevealDirectChatQueryView::new(chat as u64))
         .await
@@ -181,9 +180,9 @@ async fn test_reveal_does_not_touch_a_group_chat() {
 #[tokio::test]
 #[serial]
 async fn test_group_chats_are_listed_as_group_without_contact() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
-    let (creator, member) = (plain_user(&db).await, plain_user(&db).await);
+    let db = get_smart_db().await;
+    let fixtures = get_fixture_db().await;
+    let (creator, member) = (plain_user(&fixtures).await, plain_user(&fixtures).await);
     let chat = db
         .fetch_scalar::<i32, _>(&CreateChatQueryView::with_members(
             "",
@@ -201,9 +200,9 @@ async fn test_group_chats_are_listed_as_group_without_contact() {
 #[tokio::test]
 #[serial]
 async fn test_delete_right_comes_from_check_access() {
-    let (_container, host) = get_shared_db().await;
-    let db = get_smart_db(host).await;
-    let (granted, member) = (plain_user(&db).await, plain_user(&db).await);
+    let db = get_smart_db().await;
+    let fixtures = get_fixture_db().await;
+    let (granted, member) = (plain_user(&fixtures).await, plain_user(&fixtures).await);
     let chat = db
         .fetch_scalar::<i32, _>(&CreateChatQueryView::with_members(
             "Astreinte",
@@ -216,7 +215,7 @@ async fn test_delete_right_comes_from_check_access() {
 
     let right = |user| ChatDeleteRightQueryView::new(chat, user);
     assert!(!db.fetch_scalar::<bool, _>(&right(member)).await.unwrap());
-    grant_chat_delete(&db, chat, granted).await;
+    grant_chat_delete(&fixtures, chat, granted).await;
     assert!(db.fetch_scalar::<bool, _>(&right(granted)).await.unwrap());
     // User 1 is the Admin created by liquibase: `delete_all` on conversations.
     assert!(db.fetch_scalar::<bool, _>(&right(1)).await.unwrap());

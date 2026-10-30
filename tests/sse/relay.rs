@@ -41,10 +41,7 @@ async fn test_an_event_reaches_every_replica_once() {
     let (first, mut first_rx) = replica(&config.url, "sse:chat-events").await;
     let (_second, mut second_rx) = replica(&config.url, "sse:chat-events").await;
 
-    let event = ChatEvent {
-        chat_id: 5,
-        sender_id: 42,
-    };
+    let event = ChatEvent::message_created(5, 42, 1);
     first.publish(event.clone()).await;
 
     assert_eq!(received(&mut first_rx).await, event);
@@ -65,12 +62,27 @@ async fn test_an_unreachable_redis_falls_back_to_the_local_bus() {
     let (bus, mut rx) = broadcast::channel(16);
     let state = AppState::new(bus, Some(relay));
 
-    let event = ChatEvent {
-        chat_id: 5,
-        sender_id: 42,
-    };
+    let event = ChatEvent::message_created(5, 42, 1);
     state.publish(event.clone()).await;
     assert_eq!(received(&mut rx).await, event);
+}
+
+#[tokio::test]
+#[serial]
+async fn test_mair_524_every_event_kind_crosses_the_relay() {
+    let (_redis, config) = start_redis_container().await;
+    let (first, _first_rx) = replica(&config.url, "sse:chat-events").await;
+    let (_second, mut second_rx) = replica(&config.url, "sse:chat-events").await;
+
+    for event in [
+        ChatEvent::message_created(5, 42, 117),
+        ChatEvent::message_edited(5, 42, 117),
+        ChatEvent::message_deleted(5, 1, 117),
+        ChatEvent::chat_read(5, 51, 117, 2),
+    ] {
+        first.publish(event.clone()).await;
+        assert_eq!(received(&mut second_rx).await, event);
+    }
 }
 
 #[test]
@@ -110,10 +122,7 @@ async fn test_the_relay_works_under_the_platform_acl() {
     let relay = RedisRelay::new(&url).unwrap();
     let channel = relay.channel().to_string();
     let (state, mut rx) = replica(&url, &channel).await;
-    let event = ChatEvent {
-        chat_id: 7,
-        sender_id: 1,
-    };
+    let event = ChatEvent::message_created(7, 1, 1);
     state.publish(event.clone()).await;
     assert_eq!(received(&mut rx).await, event);
 
