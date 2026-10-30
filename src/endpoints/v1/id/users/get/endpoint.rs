@@ -5,7 +5,7 @@ use mairie360_api_lib::state::AppState;
 
 use crate::endpoints::v1::id::access::{require_chat_access, AccessDenied};
 
-use crate::database::chats::get_chat_users::view::GetChatMembersQueryView;
+use crate::database::chats::get_chat_users::view::{ChatUserRow, GetChatUsersQueryView};
 use crate::database::ids::id_from_sql;
 use crate::endpoints::error::unexpected;
 use crate::endpoints::pagination::{split_page, PageQuery};
@@ -53,8 +53,8 @@ async fn trigger_get_chat_users(
     chat_id: u64,
     page: PageQuery,
 ) -> Result<GetUsersView, GetChatUsersError> {
-    let view = GetChatMembersQueryView::page(chat_id, page.limit(), page.offset());
-    let result: Vec<i32> = state.get_smart_db().fetch_all(&view).await.map_err(|e| {
+    let view = GetChatUsersQueryView::page(chat_id, page.limit(), page.offset());
+    let result: Vec<ChatUserRow> = state.get_smart_db().fetch_all(&view).await.map_err(|e| {
         unexpected("get chat members", e);
         GetChatUsersError::DatabaseError
     })?;
@@ -63,7 +63,7 @@ async fn trigger_get_chat_users(
     Ok(GetUsersView::new(
         result
             .into_iter()
-            .map(|user_id| User::new(id_from_sql(user_id)))
+            .map(|user| User::new(id_from_sql(user.id), &user.first_name, &user.last_name))
             .collect(),
         has_more,
     ))
@@ -77,8 +77,10 @@ async fn trigger_get_chat_users(
     ),
     path = "",
     summary = "List the members of a chat",
-    description = "Returns one page of the Core API ids of the members, by increasing id. Only ids are returned: \
-                   pass them to `GET /api/v1/user/?ids=1,2,3` of Core API to get their names.\n\n\
+    description = "Returns one page of the members of a chat, by increasing id: their Core API id, first name and \
+                   last name, read in the same query. This is what to call when a chat is opened; the chat list \
+                   (`GET /api/v1/`) only carries a member count. The rest of a profile comes from \
+                   `GET /api/v1/user/?ids=1,2,3` of Core API.\n\n\
                    **Paginated** (`limit` 1 to 100, default 50, and `offset`): `has_more` tells whether another \
                    page follows; ask for it with `offset` increased by `limit`.\n\n\
                    Only the members of the chat may call this route; administrators bypass the check. A caller who \
@@ -88,7 +90,13 @@ async fn trigger_get_chat_users(
             status = 200,
             description = "One page of the members of the chat.",
             body = GetUsersView,
-            example = json!({ "users": [{ "id": 42 }, { "id": 51 }], "has_more": false })
+            example = json!({
+                "users": [
+                    { "id": 42, "first_name": "Xavier", "last_name": "Bertrand" },
+                    { "id": 51, "first_name": "Camille", "last_name": "Durand" }
+                ],
+                "has_more": false
+            })
         ),
         (
             status = 400,

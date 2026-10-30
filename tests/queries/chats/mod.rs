@@ -3,6 +3,7 @@ pub mod accessors;
 pub mod acknowledge_read;
 pub mod add_message_to_chat;
 pub mod add_user_to_chat;
+pub mod changes;
 pub mod create_chat;
 pub mod delete_chat;
 pub mod delete_message_from_chat;

@@ -19,7 +19,7 @@ use actix_web::http::StatusCode;
 use mairie360_api_lib::test_setup::queries_setup::{get_shared_db, BOB_ID};
 
 use super::harness::{request, states, token};
-use crate::common::{get_smart_db, plain_user};
+use crate::common::{get_fixture_db, plain_user};
 
 /// Every operation that declares the `jwt` scheme, as `(method, uri)`, path parameters set to `id`.
 fn secured_operations(id: u64) -> Vec<(Method, String)> {
@@ -142,8 +142,7 @@ fn refused_headers(user_id: u64) -> Vec<(&'static str, String)> {
 async fn every_secured_operation_refuses_a_missing_or_forged_token() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
-    let (_container, url) = get_shared_db().await;
-    let user = plain_user(&get_smart_db(url).await).await;
+    let user = plain_user(&get_fixture_db().await).await;
     // Sets the test JWT_SECRET the forged tokens are derived from.
     let _ = token(user);
 
@@ -197,8 +196,7 @@ async fn every_secured_operation_refuses_an_unknown_or_archived_account() {
 async fn a_genuine_token_passes_the_authentication_of_every_operation() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
-    let (_container, url) = get_shared_db().await;
-    let user = plain_user(&get_smart_db(url).await).await;
+    let user = plain_user(&get_fixture_db().await).await;
 
     for (method, uri) in secured_operations(1) {
         // The stream never ends: its status is read without waiting for the body.

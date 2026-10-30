@@ -6,8 +6,11 @@
 mod harness;
 mod access;
 mod access_matrix;
+mod changes;
+mod chat_list;
 mod docs;
 mod flows;
 mod lists;
 mod ready;
+mod telemetry;
 mod token_refusals;

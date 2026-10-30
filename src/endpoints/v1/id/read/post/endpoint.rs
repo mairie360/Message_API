@@ -10,6 +10,7 @@ use crate::endpoints::v1::id::access::{begin, commit, require_chat_access_in, Ac
 use crate::endpoints::v1::id::read::post::view::{AcknowledgeReadResultView, AcknowledgeReadView};
 use crate::endpoints::v1::id::ChatPathParams;
 use crate::endpoints::validation::ValidatedJson;
+use crate::sse::state::ChatEvent;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AcknowledgeReadError {
@@ -88,7 +89,11 @@ async fn trigger_acknowledge_read(
                    is never acknowledged by mistake.\n\n\
                    The route is idempotent and only moves forward: acknowledging an older message than a previous \
                    call, or the same one again, changes nothing and returns the current count. The author is taken \
-                   from the JWT, and messages written by the caller themselves are never counted as unread.\n\n\
+                   from the JWT, and messages written by the caller themselves (and deleted messages) are never counted as \
+                   unread.\n\n\
+                   Once committed, a `CHAT_READ` `ChatSignal` (`message_id` = `readUntilMessageId`, `unread_count`) \
+                   is pushed on **the caller's own** SSE streams (other tabs and devices, the calling one included), \
+                   never to the other members.\n\n\
                    Only the members of the chat may call this route; administrators bypass the check (their count is \
                    always `0` when they are not members). A caller who is not a member gets the same `404` as for an \
                    unknown chat.",
@@ -141,15 +146,26 @@ async fn trigger_acknowledge_read(
 #[post("/")]
 pub async fn acknowledge_read(
     state: web::Data<AppState>,
+    sse_state: web::Data<crate::sse::state::AppState>,
     auth_user: AuthenticatedUser,
     view: ValidatedJson<AcknowledgeReadView>,
     params: web::Path<ChatPathParams>,
 ) -> Result<impl Responder, AcknowledgeReadError> {
     let chat_id = params.chat_id;
+    let view = view.into_inner();
+    let read_until = view.read_until_message_id();
     let mut tx = begin(&state).await?;
     require_chat_access_in(&mut tx, chat_id, auth_user.id).await?;
-    let result =
-        trigger_acknowledge_read(&mut tx, chat_id, auth_user.id, view.into_inner()).await?;
+    let result = trigger_acknowledge_read(&mut tx, chat_id, auth_user.id, view).await?;
     commit(tx).await?;
+    // Only once committed: the caller's other tabs and devices update their unread badge.
+    sse_state
+        .publish(ChatEvent::chat_read(
+            chat_id,
+            auth_user.id,
+            read_until,
+            result.unread_count(),
+        ))
+        .await;
     Ok(HttpResponse::Ok().json(result))
 }

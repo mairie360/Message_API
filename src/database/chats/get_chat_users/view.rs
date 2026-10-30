@@ -31,18 +31,6 @@ impl GetChatMembersQueryView {
         }
     }
 
-    /// One page for `GET /{chat_id}/users/`: `limit + 1` members from `offset` (see
-    /// `endpoints::pagination::split_page`).
-    pub fn page(chat_id: u64, limit: u32, offset: u32) -> Self {
-        Self {
-            params: vec![
-                QueryParam::I32(id_to_sql(chat_id)),
-                page_limit(limit),
-                page_offset(offset),
-            ],
-        }
-    }
-
     pub fn chat_id(&self) -> u64 {
         id_from_sql(self.params[0].as_i32())
     }
@@ -65,4 +53,58 @@ impl ApiRequestDto for GetChatMembersQueryView {
     fn query_params(&self) -> &[QueryParam] {
         &self.params
     }
+}
+
+/// One page of the (not excluded) members of chat `chat_id` with their names, by increasing id:
+/// `GET /{chat_id}/users/`. The names are read from `users` in the same statement, so a page costs
+/// one query whatever its size.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct GetChatUsersQueryView {
+    params: Vec<QueryParam>,
+}
+
+impl GetChatUsersQueryView {
+    /// `limit + 1` members from `offset` (see `endpoints::pagination::split_page`).
+    pub fn page(chat_id: u64, limit: u32, offset: u32) -> Self {
+        Self {
+            params: vec![
+                QueryParam::I32(id_to_sql(chat_id)),
+                page_limit(limit),
+                page_offset(offset),
+            ],
+        }
+    }
+
+    pub fn chat_id(&self) -> u64 {
+        id_from_sql(self.params[0].as_i32())
+    }
+}
+
+impl Display for GetChatUsersQueryView {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "GetChatUsersQueryView: chat_id={}", self.chat_id())
+    }
+}
+
+impl ApiRequestDto for GetChatUsersQueryView {
+    fn query_sql(&self) -> &'static str {
+        "SELECT to_jsonb(t) FROM ( \
+            SELECT cm.user_id AS id, u.first_name, u.last_name \
+            FROM conversation_members cm \
+            INNER JOIN users u ON u.id = cm.user_id \
+            WHERE cm.conversation_id = $1 AND cm.is_excluded = FALSE \
+            ORDER BY cm.user_id LIMIT $2 OFFSET $3 \
+         ) t"
+    }
+
+    fn query_params(&self) -> &[QueryParam] {
+        &self.params
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ChatUserRow {
+    pub id: i32,
+    pub first_name: String,
+    pub last_name: String,
 }
