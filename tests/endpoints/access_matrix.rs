@@ -18,8 +18,7 @@ use serial_test::serial;
 use utoipa::OpenApi;
 
 use super::harness::{admin_id, request as as_caller, states};
-use crate::common::{get_smart_db, plain_user};
-use mairie360_api_lib::test_setup::queries_setup::get_shared_db;
+use crate::common::{get_fixture_db, plain_user};
 
 const MATRIX: &str = include_str!("../../access-matrix.yaml");
 const ROLES: [&str; 5] = ["Admin", "Maire", "Responsable", "User", "Guest"];
@@ -243,8 +242,9 @@ fn request(
 async fn every_role_and_relation_gets_what_the_matrix_says() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
-    let (_container, url) = get_shared_db().await;
-    let db = get_smart_db(url).await;
+    // Fixtures (users, roles, chats) as the superuser: they touch tables outside the grants of
+    // `message_api` (MAIR-556).
+    let db = get_fixture_db().await;
     let spec = spec();
     let people = People {
         creator: user_with_role(&db, Some("User")).await,
