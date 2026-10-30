@@ -9,6 +9,7 @@ use message_api::endpoints::{config, health, ready};
 
 use mairie360_api_lib::env_manager::{get_critical_env_var, get_env_var};
 use mairie360_api_lib::logging::telemetry::{init_telemetry, TracingLogger};
+use mairie360_api_lib::request_log::{hide_query, restore_query, RedactedRootSpanBuilder};
 use mairie360_api_lib::security::JwtMiddleware;
 use mairie360_api_lib::state::AppState;
 
@@ -82,8 +83,12 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::Data::from(app_state.clone()))
             .app_data(data.clone())
             // One span per request (request id, method, route, status): the errors logged by the
-            // handlers carry it.
-            .wrap(TracingLogger::default())
+            // handlers carry it. It records the path without the query string and no error
+            // `Debug` (MAIR-290, see `mairie360_api_lib::request_log`): `hide_query` runs before
+            // it, `restore_query` right after it.
+            .wrap(middleware::from_fn(restore_query))
+            .wrap(TracingLogger::<RedactedRootSpanBuilder>::new())
+            .wrap(middleware::from_fn(hide_query))
             // Every response is JSON, plain text or an event stream: forbid browsers from sniffing
             // it as HTML.
             .wrap(middleware::DefaultHeaders::new().add(("X-Content-Type-Options", "nosniff")))

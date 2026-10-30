@@ -180,6 +180,10 @@ fn forward(payload: &[u8], bus: &broadcast::Sender<ChatEvent>) {
         Ok(event) => {
             let _ = bus.send(event);
         }
-        Err(e) => tracing::warn!("SSE relay: ignored malformed event: {e}"),
+        // Without the value serde quotes: a malformed event may carry a message (MAIR-290).
+        Err(e) => tracing::warn!(
+            "SSE relay: ignored malformed event: {}",
+            mairie360_api_lib::error::describe_json_error(&e)
+        ),
     }
 }
