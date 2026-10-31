@@ -22,6 +22,7 @@ ignore = [
     # 0.7.6, which elliptic-curve 0.13 cannot use). Pulled by jsonwebtoken 11.1 (the latest
     # release, through p256/p384) via mairie360_api_lib, which only *verifies* ES256/ES384 Keycloak
     # signatures with public keys: no secret goes through these operations. Drop it once
-    # jsonwebtoken moves to elliptic-curve 0.14.
+    # jsonwebtoken moves to elliptic-curve 0.14, and remove it at once if code starts signing
+    # with (or otherwise using) an EC private key.
     "RUSTSEC-2026-0387",
 ]
