@@ -52,3 +52,39 @@ fn runtime_stage_declares_numeric_non_root_user() {
         .unwrap_or_else(|_| panic!("USER must be numeric for runAsNonRoot, got `{user}`"));
     assert_ne!(uid, 0, "runtime stage must not run as root");
 }
+
+/// MAIR-741: the release binary is linked in the builder stage against its glibc and OpenSSL, then
+/// run on the distroless runtime image, so builder, runtime and development images share one
+/// Debian release; Debian 12's distroless `libssl3` is unpatched (CVE-2026-84782).
+#[test]
+fn mair_741_every_image_runs_on_debian_13() {
+    let releases = [
+        ("bookworm", 12),
+        ("debian12", 12),
+        ("trixie", 13),
+        ("debian13", 13),
+    ];
+    for file in ["Dockerfile", "development.Dockerfile"] {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(file);
+        let content = std::fs::read_to_string(&path)
+            .unwrap_or_else(|err| panic!("cannot read {}: {err}", path.display()));
+        let images = content
+            .lines()
+            .map(str::trim)
+            .filter(|line| line.to_ascii_uppercase().starts_with("FROM "))
+            .filter_map(|line| line.split_whitespace().nth(1));
+        for image in images {
+            let release = releases
+                .iter()
+                .find(|(marker, _)| image.contains(marker))
+                .map_or_else(
+                    || panic!("{file}: cannot tell the Debian release of `{image}`"),
+                    |(_, release)| *release,
+                );
+            assert_eq!(
+                release, 13,
+                "{file}: `{image}` must be on Debian 13, like the distroless runtime image"
+            );
+        }
+    }
+}
