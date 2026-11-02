@@ -42,10 +42,12 @@ Cargo aliases are defined in `.cargo/config.toml`:
 
 Integration tests live in `tests/` (there is no meaningful unit-test suite in `src/`).
 `tests/endpoints/` calls the real `/api` scope (`JwtMiddleware` + `endpoints::config`) over the shared test database
-with JWTs signed by `harness::token` (the harness sets its own `JWT_SECRET`): it holds the access refusals of every
+with JWTs signed by `harness::token` like Core signs them (MAIR-680: `EdDSA` with the lib's test key pair; the
+harness sets `JWT_PUBLIC_KEY` and removes `JWT_SECRET`): it holds the access refusals of every
 route (`401`, outsider `404`, non-creator / non-author / administrator `403`, ids of another chat). A new route or a
 new refusal gets its test there, since `endpoints/` is part of the coverage gate. `token_refusals.rs` sweeps every
-operation of `ApiDoc` declaring `jwt` (`401` without a token, with another scheme, garbage, another secret, an
+operation of `ApiDoc` declaring `jwt` (`401` without a token, with another scheme, garbage, an HS256 token
+whatever its secret, an EdDSA token signed with another key under Core's `kid` or without/with another `aud`, an
 expired token, `alg: none`, a swapped payload or an asymmetric algorithm; `404` for an unknown or archived account),
 and `lists.rs` checks the production quota of `rate_limit_from_env()` (`429` past the burst, `Retry-After` of at
 least 1 s).
@@ -91,11 +93,20 @@ published `ghcr.io/mairie360/message-api:dev-<sha>` image; when it is empty the 
 `development.Dockerfile` first. That image is distroless (no shell, no curl), so readiness is a `message-ready` sidecar
 polling `/health`, and dependent services wait for it with `service_completed_successfully`.
 
-Since API_lib 2.0.0 refuses a missing, short (< 32 bytes) or well-known `JWT_SECRET` at startup, every `*_test.sh`
-sources `test_secrets.sh` (MAIR-428): a random `JWT_SECRET` per run (unless one is exported) and `ADMIN_JWT`, an HS256
-admin token (`sub=1`, 2 h) forged from it with openssl. The compose files require both (`${VAR:?}`); newman gets the
-secret as `jwt_secret`, k6 the token as `JWT`. No secret or token valid anywhere is committed. The dev stack keeps
-`b"secret"` with `JWT_ALLOW_WEAK_SECRET=true` (dev only).
+**Session tokens (MAIR-680).** Only Core_API signs them, with its Ed25519 key (`EdDSA`, `kid` = RFC 7638
+thumbprint, `iss` `mairie360-core`, `aud` `mairie360`). This API only gets `JWT_PUBLIC_KEY` (Core's public key as
+PEM, several `PUBLIC KEY` blocks during a rotation, `\n`-escaped line breaks accepted) and checks them with the lib
+(4.3.0). No `JWT_SECRET`: while it is set the lib still accepts HS256 tokens signed with it (transition), so a
+deployment removes it once `JWT_PUBLIC_KEY` is in place, and every HS256 token is then refused.
+
+Every `*_test.sh` sources `test_secrets.sh` (MAIR-428, MAIR-680): a fresh Ed25519 key pair per run (an exported
+`JWT_PRIVATE_KEY` + `JWT_PUBLIC_KEY` pair wins), the public key exported for the API, `ADMIN_JWT` (`sub=1`, 2 h) and
+`sign_jwt <sub> <role> <ttl> [key]` / `sign_jwt_file` to sign tokens like Core with the private key, which never
+reaches the API. The compose files require them (`${VAR:?}`); newman gets its tokens as `--env-var` (the Postman
+sandbox cannot sign EdDSA), k6 a JSON file of tokens mounted at `/tokens.json` (k6 cannot sign Ed25519 either). No
+key or token valid anywhere is committed. The dev stack defaults `JWT_PUBLIC_KEY` to the lib's test public key with
+`JWT_ALLOW_WEAK_SECRET=true` (dev only); sign a dev token in a subshell with the lib's test key:
+`(export JWT_PRIVATE_KEY="$(openssl pkey -inform DER -in ~/.cargo/registry/src/*/mairie360_api_lib-4.3.0/src/test_setup/fixtures/session_test_key.der)"; export JWT_PUBLIC_KEY="$(printf '%s\n' "$JWT_PRIVATE_KEY" | openssl pkey -pubout)"; source ./test_secrets.sh && sign_jwt 1 admin 3600)`.
 
 The ZAP scan is authenticated: `security-scan` injects `ADMIN_JWT` on every request, waits for the `seeder`
 service (`init-test.sql`: plain `User` accounts 2 and 3, user 1 is the Admin created by liquibase) and fails on any
@@ -113,8 +124,8 @@ never reached, or when an operation declaring `security(("jwt" = []))` only got 
 `coverage.js` and covers every operation (MAIR-195), under a high load on a volume seed (MAIR-474): the performance
 stack's `seeder` also runs `init-perf.sql` (2 000 agents `400001`-`402000` in 16 group chats each, 1 000 direct
 chats, 25 messages per group chat, 100 in the busy chats `100001`-`100100` (one in 20 soft-deleted, MAIR-524) and
-10 000 in the hot chat `100000`; agent `400001 + r` is a member of chat `100000 + r`). GET handlers run in the `reads` scenario (up to 100 VUs) as a random seeded agent (tokens signed in k6
-with the run's `JWT_SECRET`, which the compose file passes): their chat list at a random offset, one of their chats
+10 000 in the hot chat `100000`; agent `400001 + r` is a member of chat `100000 + r`). GET handlers run in the `reads` scenario (up to 100 VUs) as a random seeded agent (EdDSA tokens signed
+by `performance_test.sh` into the token file; a new seeded caller needs its id in that script): their chat list at a random offset, one of their chats
 (the hot one at a random `before`, a third of the time) and its members. The other methods run in the `writes`
 scenario (10 VUs) as the Admin, each handler creating and deleting its own chat or message so they are
 order-independent; a `chats_rush` scenario sends `GET /api/v1/` at a fixed 100 req/s; a `chat_poll`
@@ -248,9 +259,12 @@ invalid value answers `400` naming the field. Map the lib's `DbError` constraint
 
 `tests/postman/collection.json` is a Postman v2.1 collection (importable in the app) and
 `tests/postman/environment.json` its variables; the compose file overrides `baseUrl` with `--env-var` so the
-committed default (`http://localhost:3003`) stays usable from a host shell. There is no login route here, so the
-collection pre-request script forges the HS256 JWTs itself (claims `sub`/`role`/`exp`, signed with the stack's
-`JWT_SECRET`) for the seeded Admin (user 1) and a plain user (user 2, from `init-test.sql`). The scenario creates
+committed default (`http://localhost:3003`) stays usable from a host shell. There is no login route here and the
+Postman sandbox cannot sign EdDSA, so `integration_test.sh` signs the JWTs with the run's key (`test_secrets.sh`)
+and the compose file passes them with `--env-var`: `jwt_admin` (user 1), `jwt_agent` and `jwt_third` (users 2 and 3,
+from `init-test.sql`), `jwt_forged` (Core's `kid`, another key) and `jwt_expired`; the pre-request script only
+forges `jwt_hs256`, an HS256 token that must be refused (MAIR-680). From a host shell, fill those variables
+yourself. The scenario creates
 its own chat and deletes it at the end, so it is replayable against a persistent database. `GET /api/v1/stream`
 is only checked unauthenticated (401): newman cannot consume an open SSE stream.
 
@@ -403,7 +417,7 @@ module any more; read the lib for the details.
 ### Config (env vars, all "critical" → process panics if unset)
 
 `REDIS_URL`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT`, `DB_NAME`, `HOST`, `PORT`,
-`JWT_SECRET`, `JWT_TIMEOUT`. Optional: `SWAGGER_ENABLED`, `DB_STARTUP_TIMEOUT`, `RATE_LIMIT_PER_SECOND`, `RATE_LIMIT_BURST`, `LOG_FORMAT` (`json` for JSON lines, coloured text otherwise), `RUST_LOG`, the `OTEL_*` variables of the trace export. The Postgres URL is assembled by `database::pg_url::build_pg_url`,
+`JWT_PUBLIC_KEY` (MAIR-680), `JWT_TIMEOUT`. Optional: `SWAGGER_ENABLED`, `DB_STARTUP_TIMEOUT`, `RATE_LIMIT_PER_SECOND`, `RATE_LIMIT_BURST`, `LOG_FORMAT` (`json` for JSON lines, coloured text otherwise), `RUST_LOG`, the `OTEL_*` variables of the trace export. The Postgres URL is assembled by `database::pg_url::build_pg_url`,
 which percent-encodes user, password and database name, so `DB_PASSWORD` may contain any
 character. `docker-compose.yml` supplies them for the dev stack (app on
 `:3003`, Postgres via `ghcr.io/mairie360/database`, Liquibase migrations, a `seeder` running
