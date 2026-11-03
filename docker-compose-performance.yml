@@ -86,7 +86,7 @@ services:
       - backend
 
   seeder:
-    image: postgres:18-alpine
+    image: postgres:18-alpine@sha256:10a5c69a83035ab5239f5620d708520e8b28f5aa1f2b20143e6024532edadfb5
     depends_on:
       liquibase:
         condition: service_completed_successfully
@@ -104,7 +104,7 @@ services:
       - backend
 
   redis:
-    image: redis:8.4.0-bookworm
+    image: redis:8.4.0-bookworm@sha256:c22af04bb576503bf16b3e34a1fd2fd82de0f765afd866d2e380145e0af30d78
     container_name: mairie360-redis-message-api #change api name
     restart: always
     expose:
@@ -157,7 +157,7 @@ services:
   # is the coverage reference of load-test.js (openapi.json is gitignored, so the CI checkout has
   # none, and the served spec is the one of the exact image being tested).
   message-ready:
-    image: curlimages/curl:latest
+    image: curlimages/curl:latest@sha256:3fb7e13e5d179a845c97d78204f3f1064d1907037f26a3ebf91710571151fd93
     # Root, to write into the freshly created `openapi-spec` volume.
     user: "0"
     depends_on:
@@ -173,7 +173,7 @@ services:
       - backend
 
   k6-perf-test:
-    image: grafana/k6:latest
+    image: grafana/k6:latest@sha256:3e4186aea62e11a45560bfc51e19eeafe82fc07ce069c78aff44b7ff893d9a5e
     networks:
       - backend
     # load-test.js declares one handler per operation of the spec through the shared OpenAPI
