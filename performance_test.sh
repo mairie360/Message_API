@@ -18,9 +18,17 @@ fi
 export IMAGE_REF
 echo "==> API image under test: $IMAGE_REF"
 
-# Random JWT_SECRET for this run and the admin token forged from it (MAIR-428).
+# Fresh Ed25519 key pair for this run: the API gets its public key, k6 tokens signed with it like
+# Core signs them (MAIR-428, MAIR-680, test_secrets.sh).
 # shellcheck source=test_secrets.sh
 source "$(dirname "$0")/test_secrets.sh" || exit 1
+# Tokens of every caller of load-test.js (k6 cannot sign Ed25519): the Admin (1) and the agents of
+# init-perf.sql. Keep the range in step with AGENTS in load-test.js.
+JWT_TOKENS_FILE="$(mktemp --suffix=.json)"
+chmod 644 "$JWT_TOKENS_FILE" # read by the k6 container user
+export JWT_TOKENS_FILE
+echo "==> Signing the k6 callers' tokens..."
+sign_jwt_file "$JWT_TOKENS_FILE" user 7200 1 $(seq 400001 402000) || exit 1
 
 # Shared CI test files (OpenAPI coverage gate, MAIR-194: ZAP hook and k6 coverage module). CI
 # checks mairie360/CICD out as cicd-repo/; locally it is cloned once at the cicd_version pinned in
@@ -40,7 +48,7 @@ PERF_CPUS="${PERF_CPUS:-4}"
 CPUS=$(nproc)
 [ "$CPUS" -gt "$PERF_CPUS" ] && CPUS="$PERF_CPUS"
 CPUSET_FILE="$(mktemp --suffix=.yml)"
-trap 'rm -f "$CPUSET_FILE"' EXIT
+trap 'rm -f "$CPUSET_FILE" "$JWT_TOKENS_FILE"' EXIT
 {
     echo "services:"
     for service in $(docker compose -f "$COMPOSE_FILE" config --services); do
