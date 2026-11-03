@@ -1,49 +1,47 @@
 # Journal des releases — Message_API
 
-<!-- release-journal-state {"dev": "3597cbf284493105e2e9294ff9efbd97992b0ec1", "prod": "71dd8d10cc668813b5012bb27c9aefc962ba30d9", "prod_tag": "v2.1.0", "staging": "71dd8d10cc668813b5012bb27c9aefc962ba30d9", "updated": {"dev": "2026-11-03 01:35 UTC", "prod": "2026-10-21 09:10 UTC", "staging": "2026-10-21 03:20 UTC"}} -->
+<!-- release-journal-state {"dev": "525bc8c7e7d7c02588813b82e2fa7ba449508e60", "prod": "71dd8d10cc668813b5012bb27c9aefc962ba30d9", "prod_tag": "v2.1.0", "staging": "71dd8d10cc668813b5012bb27c9aefc962ba30d9", "updated": {"dev": "2026-11-03 09:41 UTC", "prod": "2026-10-21 09:10 UTC", "staging": "2026-10-21 03:20 UTC"}} -->
 > Tenu à jour par la CI (`mairie360/CICD`, action `release/release-journal`) à chaque passage en dev, staging et prod. Ne pas modifier à la main : le fichier est réécrit au passage suivant.
 
 | Environnement | Version | Commit | Mis à jour |
 | --- | --- | --- | --- |
 | prod | v2.1.0 | `71dd8d1` | 2026-10-21 09:10 UTC |
 | staging | — | `71dd8d1` | 2026-10-21 03:20 UTC |
-| dev | — | `3597cbf` | 2026-11-03 01:35 UTC |
+| dev | — | `525bc8c` | 2026-11-03 09:41 UTC |
 
 ## Ajouté sur main depuis la dernière release prod (v2.1.0)
 
 #### Changements de comportement
-- L'API ne lit plus `JWT_SECRET` : elle vérifie les jetons avec la clé publique Ed25519 de Core, fournie par `JWT_PUBLIC_KEY` (PEM, plusieurs blocs pendant une rotation). Sans `JWT_SECRET`, tout jeton HS256 est refusé en `401`. Tant que `JWT_SECRET` reste défini, la lib accepte encore les HS256 signés avec lui (transition) ; un déploiement le retire dès que `JWT_PUBLIC_KEY` est en place. Les appelants doivent présenter des jetons EdDSA émis par Core. (MAIR-680, [#223](https://github.com/mairie360/Message_API/pull/223))
+
+- Les jetons HS256 ne sont plus acceptés une fois `JWT_SECRET` retiré : l'API vérifie les jetons de session avec la clé publique Ed25519 de Core (`JWT_PUBLIC_KEY`, PEM) et, sans `JWT_SECRET`, tout jeton HS256 reçoit `401`. Pendant la transition, la lib accepte encore HS256 tant que `JWT_SECRET` est défini. Les jetons doivent être signés en `EdDSA` par Core, avec `iss` et `aud` attendus ; un appelant qui signe encore avec l'ancien secret partagé est refusé. (MAIR-680, [#223](https://github.com/mairie360/Message_API/pull/223))
+- Pour les déploiements : dans les fichiers compose de test, `JWT_SECRET` est remplacé par `JWT_PUBLIC_KEY` (obligatoire). La stack dev prend par défaut la clé publique de test de la lib, avec `JWT_ALLOW_WEAK_SECRET` (dev uniquement). Le diff de cette PR est tronqué : le détail des fichiers non vus n'est pas confirmé.
 
 #### Corrections
-- Journaux de requêtes : avant, la span racine de chaque requête contenait la query string (ex. `?limit=<nom>`), et l'erreur serde citait la valeur refusée (e-mail, téléphone). Maintenant, la span ne garde que le chemin, l'erreur est décrite par son type et son contexte, et un événement SSE mal formé ne journalise plus la valeur citée. (MAIR-290, [#154](https://github.com/mairie360/Message_API/pull/154))
+
+- Les journaux de requêtes ne contiennent plus les valeurs saisies. Avant : la query string (`?limit=...`) et le `Debug` des erreurs serde, qui cite la valeur refusée, étaient écrits dans les logs. Maintenant : seul le chemin est tracé, l'erreur est décrite par son type, et le relais SSE ne journalise plus la valeur d'un événement mal formé. (MAIR-290, [#154](https://github.com/mairie360/Message_API/pull/154))
 
 #### Technique
-- Stacks de test : clés Ed25519 générées à chaque run, jetons signés comme Core, newman et k6 reçoivent leurs jetons par variables ou fichier ; `mairie360_api_lib` passe en 4.3.0. (MAIR-680, [#223](https://github.com/mairie360/Message_API/pull/223))
-- Image d'exécution distroless Debian 13 et builder `trixie` pour corriger CVE-2026-84782, avec un test qui vérifie la version Debian de chaque image. (MAIR-741, [#215](https://github.com/mairie360/Message_API/pull/215))
-- Workflows CI et promotion : mairie360/CICD passe en v5.2.2 (contrôles RGPD), avec un test de cohérence des versions. (MAIR-771, [#219](https://github.com/mairie360/Message_API/pull/219))
-- Audit RustSec : zstd, zstd-safe, zstd-sys et ctutils mis à jour ; RUSTSEC-2026-0387 (crypto-bigint) ignoré avec sa justification. (MAIR-740, [#213](https://github.com/mairie360/Message_API/pull/213))
-- Checklist RGPD sur les pull requests (`gdpr-pr.yml`) et matrice d'accès `access-matrix.yaml` avec son test, sans effet sur l'API. (MAIR-295, [#157](https://github.com/mairie360/Message_API/pull/157) ; MAIR-288, [#161](https://github.com/mairie360/Message_API/pull/161))
-- Test du marqueur RGPD (`gdpr_marker_test.sh`, `gdpr-marker.yaml`) qui cherche les valeurs de test dans les journaux. (MAIR-290, [#154](https://github.com/mairie360/Message_API/pull/154))
-- Dépendances : redis 1.7.1 → 1.8.0 ([#208](https://github.com/mairie360/Message_API/pull/208)), tokio 1.54.0 → 1.54.1 ([#205](https://github.com/mairie360/Message_API/pull/205)), et digests de l'image de développement ([#201](https://github.com/mairie360/Message_API/pull/201), [#206](https://github.com/mairie360/Message_API/pull/206), [#207](https://github.com/mairie360/Message_API/pull/207)), remplacés ensuite par trixie.
-- Pins mairie360/CICD v4.4.1 → v4.4.3 pour corriger la promotion en prod (création du tag et de la release). ([#198](https://github.com/mairie360/Message_API/pull/198), [#200](https://github.com/mairie360/Message_API/pull/200), [#203](https://github.com/mairie360/Message_API/pull/203))
+
+- Digests Docker épinglés dans les fichiers compose (Renovate, [#217](https://github.com/mairie360/Message_API/pull/217)) ; image runtime de l'API passée en distroless Debian 13 avec builder et image de dev en trixie (MAIR-741, [#215](https://github.com/mairie360/Message_API/pull/215)) ; images `rust:1.99` de dev repassées par digest (#201, #206, #207).
+- Dépendances Rust : zstd, ctutils et une exception `RUSTSEC-2026-0387` dans `cargo audit` (MAIR-740, [#213](https://github.com/mairie360/Message_API/pull/213)), redis 1.8.0 ([#208](https://github.com/mairie360/Message_API/pull/208)), tokio 1.54.1 ([#205](https://github.com/mairie360/Message_API/pull/205)).
+- CI : CICD monté de v4.4.0 à v5.2.2 (MAIR-612, #198, #200, #203 ; MAIR-771, [#219](https://github.com/mairie360/Message_API/pull/219)), contrôle RGPD des PR (MAIR-295, [#157](https://github.com/mairie360/Message_API/pull/157)). Matrice d'accès MAIR-288 ([#161](https://github.com/mairie360/Message_API/pull/161)) : fichier et tests uniquement, sans effet à l'exécution.
 
 ## Différence dev → staging (en dev, pas encore en staging)
 
 #### Changements de comportement
-- L'API ne lit plus `JWT_SECRET` : elle vérifie les jetons avec la clé publique Ed25519 de Core, fournie par `JWT_PUBLIC_KEY` (PEM, plusieurs blocs pendant une rotation). Sans `JWT_SECRET`, tout jeton HS256 est refusé en `401`. Tant que `JWT_SECRET` reste défini, la lib accepte encore les HS256 signés avec lui (transition) ; un déploiement le retire dès que `JWT_PUBLIC_KEY` est en place. Les appelants doivent présenter des jetons EdDSA émis par Core. (MAIR-680, [#223](https://github.com/mairie360/Message_API/pull/223))
+
+- Les jetons HS256 ne sont plus acceptés une fois `JWT_SECRET` retiré : l'API vérifie les jetons de session avec la clé publique Ed25519 de Core (`JWT_PUBLIC_KEY`, PEM) et, sans `JWT_SECRET`, tout jeton HS256 reçoit `401`. Pendant la transition, la lib accepte encore HS256 tant que `JWT_SECRET` est défini. Les jetons doivent être signés en `EdDSA` par Core, avec `iss` et `aud` attendus ; un appelant qui signe encore avec l'ancien secret partagé est refusé. (MAIR-680, [#223](https://github.com/mairie360/Message_API/pull/223))
+- Pour les déploiements : dans les fichiers compose de test, `JWT_SECRET` est remplacé par `JWT_PUBLIC_KEY` (obligatoire). La stack dev prend par défaut la clé publique de test de la lib, avec `JWT_ALLOW_WEAK_SECRET` (dev uniquement). Le diff de cette PR est tronqué : le détail des fichiers non vus n'est pas confirmé.
 
 #### Corrections
-- Journaux de requêtes : avant, la span racine de chaque requête contenait la query string (ex. `?limit=<nom>`), et l'erreur serde citait la valeur refusée (e-mail, téléphone). Maintenant, la span ne garde que le chemin, l'erreur est décrite par son type et son contexte, et un événement SSE mal formé ne journalise plus la valeur citée. (MAIR-290, [#154](https://github.com/mairie360/Message_API/pull/154))
+
+- Les journaux de requêtes ne contiennent plus les valeurs saisies. Avant : la query string (`?limit=...`) et le `Debug` des erreurs serde, qui cite la valeur refusée, étaient écrits dans les logs. Maintenant : seul le chemin est tracé, l'erreur est décrite par son type, et le relais SSE ne journalise plus la valeur d'un événement mal formé. (MAIR-290, [#154](https://github.com/mairie360/Message_API/pull/154))
 
 #### Technique
-- Stacks de test : clés Ed25519 générées à chaque run, jetons signés comme Core, newman et k6 reçoivent leurs jetons par variables ou fichier ; `mairie360_api_lib` passe en 4.3.0. (MAIR-680, [#223](https://github.com/mairie360/Message_API/pull/223))
-- Image d'exécution distroless Debian 13 et builder `trixie` pour corriger CVE-2026-84782, avec un test qui vérifie la version Debian de chaque image. (MAIR-741, [#215](https://github.com/mairie360/Message_API/pull/215))
-- Workflows CI et promotion : mairie360/CICD passe en v5.2.2 (contrôles RGPD), avec un test de cohérence des versions. (MAIR-771, [#219](https://github.com/mairie360/Message_API/pull/219))
-- Audit RustSec : zstd, zstd-safe, zstd-sys et ctutils mis à jour ; RUSTSEC-2026-0387 (crypto-bigint) ignoré avec sa justification. (MAIR-740, [#213](https://github.com/mairie360/Message_API/pull/213))
-- Checklist RGPD sur les pull requests (`gdpr-pr.yml`) et matrice d'accès `access-matrix.yaml` avec son test, sans effet sur l'API. (MAIR-295, [#157](https://github.com/mairie360/Message_API/pull/157) ; MAIR-288, [#161](https://github.com/mairie360/Message_API/pull/161))
-- Test du marqueur RGPD (`gdpr_marker_test.sh`, `gdpr-marker.yaml`) qui cherche les valeurs de test dans les journaux. (MAIR-290, [#154](https://github.com/mairie360/Message_API/pull/154))
-- Dépendances : redis 1.7.1 → 1.8.0 ([#208](https://github.com/mairie360/Message_API/pull/208)), tokio 1.54.0 → 1.54.1 ([#205](https://github.com/mairie360/Message_API/pull/205)), et digests de l'image de développement ([#201](https://github.com/mairie360/Message_API/pull/201), [#206](https://github.com/mairie360/Message_API/pull/206), [#207](https://github.com/mairie360/Message_API/pull/207)), remplacés ensuite par trixie.
-- Pins mairie360/CICD v4.4.1 → v4.4.3 pour corriger la promotion en prod (création du tag et de la release). ([#198](https://github.com/mairie360/Message_API/pull/198), [#200](https://github.com/mairie360/Message_API/pull/200), [#203](https://github.com/mairie360/Message_API/pull/203))
+
+- Digests Docker épinglés dans les fichiers compose (Renovate, [#217](https://github.com/mairie360/Message_API/pull/217)) ; image runtime de l'API passée en distroless Debian 13 avec builder et image de dev en trixie (MAIR-741, [#215](https://github.com/mairie360/Message_API/pull/215)) ; images `rust:1.99` de dev repassées par digest (#201, #206, #207).
+- Dépendances Rust : zstd, ctutils et une exception `RUSTSEC-2026-0387` dans `cargo audit` (MAIR-740, [#213](https://github.com/mairie360/Message_API/pull/213)), redis 1.8.0 ([#208](https://github.com/mairie360/Message_API/pull/208)), tokio 1.54.1 ([#205](https://github.com/mairie360/Message_API/pull/205)).
+- CI : CICD monté de v4.4.0 à v5.2.2 (MAIR-612, #198, #200, #203 ; MAIR-771, [#219](https://github.com/mairie360/Message_API/pull/219)), contrôle RGPD des PR (MAIR-295, [#157](https://github.com/mairie360/Message_API/pull/157)). Matrice d'accès MAIR-288 ([#161](https://github.com/mairie360/Message_API/pull/161)) : fichier et tests uniquement, sans effet à l'exécution.
 
 ## Différence staging → prod (en staging, pas encore en prod)
 
@@ -54,6 +52,7 @@ _Rien._
 <!-- release-journal-history:start -->
 | Date | Environnement | Version | Commit | Run |
 | --- | --- | --- | --- | --- |
+| 2026-11-03 09:41 UTC | dev | — | `525bc8c` | [run](https://github.com/mairie360/Message_API/actions/runs/41612021996) |
 | 2026-11-03 01:35 UTC | dev | — | `3597cbf` | [run](https://github.com/mairie360/Message_API/actions/runs/41559223424) |
 | 2026-11-02 23:00 UTC | dev | — | `85087ed` | [run](https://github.com/mairie360/Message_API/actions/runs/41539993387) |
 | 2026-11-01 12:42 UTC | dev | — | `7c85c0b` | [run](https://github.com/mairie360/Message_API/actions/runs/41306772708) |
