@@ -40,5 +40,6 @@ gdpr-marker.yaml
 gdpr_marker_test.sh
 docker-compose-gdpr-marker.yml
 gdpr-simulation.yaml
+gdpr-journey.yaml
 gdpr_simulation_test.sh
 docker-compose-gdpr-simulation.yml
