@@ -1,39 +1,41 @@
 # Journal des releases — Message_API
 
-<!-- release-journal-state {"dev": "db230538476eb3e088d1b67bb2f0afceef6ce0cf", "prod": "71dd8d10cc668813b5012bb27c9aefc962ba30d9", "prod_tag": "v2.1.0", "staging": "71dd8d10cc668813b5012bb27c9aefc962ba30d9", "updated": {"dev": "2026-11-04 02:13 UTC", "prod": "2026-10-21 09:10 UTC", "staging": "2026-10-21 03:20 UTC"}} -->
+<!-- release-journal-state {"dev": "9cc1a61396c42a729e2313f844b9db84d138f22a", "prod": "71dd8d10cc668813b5012bb27c9aefc962ba30d9", "prod_tag": "v2.1.0", "staging": "71dd8d10cc668813b5012bb27c9aefc962ba30d9", "updated": {"dev": "2026-11-04 18:29 UTC", "prod": "2026-10-21 09:10 UTC", "staging": "2026-10-21 03:20 UTC"}} -->
 > Tenu à jour par la CI (`mairie360/CICD`, action `release/release-journal`) à chaque passage en dev, staging et prod. Ne pas modifier à la main : le fichier est réécrit au passage suivant.
 
 | Environnement | Version | Commit | Mis à jour |
 | --- | --- | --- | --- |
 | prod | v2.1.0 | `71dd8d1` | 2026-10-21 09:10 UTC |
 | staging | — | `71dd8d1` | 2026-10-21 03:20 UTC |
-| dev | — | `db23053` | 2026-11-04 02:13 UTC |
+| dev | — | `9cc1a61` | 2026-11-04 18:29 UTC |
 
 ## Ajouté sur main depuis la dernière release prod (v2.1.0)
 
 #### Changements de comportement
-- Les tokens HS256 ne sont plus acceptés : `JWT_SECRET` n'est plus lu et l'API exige `JWT_PUBLIC_KEY` (clé publique Ed25519 de Core_API, au format PEM). Sans `JWT_SECRET`, tout token HS256 reçoit `401` ; un appelant (BFF ou outil de test) qui signe encore avec le secret partagé n'est plus accepté. Le déploiement doit fournir `JWT_PUBLIC_KEY`. (MAIR-680, [#223](https://github.com/mairie360/Message_API/pull/223))
+- Les jetons de session HS256 sont refusés (401) : l'API ne lit plus `JWT_SECRET` et vérifie les jetons avec la clé publique Ed25519 de Core_API (`JWT_PUBLIC_KEY`). Avant : un jeton HS256 signé avec le secret partagé était accepté. Maintenant : il est refusé dès que `JWT_SECRET` est absent (tant qu'il est défini, la lib accepte encore HS256, en transition). Tout appelant qui signait ses propres jetons (BFF, scripts) doit utiliser des jetons EdDSA émis par Core_API. (MAIR-680, [#223](https://github.com/mairie360/Message_API/pull/223))
 
 #### Corrections
-- Journaux des requêtes : avant, la span enregistrait la query string (ex. `?limit=<valeur>`) et l'erreur en `Debug`, qui reprenait la valeur refusée (e-mail, téléphone). Maintenant, seul le chemin est journalisé et l'erreur est décrite par son type et son contexte. (MAIR-290, [#154](https://github.com/mairie360/Message_API/pull/154))
-- Relais SSE : un événement mal formé est journalisé sans la valeur citée par serde. (MAIR-290, [#154](https://github.com/mairie360/Message_API/pull/154))
+- Les logs de requête n'exposent plus les valeurs envoyées. Avant : la query string (par exemple `?limit=<nom>`) et le `Debug` des erreurs de désérialisation, qui cite la valeur refusée (e-mail, téléphone), étaient journalisés. Maintenant : seuls le chemin et la description du type d'erreur sont écrits, et un événement SSE malformé ne cite plus sa valeur. Les erreurs de base de données sont décrites par SQLSTATE, contrainte, table et colonne. (MAIR-290, [#154](https://github.com/mairie360/Message_API/pull/154))
 
 #### Technique
-- Images, dépendances et CI : digests Docker épinglés dans les fichiers compose et `development.Dockerfile` (rust 1.99 trixie), image d'exécution distroless Debian 13 (MAIR-741, [#215](https://github.com/mairie360/Message_API/pull/215)), mises à jour Renovate (dont [#225](https://github.com/mairie360/Message_API/pull/225), [#209](https://github.com/mairie360/Message_API/pull/209), [#208](https://github.com/mairie360/Message_API/pull/208), [#205](https://github.com/mairie360/Message_API/pull/205)), correctifs RustSec de cargo audit (MAIR-740, [#213](https://github.com/mairie360/Message_API/pull/213)), CICD porté en v5.2.2 avec `ANTHROPIC_WORKSPACE_ID` (MAIR-771, [#219](https://github.com/mairie360/Message_API/pull/219)), alignements CICD v4.4.1 à v4.4.3 (MAIR-612, [#198](https://github.com/mairie360/Message_API/pull/198), [#200](https://github.com/mairie360/Message_API/pull/200), [#203](https://github.com/mairie360/Message_API/pull/203)), checklist RGPD sur les PR (MAIR-295, [#157](https://github.com/mairie360/Message_API/pull/157)).
-- Tests : matrice d'accès `access-matrix.yaml` et tests de refus (MAIR-288, [#161](https://github.com/mairie360/Message_API/pull/161)), test du marqueur RGPD dans les journaux (MAIR-290, [#154](https://github.com/mairie360/Message_API/pull/154)), tests des tokens EdDSA et du rejet HS256 (MAIR-680, [#223](https://github.com/mairie360/Message_API/pull/223)).
+- CI/CD : CICD passe de v4.4.3 à v5.2.2 ([#219](https://github.com/mairie360/Message_API/pull/219)) puis v5.3.1 ([#221](https://github.com/mairie360/Message_API/pull/221)). Ajout de la simulation d'usage RGPD avant prod (`gdpr-simulation.yaml`, `docker-compose-gdpr-simulation.yml`, `gdpr_simulation_test.sh`), de la checklist RGPD des PR ([#157](https://github.com/mairie360/Message_API/pull/157)) et d'une garde de version des workflows. Sans effet sur l'API en service.
+- Tests : `test_secrets.sh` génère une paire Ed25519 par exécution, et les stacks de test signent leurs jetons avec elle. Matrice d'accès `access-matrix.yaml` et test de couverture ([#161](https://github.com/mairie360/Message_API/pull/161)), sans changement d'exécution.
+- Image d'exécution distroless Debian 13 et builder trixie, pour corriger CVE-2026-84782 ([#215](https://github.com/mairie360/Message_API/pull/215)). Corrections RustSec de zstd et ctutils ([#213](https://github.com/mairie360/Message_API/pull/213)).
+- Dépendances : `mairie360_api_lib` en 3.0.1 puis 4.3.0, mises à jour Renovate ([#205](https://github.com/mairie360/Message_API/pull/205), [#208](https://github.com/mairie360/Message_API/pull/208), [#209](https://github.com/mairie360/Message_API/pull/209), dont le diff n'est pas visible ici), digests Docker épinglés ([#201](https://github.com/mairie360/Message_API/pull/201), [#206](https://github.com/mairie360/Message_API/pull/206), [#207](https://github.com/mairie360/Message_API/pull/207), [#217](https://github.com/mairie360/Message_API/pull/217), [#225](https://github.com/mairie360/Message_API/pull/225)).
 
 ## Différence dev → staging (en dev, pas encore en staging)
 
 #### Changements de comportement
-- Les tokens HS256 ne sont plus acceptés : `JWT_SECRET` n'est plus lu et l'API exige `JWT_PUBLIC_KEY` (clé publique Ed25519 de Core_API, au format PEM). Sans `JWT_SECRET`, tout token HS256 reçoit `401` ; un appelant (BFF ou outil de test) qui signe encore avec le secret partagé n'est plus accepté. Le déploiement doit fournir `JWT_PUBLIC_KEY`. (MAIR-680, [#223](https://github.com/mairie360/Message_API/pull/223))
+- Les jetons de session HS256 sont refusés (401) : l'API ne lit plus `JWT_SECRET` et vérifie les jetons avec la clé publique Ed25519 de Core_API (`JWT_PUBLIC_KEY`). Avant : un jeton HS256 signé avec le secret partagé était accepté. Maintenant : il est refusé dès que `JWT_SECRET` est absent (tant qu'il est défini, la lib accepte encore HS256, en transition). Tout appelant qui signait ses propres jetons (BFF, scripts) doit utiliser des jetons EdDSA émis par Core_API. (MAIR-680, [#223](https://github.com/mairie360/Message_API/pull/223))
 
 #### Corrections
-- Journaux des requêtes : avant, la span enregistrait la query string (ex. `?limit=<valeur>`) et l'erreur en `Debug`, qui reprenait la valeur refusée (e-mail, téléphone). Maintenant, seul le chemin est journalisé et l'erreur est décrite par son type et son contexte. (MAIR-290, [#154](https://github.com/mairie360/Message_API/pull/154))
-- Relais SSE : un événement mal formé est journalisé sans la valeur citée par serde. (MAIR-290, [#154](https://github.com/mairie360/Message_API/pull/154))
+- Les logs de requête n'exposent plus les valeurs envoyées. Avant : la query string (par exemple `?limit=<nom>`) et le `Debug` des erreurs de désérialisation, qui cite la valeur refusée (e-mail, téléphone), étaient journalisés. Maintenant : seuls le chemin et la description du type d'erreur sont écrits, et un événement SSE malformé ne cite plus sa valeur. Les erreurs de base de données sont décrites par SQLSTATE, contrainte, table et colonne. (MAIR-290, [#154](https://github.com/mairie360/Message_API/pull/154))
 
 #### Technique
-- Images, dépendances et CI : digests Docker épinglés dans les fichiers compose et `development.Dockerfile` (rust 1.99 trixie), image d'exécution distroless Debian 13 (MAIR-741, [#215](https://github.com/mairie360/Message_API/pull/215)), mises à jour Renovate (dont [#225](https://github.com/mairie360/Message_API/pull/225), [#209](https://github.com/mairie360/Message_API/pull/209), [#208](https://github.com/mairie360/Message_API/pull/208), [#205](https://github.com/mairie360/Message_API/pull/205)), correctifs RustSec de cargo audit (MAIR-740, [#213](https://github.com/mairie360/Message_API/pull/213)), CICD porté en v5.2.2 avec `ANTHROPIC_WORKSPACE_ID` (MAIR-771, [#219](https://github.com/mairie360/Message_API/pull/219)), alignements CICD v4.4.1 à v4.4.3 (MAIR-612, [#198](https://github.com/mairie360/Message_API/pull/198), [#200](https://github.com/mairie360/Message_API/pull/200), [#203](https://github.com/mairie360/Message_API/pull/203)), checklist RGPD sur les PR (MAIR-295, [#157](https://github.com/mairie360/Message_API/pull/157)).
-- Tests : matrice d'accès `access-matrix.yaml` et tests de refus (MAIR-288, [#161](https://github.com/mairie360/Message_API/pull/161)), test du marqueur RGPD dans les journaux (MAIR-290, [#154](https://github.com/mairie360/Message_API/pull/154)), tests des tokens EdDSA et du rejet HS256 (MAIR-680, [#223](https://github.com/mairie360/Message_API/pull/223)).
+- CI/CD : CICD passe de v4.4.3 à v5.2.2 ([#219](https://github.com/mairie360/Message_API/pull/219)) puis v5.3.1 ([#221](https://github.com/mairie360/Message_API/pull/221)). Ajout de la simulation d'usage RGPD avant prod (`gdpr-simulation.yaml`, `docker-compose-gdpr-simulation.yml`, `gdpr_simulation_test.sh`), de la checklist RGPD des PR ([#157](https://github.com/mairie360/Message_API/pull/157)) et d'une garde de version des workflows. Sans effet sur l'API en service.
+- Tests : `test_secrets.sh` génère une paire Ed25519 par exécution, et les stacks de test signent leurs jetons avec elle. Matrice d'accès `access-matrix.yaml` et test de couverture ([#161](https://github.com/mairie360/Message_API/pull/161)), sans changement d'exécution.
+- Image d'exécution distroless Debian 13 et builder trixie, pour corriger CVE-2026-84782 ([#215](https://github.com/mairie360/Message_API/pull/215)). Corrections RustSec de zstd et ctutils ([#213](https://github.com/mairie360/Message_API/pull/213)).
+- Dépendances : `mairie360_api_lib` en 3.0.1 puis 4.3.0, mises à jour Renovate ([#205](https://github.com/mairie360/Message_API/pull/205), [#208](https://github.com/mairie360/Message_API/pull/208), [#209](https://github.com/mairie360/Message_API/pull/209), dont le diff n'est pas visible ici), digests Docker épinglés ([#201](https://github.com/mairie360/Message_API/pull/201), [#206](https://github.com/mairie360/Message_API/pull/206), [#207](https://github.com/mairie360/Message_API/pull/207), [#217](https://github.com/mairie360/Message_API/pull/217), [#225](https://github.com/mairie360/Message_API/pull/225)).
 
 ## Différence staging → prod (en staging, pas encore en prod)
 
@@ -44,6 +46,7 @@ _Rien._
 <!-- release-journal-history:start -->
 | Date | Environnement | Version | Commit | Run |
 | --- | --- | --- | --- | --- |
+| 2026-11-04 18:29 UTC | dev | — | `9cc1a61` | [run](https://github.com/mairie360/Message_API/actions/runs/41883197579) |
 | 2026-11-04 02:13 UTC | dev | — | `db23053` | [run](https://github.com/mairie360/Message_API/actions/runs/41758287247) |
 | 2026-11-03 15:41 UTC | dev | — | `0bd7c04` | [run](https://github.com/mairie360/Message_API/actions/runs/41664122078) |
 | 2026-11-03 09:41 UTC | dev | — | `525bc8c` | [run](https://github.com/mairie360/Message_API/actions/runs/41612021996) |
