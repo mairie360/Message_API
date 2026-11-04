@@ -2,15 +2,17 @@
 //! (`ApiDoc`): an operation is covered as soon as it is documented, and the sweep fails if one
 //! accepts a token it should not.
 //!
-//! The tokens are the ones an attacker can build without `JWT_SECRET`: none at all, another
-//! scheme, garbage, a token signed with another secret, an expired one, `alg: none`, a payload
-//! swapped under a valid signature, an asymmetric algorithm (the Keycloak path, disabled here),
-//! plus well-signed tokens for an unknown and for an archived account.
+//! The tokens are the ones an attacker can build without Core's private key (MAIR-680): none at
+//! all, another scheme, garbage, an HS256 token (no `JWT_SECRET` here, whatever secret signs it),
+//! an `EdDSA` token signed with another key under Core's `kid`, one without `iss`/`aud` or for
+//! another audience, an expired one, `alg: none`, a payload swapped under a valid signature, an
+//! asymmetric algorithm (the Keycloak path, disabled here), plus well-signed tokens for an unknown
+//! and for an archived account.
 
 use actix_web::http::Method;
 use actix_web::test::TestRequest;
 use jsonwebtoken::{encode, EncodingKey, Header};
-use mairie360_api_lib::jwt_manager::{get_jwt_secret, Claims};
+use mairie360_api_lib::jwt_manager::{Claims, SESSION_JWT_ISSUER};
 use message_api::endpoints::swagger::ApiDoc;
 use serial_test::serial;
 use utoipa::OpenApi;
@@ -18,7 +20,9 @@ use utoipa::OpenApi;
 use actix_web::http::StatusCode;
 use mairie360_api_lib::test_setup::queries_setup::{get_shared_db, BOB_ID};
 
-use super::harness::{request, states, token};
+use super::harness::{
+    core_claims, now, other_private_key, request, sign_eddsa_with, sign_like_core, states, token,
+};
 use crate::common::{get_fixture_db, plain_user};
 
 /// Every operation that declares the `jwt` scheme, as `(method, uri)`, path parameters set to `id`.
@@ -68,29 +72,19 @@ fn base64url(bytes: &[u8]) -> String {
     out
 }
 
-fn now() -> usize {
-    usize::try_from(chrono::Utc::now().timestamp()).unwrap()
-}
-
 /// Header values that must all be refused with `401`, labelled for the failure message.
 fn refused_headers(user_id: u64) -> Vec<(&'static str, String)> {
-    let secret = get_jwt_secret().unwrap();
-    let valid = Claims::new(&user_id.to_string(), "User", now() + 3600);
-    let sign = |claims: &Claims, key: &[u8]| {
+    let valid = core_claims(user_id, now() + 3600);
+    let hs256 = |claims: &Claims, key: &[u8]| {
         encode(&Header::default(), claims, &EncodingKey::from_secret(key)).unwrap()
     };
-
-    let genuine = sign(&valid, &secret);
+    let genuine = sign_like_core(&valid);
     let mut parts = genuine.split('.');
     let (header, signature) = (parts.next().unwrap(), parts.nth(1).unwrap());
     let other_user = base64url(
-        serde_json::to_string(&Claims::new(
-            &(user_id + 1).to_string(),
-            "Admin",
-            now() + 3600,
-        ))
-        .unwrap()
-        .as_bytes(),
+        serde_json::to_string(&core_claims(user_id + 1, now() + 3600))
+            .unwrap()
+            .as_bytes(),
     );
     let payload = base64url(serde_json::to_string(&valid).unwrap().as_bytes());
 
@@ -100,20 +94,41 @@ fn refused_headers(user_id: u64) -> Vec<(&'static str, String)> {
         ("empty bearer", "Bearer ".to_string()),
         ("garbage", "Bearer not.a.jwt".to_string()),
         (
-            "other secret",
+            "HS256 token, no JWT_SECRET on this API (MAIR-680)",
             format!(
                 "Bearer {}",
-                sign(&valid, b"not-the-secret-of-this-deployment-0123")
+                hs256(
+                    &Claims::new(&user_id.to_string(), "User", now() + 3600),
+                    b"endpoint-tests-only-jwt-secret-0123456789"
+                )
+            ),
+        ),
+        (
+            "EdDSA signed with another key under Core's kid (MAIR-680)",
+            format!("Bearer {}", sign_eddsa_with(&valid, &other_private_key())),
+        ),
+        (
+            "EdDSA without iss nor aud (MAIR-680)",
+            format!(
+                "Bearer {}",
+                sign_like_core(&Claims::new(&user_id.to_string(), "User", now() + 3600))
+            ),
+        ),
+        (
+            "EdDSA for another audience (MAIR-680)",
+            format!(
+                "Bearer {}",
+                sign_like_core(
+                    &Claims::new(&user_id.to_string(), "User", now() + 3600)
+                        .with_issuer_and_audience(SESSION_JWT_ISSUER, "another-platform")
+                )
             ),
         ),
         (
             "expired",
             format!(
                 "Bearer {}",
-                sign(
-                    &Claims::new(&user_id.to_string(), "User", now() - 60),
-                    &secret
-                )
+                sign_like_core(&core_claims(user_id, now() - 60))
             ),
         ),
         (
@@ -143,7 +158,7 @@ async fn every_secured_operation_refuses_a_missing_or_forged_token() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
     let user = plain_user(&get_fixture_db().await).await;
-    // Sets the test JWT_SECRET the forged tokens are derived from.
+    // Sets the JWT environment (Core's public key only) the tokens are checked against.
     let _ = token(user);
 
     let operations = secured_operations(1);

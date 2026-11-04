@@ -86,7 +86,7 @@ services:
       - backend
 
   seeder:
-    image: postgres:18-alpine
+    image: postgres:18-alpine@sha256:10a5c69a83035ab5239f5620d708520e8b28f5aa1f2b20143e6024532edadfb5
     depends_on:
       liquibase:
         condition: service_completed_successfully
@@ -101,7 +101,7 @@ services:
       - backend
 
   redis:
-    image: redis:8.4.0-bookworm
+    image: redis:8.4.0-bookworm@sha256:c22af04bb576503bf16b3e34a1fd2fd82de0f765afd866d2e380145e0af30d78
     container_name: mairie360-redis-message-api #change api name
     restart: always
     expose:
@@ -144,9 +144,12 @@ services:
     environment:
       <<: *common-env
       PUBLIC_URL: http://message.development.mairie360.fr
-      # Dev-only placeholder shared with the other dev stacks. API_lib refuses it at startup unless
-      # JWT_ALLOW_WEAK_SECRET is set: never set that flag on a deployed instance (MAIR-428).
-      JWT_SECRET: b"secret"
+      # MAIR-680: Core's public key only, no JWT_SECRET (HS256 tokens are refused). Defaults to the
+      # public half of mairie360_api_lib's test key pair (test_setup::http_setup), which the lib
+      # refuses at startup unless JWT_ALLOW_WEAK_SECRET is set: dev stack only, never a deployment.
+      # Sign dev tokens with that pair, see CLAUDE.md ("Session tokens"), or export your own
+      # JWT_PUBLIC_KEY before `docker compose up`.
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:------BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAKW8bV4kiFUo8hmOEU3+lXdqZL1wmKvBw6smUyjpmXks=\n-----END PUBLIC KEY-----}
       JWT_ALLOW_WEAK_SECRET: "true"
       JWT_TIMEOUT: 3600
       # Swagger UI on the dev stack; never set on a deployed instance (MAIR-424).
@@ -169,7 +172,7 @@ services:
       start_period: 90s
 
   nginx:
-    image: nginx:1.29.1-bookworm
+    image: nginx:1.29.1-bookworm@sha256:8adbdcb969e2676478ee2c7ad333956f0c8e0e4c5a7463f4611d7a2e7a7ff5dc
     restart: always
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf

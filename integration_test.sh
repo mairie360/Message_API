@@ -20,9 +20,19 @@ fi
 export IMAGE_REF
 echo "==> API image under test: $IMAGE_REF"
 
-# Random JWT_SECRET for this run and the admin token forged from it (MAIR-428).
+# Fresh Ed25519 key pair for this run: the API gets its public key, the runners tokens signed with
+# it like Core signs them (MAIR-428, MAIR-680, test_secrets.sh).
 # shellcheck source=test_secrets.sh
 source "$(dirname "$0")/test_secrets.sh" || exit 1
+# The collection's callers (the Postman sandbox cannot sign EdDSA): the seeded Admin (user 1), plain
+# users 2 and 3 (init-test.sql), a token claiming Core's kid but signed with another key, and an
+# expired one.
+JWT_ADMIN="$ADMIN_JWT"
+JWT_AGENT="$(sign_jwt 2 user 3600)" || exit 1
+JWT_THIRD="$(sign_jwt 3 user 3600)" || exit 1
+JWT_FORGED="$(sign_jwt 1 admin 3600 "$(openssl genpkey -algorithm ed25519 2>/dev/null)")" || exit 1
+JWT_EXPIRED="$(sign_jwt 1 admin -3600)" || exit 1
+export JWT_ADMIN JWT_AGENT JWT_THIRD JWT_FORGED JWT_EXPIRED
 
 echo "==> [1/4] Starting the stack and the newman collection..."
 # Fresh database on every run (MAIR-474): a volume left by a previous run would hand the

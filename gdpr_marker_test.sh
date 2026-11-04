@@ -20,7 +20,8 @@ fi
 export IMAGE_REF
 echo "==> API image under test: $IMAGE_REF"
 
-# Random JWT_SECRET for this run and the admin JWT forged from it (MAIR-428).
+# Fresh Ed25519 key pair for this run: the API gets its public key, and ADMIN_JWT (sub=1, valid
+# 2 hours) is signed with it like Core signs it (MAIR-428, MAIR-680, test_secrets.sh).
 # shellcheck source=test_secrets.sh
 source "$(dirname "$0")/test_secrets.sh" || exit 1
 

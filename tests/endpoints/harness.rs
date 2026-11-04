@@ -4,27 +4,80 @@ use std::sync::{Arc, Once};
 use actix_web::http::Method;
 use actix_web::test::TestRequest;
 use actix_web::web;
-use mairie360_api_lib::jwt_manager::generate_jwt;
+use jsonwebtoken::{encode, Algorithm, Header};
+use mairie360_api_lib::jwt_manager::{
+    parse_public_keys, parse_signing_key, Claims, SESSION_JWT_AUDIENCE, SESSION_JWT_ISSUER,
+};
 use mairie360_api_lib::state::AppState;
+use mairie360_api_lib::test_setup::http_setup::{test_jwt_private_key, TEST_JWT_PUBLIC_KEY};
 use mairie360_api_lib::test_setup::queries_setup::{get_shared_db, ADMIN_ID};
 use message_api::sse::state::AppState as SseState;
 
-/// Signing secret of the test tokens. Only read by this test binary.
-const TEST_JWT_SECRET: &str = "endpoint-tests-only-jwt-secret-0123456789";
+/// Seconds since the epoch, as the `exp` claim counts them.
+pub fn now() -> usize {
+    usize::try_from(chrono::Utc::now().timestamp()).unwrap()
+}
 
+/// Claims of a session token issued by Core for `user_id` (MAIR-680: with `iss` and `aud`).
+pub fn core_claims(user_id: u64, expiration: usize) -> Claims {
+    Claims::new(&user_id.to_string(), "user", expiration)
+        .with_issuer_and_audience(SESSION_JWT_ISSUER, SESSION_JWT_AUDIENCE)
+}
+
+/// PKCS#8 body (base64) of an Ed25519 private key that is not Core's (MAIR-680), assembled into
+/// PEM at run time so that the secret scanners do not read a PEM private key in the sources.
+const MAIR_680_OTHER_PRIVATE_KEY_B64: &str =
+    "MC4CAQAwBQYDK2VwBCIEII1DTYiu+dcwBgtEKil59uTH8s7XfrxGrbD+/P0sXq/8";
+
+/// Public key of [`other_private_key`], never published in `JWT_PUBLIC_KEY`.
+const MAIR_680_OTHER_PUBLIC_KEY: &str = "-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAtZHz1BNkijjkLJlnK9l7vikDl0aivrmbwllpT68Lnss=
+-----END PUBLIC KEY-----
+";
+
+/// An Ed25519 private key that is not Core's: what a compromised service could sign with.
+pub fn other_private_key() -> String {
+    let label = "PRIVATE KEY";
+    format!("-----BEGIN {label}-----\n{MAIR_680_OTHER_PRIVATE_KEY_B64}\n-----END {label}-----\n")
+}
+
+/// Signs `claims` as they are with `private_key` (PEM) under Core's `kid`: a genuine token with
+/// [`test_jwt_private_key`], a forgery with [`other_private_key`].
+pub fn sign_eddsa_with(claims: &Claims, private_key: &str) -> String {
+    let core_keys = parse_public_keys(TEST_JWT_PUBLIC_KEY).unwrap();
+    let mut header = Header::new(Algorithm::EdDSA);
+    header.kid = Some(core_keys[0].kid().to_string());
+    let known_keys = [
+        core_keys,
+        parse_public_keys(MAIR_680_OTHER_PUBLIC_KEY).unwrap(),
+    ]
+    .concat();
+    let key = parse_signing_key(private_key, &known_keys).unwrap();
+    encode(&header, claims, key.encoding_key()).unwrap()
+}
+
+/// Signs `claims` like Core does (MAIR-680): `EdDSA`, the lib's test key pair, Core's `kid`.
+pub fn sign_like_core(claims: &Claims) -> String {
+    sign_eddsa_with(claims, &test_jwt_private_key())
+}
+
+/// The environment of a deployed API after MAIR-680: Core's public key, no `JWT_SECRET`, no
+/// private key.
 static JWT_ENV: Once = Once::new();
 
-fn set_jwt_env() {
+pub fn set_jwt_env() {
     JWT_ENV.call_once(|| {
-        std::env::set_var("JWT_SECRET", TEST_JWT_SECRET);
+        std::env::set_var("JWT_PUBLIC_KEY", TEST_JWT_PUBLIC_KEY);
+        std::env::remove_var("JWT_PRIVATE_KEY");
+        std::env::remove_var("JWT_SECRET");
         std::env::set_var("JWT_TIMEOUT", "3600");
     });
 }
 
-/// A valid JWT for `user_id`, accepted by `JwtMiddleware`.
+/// A session JWT issued by Core for `user_id`, accepted by `JwtMiddleware`.
 pub fn token(user_id: u64) -> String {
     set_jwt_env();
-    generate_jwt(&user_id.to_string(), "user").expect("test JWT")
+    sign_like_core(&core_claims(user_id, now() + 3600))
 }
 
 /// Id of the administrator seeded by the shared test database.

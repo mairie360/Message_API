@@ -10,7 +10,7 @@
 // agents in 16 group chats each, 1 000 direct chats, 25 messages per chat and 10 000 in the hot
 // chat 100000). Four scenarios share the spec:
 // - `reads`: the GET operations, ramping up to the read VUs of the profile (PROFILES), as a random seeded agent (token signed
-//   here with the run's JWT_SECRET): their chat list at a random offset, one of their chats (the
+//   by performance_test.sh with the run's key): their chat list at a random offset, one of their chats (the
 //   hot one at a random `before`, a third of the time) and its members;
 // - `writes`: every other operation with the write VUs of the profile. Each handler is self-contained: it creates what it
 //   needs through `fixture()`, sends its request, then deletes what it created, so the handlers
@@ -25,27 +25,25 @@
 //   messages, 5 tombstones) from its latest cursor (nothing changed, the common case) or, one
 //   time in four, from the beginning (catching up a full page), and `GET /api/v1/?since=`.
 import http from 'k6/http';
-import crypto from 'k6/crypto';
-import encoding from 'k6/encoding';
 import { check, fail, sleep } from 'k6';
 import { createCoverage, loadSpec } from '/coverage.js';
 
 const BASE_URL = (__ENV.BASE_URL || 'http://localhost:3003').replace(/\/+$/, '');
 
-// HS256 JWT of the Admin seeded by liquibase (sub=1, role=admin), forged by performance_test.sh
-// with the random JWT_SECRET of the run (MAIR-428): no token is committed. Administrators bypass
-// the chat membership checks, so every operation answers for any chat.
-const TOKEN = __ENV.JWT;
-if (!TOKEN) {
-  throw new Error('JWT is not set: run ./performance_test.sh, which forges it');
-}
-const AUTH = { Authorization: `Bearer ${TOKEN}` };
+// EdDSA tokens of the Admin seeded by liquibase (sub=1) and of the agents of init-perf.sql
+// ({ "<user id>": "<jwt>" }), signed by performance_test.sh with the run's key like Core signs them
+// (test_secrets.sh, MAIR-428, MAIR-680): k6 cannot sign Ed25519 itself, and no token is committed.
+// Administrators bypass the chat membership checks, so every operation answers for any chat.
+const TOKENS = JSON.parse(open(__ENV.JWT_TOKENS_FILE || '/tokens.json'));
 
-// Secret of the run, to sign the tokens of the seeded agents.
-const JWT_SECRET = __ENV.JWT_SECRET;
-if (!JWT_SECRET) {
-  throw new Error('JWT_SECRET is not set: run ./performance_test.sh, which generates it');
+/** EdDSA JWT of seeded user `id`, valid for the run. */
+function jwt(id) {
+  const token = TOKENS[String(id)];
+  if (!token) throw new Error(`No token for user ${id}: sign it in performance_test.sh`);
+  return token;
 }
+
+const AUTH = { Authorization: `Bearer ${jwt(1)}` };
 
 // Rows of init-perf.sql: agent 400001 + r is a member of chat 100000 + r (and 102000 + r).
 const AGENTS = { first: 400001, count: 2000 };
@@ -83,13 +81,9 @@ const randomInt = (max) => Math.floor(Math.random() * max);
 
 const agentTokens = {};
 
-/** `Authorization` header of seeded agent `id`, an HS256 token signed with the run's secret. */
+/** `Authorization` header of seeded agent `id`. */
 function agentAuth(id) {
-  if (!agentTokens[id]) {
-    const part = (value) => encoding.b64encode(JSON.stringify(value), 'rawurl');
-    const unsigned = `${part({ alg: 'HS256', typ: 'JWT' })}.${part({ sub: String(id), role: 'user', exp: Math.floor(Date.now() / 1000) + 7200 })}`;
-    agentTokens[id] = { Authorization: `Bearer ${unsigned}.${crypto.hmac('sha256', JWT_SECRET, unsigned, 'base64rawurl')}` };
-  }
+  if (!agentTokens[id]) agentTokens[id] = { Authorization: `Bearer ${jwt(id)}` };
   return agentTokens[id];
 }
 
