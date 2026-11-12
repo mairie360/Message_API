@@ -13,9 +13,9 @@ permissions:
 
 jobs:
   gdpr:
-    uses: mairie360/CICD/.github/workflows/gdpr-pr-cicd.yml@v5.3.1
+    uses: mairie360/CICD/.github/workflows/gdpr-pr-cicd.yml@v5.6.0
     with:
-      cicd_version: v5.3.1
+      cicd_version: v5.6.0
     # Only the secrets the called workflow declares (its optional AI review).
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
