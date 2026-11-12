@@ -1,16 +1,19 @@
 # Journal des releases — Message_API
 
-<!-- release-journal-state {"dev": "d810a63963c7036c4323bac6cf9167798f28d122", "prod": "71dd8d10cc668813b5012bb27c9aefc962ba30d9", "prod_tag": "v2.1.0", "staging": "71dd8d10cc668813b5012bb27c9aefc962ba30d9", "updated": {"dev": "2026-11-06 05:18 UTC", "prod": "2026-10-21 09:10 UTC", "staging": "2026-10-21 03:20 UTC"}} -->
+<!-- release-journal-state {"dev": "b2d2f9edf49d1de870e91e20c3045a10bc488c2b", "prod": "71dd8d10cc668813b5012bb27c9aefc962ba30d9", "prod_tag": "v2.1.0", "staging": "71dd8d10cc668813b5012bb27c9aefc962ba30d9", "updated": {"dev": "2026-11-12 11:52 UTC", "prod": "2026-10-21 09:10 UTC", "staging": "2026-10-21 03:20 UTC"}} -->
 > Tenu à jour par la CI (`mairie360/CICD`, action `release/release-journal`) à chaque passage en dev, staging et prod. Ne pas modifier à la main : le fichier est réécrit au passage suivant.
 
 | Environnement | Version | Commit | Mis à jour |
 | --- | --- | --- | --- |
 | prod | v2.1.0 | `71dd8d1` | 2026-10-21 09:10 UTC |
 | staging | — | `71dd8d1` | 2026-10-21 03:20 UTC |
-| dev | — | `d810a63` | 2026-11-06 05:18 UTC |
+| dev | — | `b2d2f9e` | 2026-11-12 11:52 UTC |
 
 ## Ajouté sur main depuis la dernière release prod (v2.1.0)
 
+- chore(deps): update gcr.io/distroless/cc-debian13:nonroot docker digest to cc66d22 (#231) ([#231](https://github.com/mairie360/Message_API/pull/231))
+- fix(deps): MAIR-740 APIs: fix the cargo audit RustSec alerts (actix-http, libsqlite3-sys) (#235) ([#235](https://github.com/mairie360/Message_API/pull/235))
+- chore(deps): update rust:1.99-trixie docker digest to 8a4e90c (#230) ([#230](https://github.com/mairie360/Message_API/pull/230))
 - chore(deps): update rust:1.99-trixie docker digest to bc2c4c2 (#229) ([#229](https://github.com/mairie360/Message_API/pull/229))
 - chore(deps): pin node.js to c86ecea (#226) ([#226](https://github.com/mairie360/Message_API/pull/226))
 - feat: MAIR-497 GDPR - Usage simulation and AI review of logs and database before prod ([#221](https://github.com/mairie360/Message_API/pull/221))
@@ -35,6 +38,9 @@
 
 ## Différence dev → staging (en dev, pas encore en staging)
 
+- chore(deps): update gcr.io/distroless/cc-debian13:nonroot docker digest to cc66d22 (#231) ([#231](https://github.com/mairie360/Message_API/pull/231))
+- fix(deps): MAIR-740 APIs: fix the cargo audit RustSec alerts (actix-http, libsqlite3-sys) (#235) ([#235](https://github.com/mairie360/Message_API/pull/235))
+- chore(deps): update rust:1.99-trixie docker digest to 8a4e90c (#230) ([#230](https://github.com/mairie360/Message_API/pull/230))
 - chore(deps): update rust:1.99-trixie docker digest to bc2c4c2 (#229) ([#229](https://github.com/mairie360/Message_API/pull/229))
 - chore(deps): pin node.js to c86ecea (#226) ([#226](https://github.com/mairie360/Message_API/pull/226))
 - feat: MAIR-497 GDPR - Usage simulation and AI review of logs and database before prod ([#221](https://github.com/mairie360/Message_API/pull/221))
@@ -68,6 +74,7 @@ _Rien._
 <!-- release-journal-history:start -->
 | Date | Environnement | Version | Commit | Run |
 | --- | --- | --- | --- | --- |
+| 2026-11-12 11:52 UTC | dev | — | `b2d2f9e` | [run](https://github.com/mairie360/Message_API/actions/runs/43211628549) |
 | 2026-11-06 05:18 UTC | dev | — | `d810a63` | [run](https://github.com/mairie360/Message_API/actions/runs/42166863876) |
 | 2026-11-05 02:04 UTC | dev | — | `4b06970` | [run](https://github.com/mairie360/Message_API/actions/runs/41951797525) |
 | 2026-11-04 18:29 UTC | dev | — | `9cc1a61` | [run](https://github.com/mairie360/Message_API/actions/runs/41883197579) |
