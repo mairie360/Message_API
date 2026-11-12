@@ -103,7 +103,7 @@ async fn trigger_get_chat_users(
             description = "`chat_id` is not an integer, `limit` not between 1 and 100, or `offset` not between 0 and 2147483647.",
             body = String,
             content_type = "text/plain",
-            example = json!("Path deserialize error: can not parse `abc` to a u64")
+            example = json!("Invalid path: ids are integers.")
         ),
         (
             status = 401,
