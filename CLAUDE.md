@@ -427,8 +427,7 @@ character. `docker-compose.yml` supplies them for the dev stack (app on
 
 `.github/workflows/cicd.yml` just calls the reusable `mairie360/CICD` workflow (runs
 fmt/clippy/tests, the three `*_test.sh` stacks run against the published `dev-<sha>` image through `IMAGE_REF`, builds & publishes the image as `message-api`).
-Releases use **semantic-release with Angular commit conventions** (`.releaserc.json` /
-`release.config.js`): `feat:` → minor, `fix:`/`chore:`/`perf:` → patch, breaking → major.
+Releases use **semantic-release with Angular commit conventions** (`.releaserc.json`): `feat:` → minor, `fix:`/`chore:`/`perf:` → patch, breaking → major.
 
 Kept in sync with `API_template` (MAIR-427): `cicd.yml` passes only the secrets the reusable workflow declares
 (`CODECOV_TOKEN`, `N8N_WEBHOOK_SECRET`, no `secrets: inherit`) and Renovate bumps the `uses:` tag and `cicd_version`
