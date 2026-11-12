@@ -106,7 +106,7 @@ reaches the API. The compose files require them (`${VAR:?}`); newman gets its to
 sandbox cannot sign EdDSA), k6 a JSON file of tokens mounted at `/tokens.json` (k6 cannot sign Ed25519 either). No
 key or token valid anywhere is committed. The dev stack defaults `JWT_PUBLIC_KEY` to the lib's test public key with
 `JWT_ALLOW_WEAK_SECRET=true` (dev only); sign a dev token in a subshell with the lib's test key:
-`(export JWT_PRIVATE_KEY="$(openssl pkey -inform DER -in ~/.cargo/registry/src/*/mairie360_api_lib-4.3.0/src/test_setup/fixtures/session_test_key.der)"; export JWT_PUBLIC_KEY="$(printf '%s\n' "$JWT_PRIVATE_KEY" | openssl pkey -pubout)"; source ./test_secrets.sh && sign_jwt 1 admin 3600)`.
+`(export JWT_PRIVATE_KEY="$(openssl pkey -inform DER -in ~/.cargo/registry/src/*/mairie360_api_lib-4.3.1/src/test_setup/fixtures/session_test_key.der)"; export JWT_PUBLIC_KEY="$(printf '%s\n' "$JWT_PRIVATE_KEY" | openssl pkey -pubout)"; source ./test_secrets.sh && sign_jwt 1 admin 3600)`.
 
 The ZAP scan is authenticated: `security-scan` injects `ADMIN_JWT` on every request, waits for the `seeder`
 service (`init-test.sql`: plain `User` accounts 2 and 3, user 1 is the Admin created by liquibase) and fails on any
