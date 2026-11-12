@@ -1,12 +1,12 @@
 # Journal des releases — Message_API
 
-<!-- release-journal-state {"dev": "b71b66c8994b824cfed1712dc602194fc6e94a17", "prod": "71dd8d10cc668813b5012bb27c9aefc962ba30d9", "prod_tag": "v2.1.0", "staging": "71dd8d10cc668813b5012bb27c9aefc962ba30d9", "updated": {"dev": "2026-11-12 12:58 UTC", "prod": "2026-10-21 09:10 UTC", "staging": "2026-10-21 03:20 UTC"}} -->
+<!-- release-journal-state {"dev": "b71b66c8994b824cfed1712dc602194fc6e94a17", "prod": "71dd8d10cc668813b5012bb27c9aefc962ba30d9", "prod_tag": "v2.1.0", "staging": "b71b66c8994b824cfed1712dc602194fc6e94a17", "updated": {"dev": "2026-11-12 12:58 UTC", "prod": "2026-10-21 09:10 UTC", "staging": "2026-11-12 18:52 UTC"}} -->
 > Tenu à jour par la CI (`mairie360/CICD`, action `release/release-journal`) à chaque passage en dev, staging et prod. Ne pas modifier à la main : le fichier est réécrit au passage suivant.
 
 | Environnement | Version | Commit | Mis à jour |
 | --- | --- | --- | --- |
 | prod | v2.1.0 | `71dd8d1` | 2026-10-21 09:10 UTC |
-| staging | — | `71dd8d1` | 2026-10-21 03:20 UTC |
+| staging | — | `b71b66c` | 2026-11-12 18:52 UTC |
 | dev | — | `b71b66c` | 2026-11-12 12:58 UTC |
 
 ## Ajouté sur main depuis la dernière release prod (v2.1.0)
@@ -39,6 +39,10 @@
 
 ## Différence dev → staging (en dev, pas encore en staging)
 
+_Rien._
+
+## Différence staging → prod (en staging, pas encore en prod)
+
 - fix: MAIR-262 Integration tests - API functional tests, BFF business tests and regression tests (#236) ([#236](https://github.com/mairie360/Message_API/pull/236))
 - chore(deps): update gcr.io/distroless/cc-debian13:nonroot docker digest to cc66d22 (#231) ([#231](https://github.com/mairie360/Message_API/pull/231))
 - fix(deps): MAIR-740 APIs: fix the cargo audit RustSec alerts (actix-http, libsqlite3-sys) (#235) ([#235](https://github.com/mairie360/Message_API/pull/235))
@@ -65,10 +69,6 @@
 - ci: MAIR-612 Release prod: align internal versions and deploy (#200) ([#200](https://github.com/mairie360/Message_API/pull/200))
 - ci: MAIR-612 Release prod: align internal versions and deploy (#198) ([#198](https://github.com/mairie360/Message_API/pull/198))
 
-## Différence staging → prod (en staging, pas encore en prod)
-
-_Rien._
-
 > Résumé Claude indisponible pour ce passage : listes brutes des commits.
 
 ## Historique des passages
@@ -76,6 +76,7 @@ _Rien._
 <!-- release-journal-history:start -->
 | Date | Environnement | Version | Commit | Run |
 | --- | --- | --- | --- | --- |
+| 2026-11-12 18:52 UTC | staging | — | `b71b66c` | [run](https://github.com/mairie360/Message_API/actions/runs/43282717597) |
 | 2026-11-12 12:58 UTC | dev | — | `b71b66c` | [run](https://github.com/mairie360/Message_API/actions/runs/43220703802) |
 | 2026-11-12 11:52 UTC | dev | — | `b2d2f9e` | [run](https://github.com/mairie360/Message_API/actions/runs/43211628549) |
 | 2026-11-06 05:18 UTC | dev | — | `d810a63` | [run](https://github.com/mairie360/Message_API/actions/runs/42166863876) |
