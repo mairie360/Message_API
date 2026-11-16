@@ -118,6 +118,9 @@ services:
       # runners' tokens with it: no key or token is committed.
       JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:?JWT_PUBLIC_KEY must be set, run the matching *_test.sh script}
       JWT_TIMEOUT: 3600
+      # Serves /api-docs/openapi.json, read by the collection's contract checks (MAIR-262). Off on
+      # the deployed instances (MAIR-424): tests/endpoints/docs.rs checks the 404 without it.
+      SWAGGER_ENABLED: "true"
     depends_on:
       seeder:
         condition: service_completed_successfully

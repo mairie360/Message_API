@@ -310,7 +310,7 @@ async fn ids_from_another_chat_are_refused() {
     let (_, message_b, _) = seeded_chat!(app, author, other);
 
     // The author of `message_b` is a member of both chats: only the chat of the path counts.
-    let (status, _) = send!(
+    let (status, body) = send!(
         app,
         request(
             Method::PATCH,
@@ -319,8 +319,9 @@ async fn ids_from_another_chat_are_refused() {
         )
         .set_json(json!({ "content": "Mauvaise conversation" }))
     );
-    // Documented as `400 Unknown event.` for an unknown message of the chat.
+    // `400` for a message that is not one of the chat; the body said `Unknown event.` (MAIR-262).
     assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body, "Unknown message.");
     let (status, _) = send!(
         app,
         request(
