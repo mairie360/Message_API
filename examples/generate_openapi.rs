@@ -9,6 +9,6 @@ fn main() {
     // Si vous avez la feature "yaml" dans Cargo.toml :
     match doc.to_json() {
         Ok(yaml) => println!("{}", yaml),
-        Err(err) => eprintln!("Erreur lors de la génération du YAML : {}", err),
+        Err(err) => eprintln!("Failed to generate the OpenAPI YAML: {}", err),
     }
 }
