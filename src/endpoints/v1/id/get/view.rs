@@ -422,7 +422,7 @@ mod tests {
     fn chat() -> ChatView {
         ChatView::new(
             5,
-            "Service urbanisme".to_string(),
+            "Urban planning department".to_string(),
             ChatKind::Group,
             None,
             8,

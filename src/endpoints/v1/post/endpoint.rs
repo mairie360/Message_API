@@ -112,7 +112,7 @@ async fn trigger_create_chat(
         content = CreateChatView,
         description = "Title of the chat and Core API ids of its other members.",
         example = json!({
-            "name": "Service urbanisme",
+            "name": "Urban planning department",
             "members": [42, 51]
         })
     ),

@@ -145,7 +145,7 @@ async fn trigger_get_chat(
             description = "The chat and one page of its messages: the history oldest first, or (with `since`) the changes after the cursor in change order, tombstones included.",
             body = GetChatResultView,
             example = json!({
-                "chat": { "id": 5, "name": "Service urbanisme", "kind": "group", "contact_id": null, "member_count": 8, "unread_count": 3, "last_activity_at": "2026-09-16T09:14:30.105822Z" },
+                "chat": { "id": 5, "name": "Urban planning department", "kind": "group", "contact_id": null, "member_count": 8, "unread_count": 3, "last_activity_at": "2026-09-16T09:14:30.105822Z" },
                 "messages": [
                     {
                         "id": 117,
