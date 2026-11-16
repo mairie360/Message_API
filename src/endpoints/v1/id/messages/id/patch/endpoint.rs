@@ -136,7 +136,7 @@ async fn trigger_patch_message(
     request_body(
         content = PatchMessageView,
         description = "New content of the message, which replaces the old one entirely.",
-        example = json!({ "content": "La réunion est finalement décalée à 16h." })
+        example = json!({ "content": "The meeting is finally moved to 4 pm." })
     ),
     security(
         ("jwt" = [])

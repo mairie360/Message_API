@@ -2,14 +2,14 @@ use crate::endpoints::validation::{
     check_description, Validate, ValidationError, MAX_MESSAGE_LENGTH,
 };
 
-/// Nouveau contenu d'un message, qui remplace entièrement l'ancien.
+/// New content of a message, which replaces the old one entirely.
 #[derive(Debug, serde::Deserialize, utoipa::ToSchema)]
 pub struct PatchMessageView {
-    /// Nouveau contenu, qui remplace intégralement l'ancien. Obligatoire.
+    /// New content, which replaces the old one entirely. Required.
     #[schema(
         min_length = 1,
         max_length = 5000,
-        example = "La réunion est finalement décalée à 16h."
+        example = "The meeting is finally moved to 4 pm."
     )]
     content: String,
 }

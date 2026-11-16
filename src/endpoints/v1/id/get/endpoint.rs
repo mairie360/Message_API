@@ -149,7 +149,7 @@ async fn trigger_get_chat(
                 "messages": [
                     {
                         "id": 117,
-                        "content": "Quelqu'un a des nouvelles du permis de construire de la rue Pasteur ?",
+                        "content": "Any news about the building permit for rue Pasteur?",
                         "sender_id": 51,
                         "created_at": "2026-09-16T09:05:00Z",
                         "citation": null,
@@ -160,11 +160,11 @@ async fn trigger_get_chat(
                     },
                     {
                         "id": 118,
-                        "content": "La réunion est décalée à 15h.",
+                        "content": "The meeting is moved to 3 pm.",
                         "sender_id": 42,
                         "created_at": "2026-09-16T09:12:00Z",
                         "citation": 117,
-                        "quoted": { "id": 117, "sender_id": 51, "excerpt": "Quelqu'un a des nouvelles du permis de construire de la rue Pasteur ?" },
+                        "quoted": { "id": 117, "sender_id": 51, "excerpt": "Any news about the building permit for rue Pasteur?" },
                         "edited_at": "2026-09-16T09:14:30.105822Z",
                         "updated_at": "2026-09-16T09:14:30.105822Z",
                         "deleted": false

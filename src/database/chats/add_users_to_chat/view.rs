@@ -10,8 +10,8 @@ pub struct AddMembersToChatQueryView {
 
 impl AddMembersToChatQueryView {
     pub fn new(chat_id: u64, user_id: Vec<u64>) -> Self {
-        // `QueryParam` ne connaît pas les tableaux : on passe la liste des
-        // identifiants sous forme de chaîne "1,2,3" que Postgres reconvertit en
+        // `QueryParam` has no array variant: the ids are passed as a "1,2,3"
+        // string that Postgres converts back to
         // `integer[]` via `string_to_array`.
         let csv = user_id
             .iter()
@@ -54,7 +54,7 @@ impl Display for AddMembersToChatQueryView {
 
 impl ApiRequestDto for AddMembersToChatQueryView {
     fn query_sql(&self) -> &'static str {
-        // $1 = chat_id, $2 = liste des user_ids au format "1,2,3"
+        // $1 = chat_id, $2 = the user_ids as "1,2,3"
         "INSERT INTO conversation_members (conversation_id, user_id)
          SELECT $1, unnest(string_to_array($2, ','))::integer"
     }

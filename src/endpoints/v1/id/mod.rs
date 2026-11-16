@@ -6,11 +6,11 @@ pub mod messages;
 pub mod read;
 pub mod users;
 
-/// Paramètres de chemin des routes d'une conversation.
+/// Path parameters of the routes of a conversation.
 #[derive(serde::Deserialize, utoipa::IntoParams, utoipa::ToSchema)]
 #[into_params(parameter_in = Path)]
 pub struct ChatPathParams {
-    /// Identifiant de la conversation.
+    /// Id of the conversation.
     #[param(example = 5)]
     #[schema(example = 5)]
     chat_id: u64,

@@ -1,15 +1,15 @@
 pub mod delete;
 pub mod doc;
 
-/// Paramètres de chemin des routes d'un participant.
+/// Path parameters of the routes of a participant.
 #[derive(serde::Deserialize, utoipa::IntoParams, utoipa::ToSchema)]
 #[into_params(parameter_in = Path)]
 pub struct UsersPathParams {
-    /// Identifiant de la conversation.
+    /// Id of the conversation.
     #[param(example = 5)]
     #[schema(example = 5)]
     chat_id: u64,
-    /// Identifiant Core API du participant.
+    /// Core API id of the participant.
     #[param(example = 42)]
     #[schema(example = 42)]
     user_id: u64,

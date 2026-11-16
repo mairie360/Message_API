@@ -2,15 +2,15 @@ pub mod delete;
 pub mod doc;
 pub mod patch;
 
-/// Paramètres de chemin des routes d'un message.
+/// Path parameters of the routes of a message.
 #[derive(serde::Deserialize, utoipa::IntoParams, utoipa::ToSchema)]
 #[into_params(parameter_in = Path)]
 pub struct MessagePathParams {
-    /// Identifiant de la conversation.
+    /// Id of the conversation.
     #[param(example = 5)]
     #[schema(example = 5)]
     chat_id: u64,
-    /// Identifiant du message, dans la conversation du chemin.
+    /// Id of the message, in the conversation of the path.
     #[param(example = 118)]
     #[schema(example = 118)]
     message_id: u64,
