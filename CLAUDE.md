@@ -53,7 +53,7 @@ and `lists.rs` checks the production quota of `rate_limit_from_env()` (`429` pas
 least 1 s).
 They are plain `#[tokio::test]` + `#[serial]` (`serial_test`) and use `mairie360_api_lib`'s
 `get_shared_db()`, which spins up **real Docker containers via testcontainers** —
-`ghcr.io/mairie360/database:dev-949384c` (pinned in `.cargo/config.toml` through `TEST_DB_VERSION`, which overrides the lib default) plus a Liquibase
+`ghcr.io/mairie360/database:3.4.0` (pinned in `.cargo/config.toml` through `TEST_DB_VERSION`, which overrides the lib default) plus a Liquibase
 migration container, with Postgres published on a random host port (tests must still stay
 `#[serial]`). A running Docker daemon and pull access to `ghcr.io/mairie360/*` are required.
 
@@ -242,7 +242,7 @@ which lives in `Devops/Database` (`releases/v1.5.0` + `repeatable/messages/`): i
 when the id belongs to another chat. Sends and acknowledgements of one conversation are serialized by a transaction advisory
 lock taken by a `BEFORE INSERT` trigger on `messages`, which also draws the message id after the lock so a single cursor is
 sound. **This API needs a Database image that ships that release, `releases/v1.8.0`** (MAIR-394: `created_by`,
-`reply_to_id`, `messaging_moderation_log`) **and `releases/v1.9.0`** (MAIR-478: direct chat pair) **and `releases/v3.1.0`** (MAIR-524: change tracking) **and the MAIR-556 role passwords** (`dev-949384c`): the compose files and
+`reply_to_id`, `messaging_moderation_log`) **and `releases/v1.9.0`** (MAIR-478: direct chat pair) **and `releases/v3.1.0`** (MAIR-524: change tracking) **and the MAIR-556 role passwords** (`3.4.0`): the compose files and
 `TEST_DB_VERSION` in `.cargo/config.toml` pin it, and both have to be bumped together when a newer Database image is
 needed. To try an unmerged Database branch, build `ghcr.io/mairie360/database:<tag>` and `…/liquibase-migrations:<tag>`
 from `Devops/Database` and run `TEST_DB_VERSION=<tag> cargo test`.
