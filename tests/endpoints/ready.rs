@@ -6,7 +6,6 @@ use actix_web::http::{Method, StatusCode};
 use mairie360_api_lib::state::AppState;
 use mairie360_api_lib::test_setup::redis_setup::start_redis_container;
 use message_api::endpoints::{health, ready};
-use serial_test::serial;
 
 use super::harness::request;
 use crate::common::{get_smart_db, message_db_url, smart_db_at};
@@ -24,7 +23,6 @@ macro_rules! probe_app {
 }
 
 #[actix_web::test]
-#[serial]
 async fn ready_answers_200_when_postgres_and_redis_answer() {
     let (_redis, redis) = start_redis_container().await;
     let app = probe_app!(AppState::new(redis.url.clone(), message_db_url().await).await);
@@ -38,7 +36,6 @@ async fn ready_answers_200_when_postgres_and_redis_answer() {
 }
 
 #[actix_web::test]
-#[serial]
 async fn ready_answers_503_naming_the_dependency_down() {
     // Nothing listens on port 1.
     let app =
@@ -57,7 +54,6 @@ async fn ready_answers_503_naming_the_dependency_down() {
 }
 
 #[actix_web::test]
-#[serial]
 async fn startup_gives_up_on_an_unreachable_database() {
     let db = smart_db_at("postgres://user:password@127.0.0.1:1/none").await;
     let result = ready::wait_for_postgres(&db, Duration::from_secs(1)).await;

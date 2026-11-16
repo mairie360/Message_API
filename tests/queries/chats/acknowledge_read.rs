@@ -11,7 +11,6 @@ use message_api::database::chats::{
     get_chats::view::{GetChatsQueryResultView, GetChatsQueryView},
     remove_user_from_chat::view::RemoveMemberFromChatQueryView,
 };
-use serial_test::serial;
 use std::fmt::Display;
 
 /// Highest message id of a chat.
@@ -119,7 +118,6 @@ async fn listed_unread(db: &SmartDatabase, chat_id: u64, user_id: u64) -> i32 {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_acknowledge_read_only_clears_up_to_the_cursor() {
     let db = get_smart_db().await;
     let fixtures = get_fixture_db().await;
@@ -145,7 +143,6 @@ async fn test_acknowledge_read_only_clears_up_to_the_cursor() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_stale_acknowledgement_cannot_clear_a_new_message() {
     let db = get_smart_db().await;
     let fixtures = get_fixture_db().await;
@@ -178,7 +175,6 @@ async fn test_stale_acknowledgement_cannot_clear_a_new_message() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_acknowledge_read_refuses_a_message_of_another_chat() {
     let db = get_smart_db().await;
     let fixtures = get_fixture_db().await;
@@ -206,7 +202,6 @@ async fn test_acknowledge_read_refuses_a_message_of_another_chat() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_acknowledge_read_never_counts_own_or_removed_members() {
     let db = get_smart_db().await;
     let fixtures = get_fixture_db().await;
@@ -230,7 +225,6 @@ async fn test_acknowledge_read_never_counts_own_or_removed_members() {
 // message posted after the cursor (the counter must stay equal to what the cursor implies), and
 // once the traffic stops one last acknowledgement clears everything.
 #[tokio::test]
-#[serial]
 async fn test_acknowledge_read_races_with_new_messages() {
     let db = get_smart_db().await;
     let fixtures = get_fixture_db().await;

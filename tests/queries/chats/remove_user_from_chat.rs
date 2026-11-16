@@ -3,10 +3,8 @@ use message_api::database::chats::{
     add_users_to_chat::view::AddMembersToChatQueryView, create_chat::view::CreateChatQueryView,
     remove_user_from_chat::view::RemoveMemberFromChatQueryView,
 };
-use serial_test::serial;
 
 #[tokio::test]
-#[serial]
 async fn test_remove_user_from_chat_success() {
     let db = get_smart_db().await;
 
@@ -23,7 +21,6 @@ async fn test_remove_user_from_chat_success() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_remove_user_from_chat_success_unknow_chat() {
     let db = get_smart_db().await;
 
@@ -34,7 +31,6 @@ async fn test_remove_user_from_chat_success_unknow_chat() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_remove_user_from_chat_success_unknow_user() {
     let db = get_smart_db().await;
 
@@ -49,7 +45,6 @@ async fn test_remove_user_from_chat_success_unknow_user() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_remove_user_from_chat_success_unknow_user_and_chat() {
     let db = get_smart_db().await;
 

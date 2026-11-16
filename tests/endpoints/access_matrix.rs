@@ -14,7 +14,6 @@ use mairie360_api_lib::smart_db::SmartDatabase;
 use message_api::endpoints::swagger::ApiDoc;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use serial_test::serial;
 use utoipa::OpenApi;
 
 use super::harness::{admin_id, request as as_caller, states};
@@ -238,7 +237,6 @@ fn request(
 }
 
 #[actix_web::test]
-#[serial]
 async fn every_role_and_relation_gets_what_the_matrix_says() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);

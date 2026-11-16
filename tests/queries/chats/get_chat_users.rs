@@ -3,10 +3,8 @@ use message_api::database::chats::{
     add_users_to_chat::view::AddMembersToChatQueryView, create_chat::view::CreateChatQueryView,
     get_chat_users::view::GetChatMembersQueryView,
 };
-use serial_test::serial;
 
 #[tokio::test]
-#[serial]
 async fn test_get_chat_members_success() {
     let db = get_smart_db().await;
 
@@ -24,7 +22,6 @@ async fn test_get_chat_members_success() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_get_chat_members_success_unknow_chat() {
     let db = get_smart_db().await;
 
@@ -36,7 +33,6 @@ async fn test_get_chat_members_success_unknow_chat() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_get_chat_members_skips_excluded_members() {
     let db = get_smart_db().await;
     let fixtures = get_fixture_db().await;

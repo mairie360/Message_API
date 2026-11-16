@@ -2,10 +2,8 @@ use crate::common::get_smart_db;
 use message_api::database::chats::{
     add_users_to_chat::view::AddMembersToChatQueryView, create_chat::view::CreateChatQueryView,
 };
-use serial_test::serial;
 
 #[tokio::test]
-#[serial]
 async fn test_add_user_to_chat_success() {
     let db = get_smart_db().await;
 
@@ -20,7 +18,6 @@ async fn test_add_user_to_chat_success() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_add_user_to_chat_success_unknow_chat() {
     let db = get_smart_db().await;
 

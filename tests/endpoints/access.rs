@@ -2,13 +2,11 @@
 
 use actix_web::http::{Method, StatusCode};
 use serde_json::json;
-use serial_test::serial;
 
 use super::harness::{admin_id, request, states};
 use crate::common::{get_fixture_db, plain_user};
 
 #[actix_web::test]
-#[serial]
 async fn every_api_route_requires_a_valid_jwt() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
@@ -62,7 +60,6 @@ macro_rules! seeded_chat {
 }
 
 #[actix_web::test]
-#[serial]
 async fn outsiders_get_the_same_404_as_for_an_unknown_chat() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
@@ -141,7 +138,6 @@ async fn outsiders_get_the_same_404_as_for_an_unknown_chat() {
 }
 
 #[actix_web::test]
-#[serial]
 async fn url_encoded_chat_id_is_checked_like_the_plain_one() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
@@ -172,7 +168,6 @@ async fn url_encoded_chat_id_is_checked_like_the_plain_one() {
 }
 
 #[actix_web::test]
-#[serial]
 async fn members_only_manage_themselves_and_their_own_messages() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
@@ -260,7 +255,6 @@ async fn members_only_manage_themselves_and_their_own_messages() {
 }
 
 #[actix_web::test]
-#[serial]
 async fn administrators_moderate_but_do_not_take_part() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
@@ -300,7 +294,6 @@ async fn administrators_moderate_but_do_not_take_part() {
 }
 
 #[actix_web::test]
-#[serial]
 async fn ids_from_another_chat_are_refused() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
@@ -354,7 +347,6 @@ async fn ids_from_another_chat_are_refused() {
 }
 
 #[actix_web::test]
-#[serial]
 async fn invalid_bodies_are_refused_before_any_write() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
@@ -423,7 +415,6 @@ async fn invalid_bodies_are_refused_before_any_write() {
 /// MAIR-422: `as i32` wrapped `chat + 2^32` around to `chat`, so a member could reach their chat
 /// through an alias. Out-of-range ids now saturate and match no row.
 #[actix_web::test]
-#[serial]
 async fn out_of_range_ids_do_not_alias_another_row() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
@@ -470,7 +461,6 @@ async fn out_of_range_ids_do_not_alias_another_row() {
 
 /// MAIR-478: the participants of a direct chat never change, and its creator does not own it.
 #[actix_web::test]
-#[serial]
 async fn direct_chat_keeps_its_two_participants() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
@@ -519,7 +509,6 @@ async fn direct_chat_keeps_its_two_participants() {
 }
 
 #[actix_web::test]
-#[serial]
 async fn direct_chat_needs_another_known_agent() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);

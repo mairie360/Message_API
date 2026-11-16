@@ -2,13 +2,11 @@
 
 use actix_web::http::{Method, StatusCode};
 use serde_json::json;
-use serial_test::serial;
 
 use super::harness::{admin_id, request, states};
 use crate::common::{get_fixture_db, grant_chat_delete, plain_user};
 
 #[actix_web::test]
-#[serial]
 async fn chat_lifecycle_through_every_route() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
@@ -165,7 +163,6 @@ async fn chat_lifecycle_through_every_route() {
 }
 
 #[actix_web::test]
-#[serial]
 async fn last_member_leaving_deletes_the_chat() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
@@ -198,7 +195,6 @@ async fn last_member_leaving_deletes_the_chat() {
 }
 
 #[actix_web::test]
-#[serial]
 async fn stream_opens_an_event_stream() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
@@ -222,7 +218,6 @@ async fn stream_opens_an_event_stream() {
 /// MAIR-561: the stream sends its first bytes at once, not with the first ping 15 s later, so the
 /// head of the response reaches the client (and the BFF) immediately.
 #[actix_web::test]
-#[serial]
 async fn stream_sends_its_first_bytes_within_a_second() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
@@ -252,7 +247,6 @@ async fn stream_sends_its_first_bytes_within_a_second() {
 /// MAIR-426: `<` and `>` are ordinary characters, stored and served back as sent (JSON with
 /// `nosniff`, escaping is the fronts' job).
 #[actix_web::test]
-#[serial]
 async fn angle_brackets_are_accepted_in_free_text() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
@@ -309,7 +303,6 @@ macro_rules! listed {
 
 /// MAIR-478: one direct chat per pair; hiding it keeps the contact, a message shows it again.
 #[actix_web::test]
-#[serial]
 async fn direct_chat_is_reused_and_shown_again_by_a_message() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
@@ -428,7 +421,6 @@ async fn direct_chat_is_reused_and_shown_again_by_a_message() {
 
 /// A group chat is deleted by its creator, an administrator or an agent granted the right.
 #[actix_web::test]
-#[serial]
 async fn group_chat_is_deleted_by_its_creator_or_an_agent_granted_the_right() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);

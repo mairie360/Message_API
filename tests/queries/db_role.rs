@@ -3,7 +3,6 @@
 //! would pass here.
 
 use crate::common::{get_smart_db, RawQuery};
-use serial_test::serial;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct CurrentRole {
@@ -12,7 +11,6 @@ struct CurrentRole {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_mair_556_the_code_under_test_runs_as_message_api() {
     let db = get_smart_db().await;
 
@@ -30,7 +28,6 @@ async fn test_mair_556_the_code_under_test_runs_as_message_api() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_mair_556_message_api_is_held_to_its_grants() {
     // Message never reads the sessions of Core: the grants refuse it, as in staging.
     let db = get_smart_db().await;

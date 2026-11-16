@@ -11,7 +11,6 @@ use message_api::database::chats::{
     message_owner::view::MessageOwnerQueryView,
     remove_user_from_chat::view::RemoveMemberFromChatQueryView,
 };
-use serial_test::serial;
 
 async fn chat_with(db: &SmartDatabase, members: Vec<u64>) -> u64 {
     let chat_id = db
@@ -31,7 +30,6 @@ async fn access(db: &SmartDatabase, chat_id: u64, user_id: u64) -> ChatAccess {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_chat_access_tells_members_outsiders_and_admins_apart() {
     let db = get_smart_db().await;
     let fixtures = get_fixture_db().await;
@@ -54,7 +52,6 @@ async fn test_chat_access_tells_members_outsiders_and_admins_apart() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_chat_access_on_an_unknown_chat() {
     let db = get_smart_db().await;
     let fixtures = get_fixture_db().await;
@@ -65,7 +62,6 @@ async fn test_chat_access_on_an_unknown_chat() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_message_owner_is_scoped_to_the_chat() {
     let db = get_smart_db().await;
     let fixtures = get_fixture_db().await;
@@ -93,7 +89,6 @@ async fn test_message_owner_is_scoped_to_the_chat() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_chat_is_deleted_with_its_last_member() {
     let db = get_smart_db().await;
     let fixtures = get_fixture_db().await;
@@ -119,7 +114,6 @@ async fn test_chat_is_deleted_with_its_last_member() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_chat_access_tells_the_creator_apart() {
     let db = get_smart_db().await;
     let fixtures = get_fixture_db().await;
@@ -147,7 +141,6 @@ async fn test_chat_access_tells_the_creator_apart() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_locking_access_answers_like_the_plain_one() {
     let db = get_smart_db().await;
     let fixtures = get_fixture_db().await;
@@ -199,7 +192,6 @@ async fn test_locking_access_answers_like_the_plain_one() {
 /// MAIR-420: a write checks access and writes in one transaction; until it ends, the member it
 /// checked cannot be removed (no post from a member already gone).
 #[tokio::test]
-#[serial]
 async fn test_locking_access_holds_the_membership_until_the_write_ends() {
     let db = get_smart_db().await;
     let fixtures = get_fixture_db().await;

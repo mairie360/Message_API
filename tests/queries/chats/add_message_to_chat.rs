@@ -4,10 +4,8 @@ use mairie360_api_lib::error::ApiLibError;
 use message_api::database::chats::{
     add_message_to_chat::view::PostMessageInChatQueryView, create_chat::view::CreateChatQueryView,
 };
-use serial_test::serial;
 
 #[tokio::test]
-#[serial]
 async fn test_add_message_to_chat_success() {
     let db = get_smart_db().await;
 
@@ -23,7 +21,6 @@ async fn test_add_message_to_chat_success() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_add_message_to_chat_unknown_chat() {
     let db = get_smart_db().await;
 
@@ -34,7 +31,6 @@ async fn test_add_message_to_chat_unknown_chat() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_add_message_to_chat_unknown_sender() {
     let db = get_smart_db().await;
 
@@ -49,7 +45,6 @@ async fn test_add_message_to_chat_unknown_sender() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_add_message_to_chat_unknown_sender_and_chat() {
     let db = get_smart_db().await;
 
@@ -60,7 +55,6 @@ async fn test_add_message_to_chat_unknown_sender_and_chat() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_add_message_cannot_quote_a_message_of_another_chat() {
     let db = get_smart_db().await;
 

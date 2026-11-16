@@ -15,7 +15,6 @@ use mairie360_api_lib::logging::telemetry::opentelemetry_sdk::trace::{
 };
 use mairie360_api_lib::logging::telemetry::{trace_layer, tracer_provider, TracingLogger};
 use mairie360_api_lib::request_log::{hide_query, restore_query, RedactedRootSpanBuilder};
-use serial_test::serial;
 use tracing::subscriber::DefaultGuard;
 use tracing_subscriber::layer::SubscriberExt;
 
@@ -74,7 +73,6 @@ fn attribute<'a>(span: &'a SpanData, key: &str) -> Option<&'a Value> {
 }
 
 #[actix_web::test]
-#[serial]
 async fn a_request_is_exported_as_a_span_with_its_sql() {
     let (exporter, provider, _guard) = in_memory_tracing();
     let (state, sse) = states().await;
@@ -127,7 +125,6 @@ async fn a_request_is_exported_as_a_span_with_its_sql() {
 }
 
 #[actix_web::test]
-#[serial]
 async fn a_refused_request_still_gets_its_span() {
     let (exporter, provider, _guard) = in_memory_tracing();
     let (state, sse) = states().await;
@@ -145,7 +142,6 @@ async fn a_refused_request_still_gets_its_span() {
 /// MAIR-290: a refused body is described by its type in the request span, never by the value it
 /// held (`TracingLogger::default()` recorded the error `Debug`, where serde quotes the value).
 #[actix_web::test]
-#[serial]
 async fn mair_290_the_span_of_a_refused_body_holds_no_value_of_the_request() {
     const MARKER: &str = "gdpr.marker@example.com";
     let (exporter, provider, _guard) = in_memory_tracing();

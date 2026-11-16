@@ -11,7 +11,6 @@ use message_api::database::chats::{
 };
 use message_api::sse::event_manager::{listen, start_internal_event_listener};
 use message_api::sse::state::{AppState, ChatEvent};
-use serial_test::serial;
 use tokio::sync::{broadcast, mpsc};
 
 use crate::common::get_smart_db;
@@ -35,7 +34,6 @@ async fn spawn_listener() -> (Arc<AppState>, broadcast::Sender<ChatEvent>) {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_event_manager_notifies_online_members_except_sender() {
     let db = get_smart_db().await;
 
@@ -82,7 +80,6 @@ async fn test_event_manager_notifies_online_members_except_sender() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_event_manager_ignores_unknown_chat() {
     let (state, bus_tx) = spawn_listener().await;
 
@@ -101,7 +98,6 @@ async fn test_event_manager_ignores_unknown_chat() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_event_manager_notifies_every_connection_of_a_user() {
     let db = get_smart_db().await;
 
@@ -142,7 +138,6 @@ async fn test_event_manager_notifies_every_connection_of_a_user() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_event_manager_prunes_only_closed_connections() {
     let db = get_smart_db().await;
 
@@ -175,7 +170,6 @@ async fn test_event_manager_prunes_only_closed_connections() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_event_manager_survives_a_lagged_receiver() {
     let db = get_smart_db().await;
 
@@ -228,7 +222,6 @@ async fn nothing_received(rx: &mut mpsc::Receiver<Result<Bytes, String>>) -> boo
 }
 
 #[tokio::test]
-#[serial]
 async fn test_mair_524_edits_and_deletions_reach_the_members_but_the_actor() {
     let db = get_smart_db().await;
     let chat_id = db
@@ -272,7 +265,6 @@ async fn test_mair_524_edits_and_deletions_reach_the_members_but_the_actor() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_mair_524_a_read_acknowledgement_only_reaches_the_reader() {
     let db = get_smart_db().await;
     let chat_id = db

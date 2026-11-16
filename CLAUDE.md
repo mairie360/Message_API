@@ -51,11 +51,10 @@ whatever its secret, an EdDSA token signed with another key under Core's `kid` o
 expired token, `alg: none`, a swapped payload or an asymmetric algorithm; `404` for an unknown or archived account),
 and `lists.rs` checks the production quota of `rate_limit_from_env()` (`429` past the burst, `Retry-After` of at
 least 1 s).
-They are plain `#[tokio::test]` + `#[serial]` (`serial_test`) and use `mairie360_api_lib`'s
+They are plain `#[tokio::test]` and use `mairie360_api_lib`'s
 `get_shared_db()`, which spins up **real Docker containers via testcontainers** —
 `ghcr.io/mairie360/database:3.4.0` (pinned in `.cargo/config.toml` through `TEST_DB_VERSION`, which overrides the lib default) plus a Liquibase
-migration container, with Postgres published on a random host port (tests must still stay
-`#[serial]`). A running Docker daemon and pull access to `ghcr.io/mairie360/*` are required.
+migration container, with Postgres published on a random host port. A running Docker daemon and pull access to `ghcr.io/mairie360/*` are required.
 
 `get_shared_db()` hands back the **superuser** URL, used by the fixtures only
 (`tests/common::get_fixture_db()`: users, ACLs, moderation log reads). Everything that runs Message's code connects
@@ -65,6 +64,16 @@ as the `message_api` role, like in staging (MAIR-556): `tests/common::get_smart_
 `permission denied` (SQLSTATE `42501`): add the grant there, never connect the code under test as the superuser.
 `tests/queries/db_role.rs` guards this. The compose stacks connect `message` as `message_api` too
 (`-Dmessage_api_password` passed to Liquibase); postgres, liquibase and the seeder keep the superuser.
+
+Tests run in parallel (MAIR-1002): there is no `#[serial]`. The tests share the seeded database of
+`get_shared_db()` and keep to rows of their own (unique markers). A test that depends on, or changes, what the
+others see (a count of rows of a table, a sequence reset, anything that reads every row) takes a database of its
+own with `mairie360_api_lib::test_setup::isolated::isolated_db()`: a copy of the seeded template (about 0.2 s),
+dropped when the guard is dropped, whose URLs are `db.url()` (superuser, fixtures) and `db.url_as("<role>")`.
+`isolated_redis()` gives a Redis client with its own key prefix on one container shared by the process. A test
+that sets a process environment variable takes a named `#[serial(<group>)]` (add the `serial_test` dev-dependency; no test needs it today). The dependencies are compiled with
+`opt-level = 3` (`[profile.dev.package."*"]`): the code of the crate stays in debug, which is what the coverage
+measures, while argon2 and the TLS stack no longer dominate the run.
 
 `tests/common::smart_db_at(db_url)` builds a `SmartDatabase` over any URL. It also
 constructs a `Redis` pointing at `localhost:6379`, but no chat `QueryView` declares a
@@ -106,7 +115,7 @@ reaches the API. The compose files require them (`${VAR:?}`); newman gets its to
 sandbox cannot sign EdDSA), k6 a JSON file of tokens mounted at `/tokens.json` (k6 cannot sign Ed25519 either). No
 key or token valid anywhere is committed. The dev stack defaults `JWT_PUBLIC_KEY` to the lib's test public key with
 `JWT_ALLOW_WEAK_SECRET=true` (dev only); sign a dev token in a subshell with the lib's test key:
-`(export JWT_PRIVATE_KEY="$(openssl pkey -inform DER -in ~/.cargo/registry/src/*/mairie360_api_lib-4.3.1/src/test_setup/fixtures/session_test_key.der)"; export JWT_PUBLIC_KEY="$(printf '%s\n' "$JWT_PRIVATE_KEY" | openssl pkey -pubout)"; source ./test_secrets.sh && sign_jwt 1 admin 3600)`.
+`(export JWT_PRIVATE_KEY="$(openssl pkey -inform DER -in ~/.cargo/registry/src/*/mairie360_api_lib-4.4.0/src/test_setup/fixtures/session_test_key.der)"; export JWT_PUBLIC_KEY="$(printf '%s\n' "$JWT_PRIVATE_KEY" | openssl pkey -pubout)"; source ./test_secrets.sh && sign_jwt 1 admin 3600)`.
 
 The ZAP scan is authenticated: `security-scan` injects `ADMIN_JWT` on every request, waits for the `seeder`
 service (`init-test.sql`: plain `User` accounts 2 and 3, user 1 is the Admin created by liquibase) and fails on any

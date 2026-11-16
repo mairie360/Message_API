@@ -8,7 +8,6 @@
 use actix_web::http::{header::CONTENT_TYPE, Method, StatusCode};
 use message_api::endpoints::swagger::ApiDoc;
 use serde_json::json;
-use serial_test::serial;
 use utoipa::OpenApi;
 
 use super::harness::{admin_id, request, states};
@@ -64,7 +63,6 @@ fn operations_with_a_path_id() -> Vec<(Method, String, Vec<String>)> {
 }
 
 #[actix_web::test]
-#[serial]
 async fn a_path_id_that_is_not_an_integer_answers_the_documented_400() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);

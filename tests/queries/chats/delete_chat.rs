@@ -2,10 +2,8 @@ use crate::common::{get_fixture_db, get_smart_db, moderation_log_count};
 use message_api::database::chats::{
     create_chat::view::CreateChatQueryView, delete_chat::view::DeleteChatQueryView,
 };
-use serial_test::serial;
 
 #[tokio::test]
-#[serial]
 async fn test_delete_chat_success() {
     let db = get_smart_db().await;
     let fixtures = get_fixture_db().await;
@@ -25,7 +23,6 @@ async fn test_delete_chat_success() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_delete_unknow_chat() {
     let db = get_smart_db().await;
     let fixtures = get_fixture_db().await;

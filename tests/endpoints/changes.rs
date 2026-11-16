@@ -4,7 +4,6 @@
 use actix_web::http::{Method, StatusCode};
 use message_api::sse::state::{ChatEvent, ChatEventKind};
 use serde_json::{json, Value};
-use serial_test::serial;
 use tokio::sync::broadcast;
 
 use super::harness::{request, states};
@@ -37,7 +36,6 @@ async fn next_event(rx: &mut broadcast::Receiver<ChatEvent>) -> Option<ChatEvent
 }
 
 #[actix_web::test]
-#[serial]
 async fn mair_524_open_chat_is_polled_from_a_cursor() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
@@ -188,7 +186,6 @@ async fn mair_524_open_chat_is_polled_from_a_cursor() {
 }
 
 #[actix_web::test]
-#[serial]
 async fn mair_524_tombstones_are_final() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
@@ -242,7 +239,6 @@ async fn mair_524_tombstones_are_final() {
 }
 
 #[actix_web::test]
-#[serial]
 async fn mair_524_since_refusals() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
@@ -303,7 +299,6 @@ async fn mair_524_since_refusals() {
 }
 
 #[actix_web::test]
-#[serial]
 async fn mair_524_chat_list_since() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
