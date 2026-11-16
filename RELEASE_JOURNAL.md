@@ -1,31 +1,36 @@
 # Journal des releases — Message_API
 
-<!-- release-journal-state {"dev": "b71b66c8994b824cfed1712dc602194fc6e94a17", "prod": "b71b66c8994b824cfed1712dc602194fc6e94a17", "prod_tag": "v2.2.0", "staging": "b71b66c8994b824cfed1712dc602194fc6e94a17", "updated": {"dev": "2026-11-12 12:58 UTC", "prod": "2026-11-12 23:53 UTC", "staging": "2026-11-12 18:52 UTC"}} -->
+<!-- release-journal-state {"dev": "f570b7e5a2cf9c0b974de91516e7de47c3ffdffe", "prod": "b71b66c8994b824cfed1712dc602194fc6e94a17", "prod_tag": "v2.2.0", "staging": "b71b66c8994b824cfed1712dc602194fc6e94a17", "updated": {"dev": "2026-11-16 16:36 UTC", "prod": "2026-11-12 23:53 UTC", "staging": "2026-11-12 18:52 UTC"}} -->
 > Tenu à jour par la CI (`mairie360/CICD`, action `release/release-journal`) à chaque passage en dev, staging et prod. Ne pas modifier à la main : le fichier est réécrit au passage suivant.
 
 | Environnement | Version | Commit | Mis à jour |
 | --- | --- | --- | --- |
 | prod | v2.2.0 | `b71b66c` | 2026-11-12 23:53 UTC |
 | staging | — | `b71b66c` | 2026-11-12 18:52 UTC |
-| dev | — | `b71b66c` | 2026-11-12 12:58 UTC |
+| dev | — | `f570b7e` | 2026-11-16 16:36 UTC |
 
 ## Ajouté sur main depuis la dernière release prod (v2.2.0)
 
-_Rien._
+- docs: MAIR-245 Rewrite the APIs' README and API.md (#234) ([#234](https://github.com/mairie360/Message_API/pull/234))
+- chore: MAIR-243 Align the test Database version on the 3.4.0 release (#240) ([#240](https://github.com/mairie360/Message_API/pull/240))
 
 ## Différence dev → staging (en dev, pas encore en staging)
 
-_Rien._
+- docs: MAIR-245 Rewrite the APIs' README and API.md (#234) ([#234](https://github.com/mairie360/Message_API/pull/234))
+- chore: MAIR-243 Align the test Database version on the 3.4.0 release (#240) ([#240](https://github.com/mairie360/Message_API/pull/240))
 
 ## Différence staging → prod (en staging, pas encore en prod)
 
 _Rien._
+
+> Résumé Claude indisponible pour ce passage : listes brutes des commits.
 
 ## Historique des passages
 
 <!-- release-journal-history:start -->
 | Date | Environnement | Version | Commit | Run |
 | --- | --- | --- | --- | --- |
+| 2026-11-16 16:36 UTC | dev | — | `f570b7e` | [run](https://github.com/mairie360/Message_API/actions/runs/43905386173) |
 | 2026-11-12 23:53 UTC | prod | v2.2.0 | `b71b66c` | [run](https://github.com/mairie360/Message_API/actions/runs/43330556457) |
 | 2026-11-12 18:52 UTC | staging | — | `b71b66c` | [run](https://github.com/mairie360/Message_API/actions/runs/43282717597) |
 | 2026-11-12 12:58 UTC | dev | — | `b71b66c` | [run](https://github.com/mairie360/Message_API/actions/runs/43220703802) |
