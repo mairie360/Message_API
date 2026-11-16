@@ -37,8 +37,8 @@ pub struct ChatView {
     #[schema(example = 5)]
     id: u64,
     /// Name to display. A group chat: its title (empty string when it has none). A direct chat: the
-    /// full name of the other participant ("Prénom Nom"), computed by the API. Never `null`.
-    #[schema(example = "Service urbanisme")]
+    /// full name of the other participant ("First Last"), computed by the API. Never `null`.
+    #[schema(example = "Urban planning department")]
     name: String,
     /// `direct` (two agents, see `contact_id`) or `group`.
     #[schema(example = "group")]
@@ -142,8 +142,8 @@ pub struct ChatListQuery {
     #[param(example = 0, minimum = 0)]
     offset: Option<u32>,
     /// Keeps the chats whose name contains this text, or in which a member other than the caller
-    /// has a first name, a last name or a full name ("Prénom Nom" or "Nom Prénom") containing it:
-    /// "autoroute" finds the chat "Projet autoroute", "Xavier Bertrand" finds the direct chat with
+    /// has a first name, a last name or a full name ("First Last" or "Last First") containing it:
+    /// "motorway" finds the chat "Motorway project", "Xavier Bertrand" finds the direct chat with
     /// him and the group chats he belongs to. Case-insensitive (accents count); surrounding
     /// spaces are ignored; at most 150 characters, no control character. The page is taken from
     /// the filtered list.

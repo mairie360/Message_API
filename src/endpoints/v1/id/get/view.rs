@@ -112,7 +112,7 @@ pub struct QuotedMessageView {
     #[schema(example = 51, nullable = true)]
     sender_id: Option<u64>,
     /// First 100 characters of the quoted message.
-    #[schema(example = "Quelqu'un a des nouvelles du permis de construire de la rue Pasteur ?")]
+    #[schema(example = "Any news about the building permit for rue Pasteur?")]
     excerpt: String,
 }
 
@@ -145,7 +145,7 @@ pub struct MessageView {
     #[schema(example = 118)]
     id: u64,
     /// Content of the message.
-    #[schema(example = "La réunion est décalée à 15h.")]
+    #[schema(example = "The meeting is moved to 3 pm.")]
     content: String,
     /// Core API id of the author; `null` once the author's account is deleted.
     #[schema(example = 42, nullable = true)]
@@ -422,7 +422,7 @@ mod tests {
     fn chat() -> ChatView {
         ChatView::new(
             5,
-            "Service urbanisme".to_string(),
+            "Urban planning department".to_string(),
             ChatKind::Group,
             None,
             8,

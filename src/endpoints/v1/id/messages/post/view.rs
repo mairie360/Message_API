@@ -13,7 +13,7 @@ pub struct PostMessageView {
     #[schema(
         min_length = 1,
         max_length = 5000,
-        example = "La réunion est décalée à 15h."
+        example = "The meeting is moved to 3 pm."
     )]
     content: String,
 }

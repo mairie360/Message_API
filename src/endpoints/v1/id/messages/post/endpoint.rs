@@ -154,7 +154,7 @@ async fn trigger_post_message(
     request_body(
         content = PostMessageView,
         description = "Content of the message and, optionally, the message it answers.",
-        example = json!({ "content": "La réunion est décalée à 15h.", "citation": 118 })
+        example = json!({ "content": "The meeting is moved to 3 pm.", "citation": 118 })
     ),
     security(
         ("jwt" = [])

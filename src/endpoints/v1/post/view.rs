@@ -13,7 +13,7 @@ pub struct CreateChatView {
     members: Vec<u64>,
     /// Title of the chat: 1 to 150 characters, or empty for a chat without a title. A direct chat
     /// is opened with `POST /api/v1/direct/`, not here.
-    #[schema(max_length = 150, example = "Service urbanisme")]
+    #[schema(max_length = 150, example = "Urban planning department")]
     name: String,
 }
 

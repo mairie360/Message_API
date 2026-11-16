@@ -76,8 +76,8 @@ async fn trigger_get_chats(
                    is the other participant, even when they hid it) from a **group** chat (`contact_id` is \
                    `null`). A chat the caller hid is not listed.\n\n\
                    **Search:** `search` keeps the chats whose name contains the text, or in which a member other \
-                   than the caller has a first name, last name or full name containing it. \"autoroute\" finds \
-                   the chat \"Projet autoroute\"; \"Xavier Bertrand\" finds the direct chat with him and the group \
+                   than the caller has a first name, last name or full name containing it. \"motorway\" finds \
+                   the chat \"Motorway project\"; \"Xavier Bertrand\" finds the direct chat with him and the group \
                    chats he belongs to. The pagination applies to the filtered list.\n\n\
                    **Incremental refresh** (MAIR-524, replaces reloading the whole list): `since` keeps the chats \
                    whose `last_activity_at` (creation, or last message posted, edited or deleted) is after it; \
@@ -92,7 +92,7 @@ async fn trigger_get_chats(
             body = GetChatsResultView,
             example = json!({
                 "chats": [
-                    { "id": 5, "name": "Service urbanisme", "kind": "group", "contact_id": null, "member_count": 8, "unread_count": 3, "last_activity_at": "2026-09-16T09:12:00.482113Z" },
+                    { "id": 5, "name": "Urban planning department", "kind": "group", "contact_id": null, "member_count": 8, "unread_count": 3, "last_activity_at": "2026-09-16T09:12:00.482113Z" },
                     { "id": 9, "name": "Xavier Bertrand", "kind": "direct", "contact_id": 42, "member_count": 2, "unread_count": 1, "last_activity_at": "2026-09-16T08:47:12.004518Z" },
                     { "id": 8, "name": "Astreinte week-end", "kind": "group", "contact_id": null, "member_count": 4, "unread_count": 0, "last_activity_at": "2026-09-12T17:30:45.913204Z" }
                 ],
