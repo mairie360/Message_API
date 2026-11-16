@@ -22,7 +22,7 @@ Required (the process panics when one is missing):
 
 | Variable | Role |
 | --- | --- |
-| `REDIS_URL` | Redis URL (cache and revocation list). Redis stays optional at runtime: the cache degrades to Postgres. |
+| `REDIS_URL` | Redis URL (cache and revocation list). The read cache degrades to Postgres without Redis, but `/ready` answers `503` while Redis is unreachable, so a readiness probe takes the API out of service. |
 | `DB_USER` / `DB_PASSWORD` | Postgres role of this API (`message_api`) and its password. |
 | `DB_HOST` / `DB_PORT` / `DB_NAME` | Postgres address and database. |
 | `HOST` / `PORT` | Listen address and port (`3003` in the dev stack). |
@@ -46,13 +46,13 @@ Optional:
 
 ## Run locally
 
-Docker and Docker Compose are enough (pulling the `ghcr.io/mairie360/*` images needs registry access):
+Docker and Docker Compose run the stack (pulling the `ghcr.io/mairie360/*` images needs registry access):
 
 ```bash
 docker compose up --watch   # Postgres + Liquibase + seeder + Redis + API (hot reload, src/ synced) + nginx
 ```
 
-The API listens on `localhost:3003`. The dev stack signs nothing: to call `/api`, sign a token with the lib's test key (see `CLAUDE.md`, "Session tokens").
+The API listens on `localhost:3003`. The dev stack signs nothing: to call `/api`, sign a token with the lib's test key, which needs OpenSSL 3 on the host and the `mairie360_api_lib` sources in the cargo registry (`cargo fetch` once); see `CLAUDE.md`, "Session tokens".
 
 Without Docker for the API itself, export the variables above (Postgres and Redis must be reachable) and run `cargo run`.
 
@@ -67,6 +67,8 @@ cargo cov_test      # llvm-cov with a 60 % line gate (only main.rs and lib.rs ex
 ./security_test.sh      # OWASP ZAP scan of the served OpenAPI spec
 ./performance_test.sh   # k6 load test (load-test.js)
 ```
+
+The three `*_test.sh` scripts source `test_secrets.sh`, which signs their tokens with OpenSSL 3: install it on the host first.
 
 The three `*_test.sh` stacks run in CI on `main` against the published `dev-<sha>` image (`IMAGE_REF`); locally they build `message-api:local` from `development.Dockerfile` when it is empty.
 
