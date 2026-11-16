@@ -2301,9 +2301,9 @@ dependencies = [
 
 [[package]]
 name = "mairie360_api_lib"
-version = "4.3.2"
+version = "4.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "477208a5b75ae995373466d38b0bf3adfdffeca26e4af51afd9694e763ec09e8"
+checksum = "e6da224aadbf85b3888ed015b9b72ddc10e3e5284f9d463617c84eebb34d5c06"
 dependencies = [
  "actix-web",
  "anyhow",
@@ -2398,7 +2398,6 @@ dependencies = [
  "redis",
  "serde",
  "serde_json",
- "serial_test",
  "testcontainers",
  "tokio",
  "tokio-stream",
@@ -3745,31 +3744,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "serial_test"
-version = "4.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6df5ed973ad8d834e09f824f9e9f449af6b9a3745f78dec7cc752770bd3bf11"
-dependencies = [
- "futures-executor",
- "futures-util",
- "log",
- "once_cell",
- "parking_lot",
- "serial_test_derive",
-]
-
-[[package]]
-name = "serial_test_derive"
-version = "4.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a22144e767da4ddd8416dbf383700542ffd8a5dc493dfecedfe1fe3ad03c98ae"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 3.0.4",
-]
-
-[[package]]
 name = "sha1"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4229,7 +4203,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",

@@ -20,7 +20,6 @@ use message_api::database::chats::{
     get_chats::view::{GetChatsQueryResultView, GetChatsQueryView},
     patch_message_in_chat::view::PatchMessageQueryView,
 };
-use serial_test::serial;
 
 async fn chat_with(db: &SmartDatabase, title: &str, members: Vec<u64>) -> u64 {
     let chat_id = db
@@ -68,7 +67,6 @@ fn ids(rows: &[Message]) -> Vec<i64> {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_mair_524_since_returns_created_edited_and_deleted_messages_in_change_order() {
     let db = get_smart_db().await;
     let fixtures = get_fixture_db().await;
@@ -107,7 +105,6 @@ async fn test_mair_524_since_returns_created_edited_and_deleted_messages_in_chan
 }
 
 #[tokio::test]
-#[serial]
 async fn test_mair_524_since_pages_through_equal_timestamps_with_the_id() {
     let db = get_smart_db().await;
     let fixtures = get_fixture_db().await;
@@ -149,7 +146,6 @@ async fn test_mair_524_since_pages_through_equal_timestamps_with_the_id() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_mair_524_since_is_scoped_to_its_chat() {
     let db = get_smart_db().await;
     let fixtures = get_fixture_db().await;
@@ -164,7 +160,6 @@ async fn test_mair_524_since_is_scoped_to_its_chat() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_mair_524_since_query_uses_the_change_index() {
     let db = get_smart_db().await;
     let fixtures = get_fixture_db().await;
@@ -196,7 +191,6 @@ async fn test_mair_524_since_query_uses_the_change_index() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_mair_524_history_skips_tombstones_and_their_quotes() {
     let db = get_smart_db().await;
     let fixtures = get_fixture_db().await;
@@ -239,7 +233,6 @@ async fn test_mair_524_history_skips_tombstones_and_their_quotes() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_mair_524_a_tombstone_is_neither_edited_deleted_again_nor_quoted() {
     let db = get_smart_db().await;
     let fixtures = get_fixture_db().await;
@@ -278,7 +271,6 @@ async fn test_mair_524_a_tombstone_is_neither_edited_deleted_again_nor_quoted() 
 }
 
 #[tokio::test]
-#[serial]
 async fn test_mair_524_deleting_an_unread_message_lowers_the_unread_counter() {
     let db = get_smart_db().await;
     let fixtures = get_fixture_db().await;
@@ -330,7 +322,6 @@ async fn test_mair_524_deleting_an_unread_message_lowers_the_unread_counter() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_mair_524_header_carries_the_latest_change_cursor() {
     let db = get_smart_db().await;
     let fixtures = get_fixture_db().await;
@@ -369,7 +360,6 @@ async fn test_mair_524_header_carries_the_latest_change_cursor() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_mair_524_chat_list_since_keeps_the_chats_with_activity() {
     let db = get_smart_db().await;
     let fixtures = get_fixture_db().await;

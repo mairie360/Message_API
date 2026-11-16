@@ -14,7 +14,6 @@ use message_api::database::chats::{
     open_direct_chat::view::{OpenDirectChatQueryResultView, OpenDirectChatQueryView},
     reveal_direct_chat::view::RevealDirectChatQueryView,
 };
-use serial_test::serial;
 
 async fn open(db: &SmartDatabase, user: u64, contact: u64) -> OpenDirectChatQueryResultView {
     db.fetch_one(&OpenDirectChatQueryView::new(user, contact))
@@ -32,7 +31,6 @@ async fn listed(db: &SmartDatabase, user: u64, chat_id: i32) -> Option<GetChatsQ
 }
 
 #[tokio::test]
-#[serial]
 async fn test_a_pair_has_a_single_direct_chat() {
     let db = get_smart_db().await;
     let fixtures = get_fixture_db().await;
@@ -53,7 +51,6 @@ async fn test_a_pair_has_a_single_direct_chat() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_direct_chat_lists_its_contact_on_both_sides() {
     let db = get_smart_db().await;
     let fixtures = get_fixture_db().await;
@@ -75,7 +72,6 @@ async fn test_direct_chat_lists_its_contact_on_both_sides() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_hidden_direct_chat_keeps_its_contact_until_revealed() {
     let db = get_smart_db().await;
     let fixtures = get_fixture_db().await;
@@ -112,7 +108,6 @@ async fn test_hidden_direct_chat_keeps_its_contact_until_revealed() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_direct_chat_hidden_by_both_is_deleted() {
     let db = get_smart_db().await;
     let fixtures = get_fixture_db().await;
@@ -136,7 +131,6 @@ async fn test_direct_chat_hidden_by_both_is_deleted() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_direct_chat_with_an_unknown_user_is_refused() {
     let db = get_smart_db().await;
     let fixtures = get_fixture_db().await;
@@ -155,7 +149,6 @@ async fn test_direct_chat_with_an_unknown_user_is_refused() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_reveal_does_not_touch_a_group_chat() {
     let db = get_smart_db().await;
     let fixtures = get_fixture_db().await;
@@ -178,7 +171,6 @@ async fn test_reveal_does_not_touch_a_group_chat() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_group_chats_are_listed_as_group_without_contact() {
     let db = get_smart_db().await;
     let fixtures = get_fixture_db().await;
@@ -198,7 +190,6 @@ async fn test_group_chats_are_listed_as_group_without_contact() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_delete_right_comes_from_check_access() {
     let db = get_smart_db().await;
     let fixtures = get_fixture_db().await;

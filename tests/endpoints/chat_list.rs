@@ -4,7 +4,6 @@
 
 use actix_web::http::{Method, StatusCode};
 use serde_json::{json, Value};
-use serial_test::serial;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use super::harness::{admin_id, request, states};
@@ -31,7 +30,6 @@ fn names(body: &Value) -> Vec<String> {
 }
 
 #[actix_web::test]
-#[serial]
 async fn list_names_a_direct_chat_after_the_other_participant_and_counts_members() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
@@ -87,7 +85,6 @@ async fn list_names_a_direct_chat_after_the_other_participant_and_counts_members
 }
 
 #[actix_web::test]
-#[serial]
 async fn search_finds_chats_by_their_name_or_by_a_member_name() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
@@ -185,7 +182,6 @@ async fn search_finds_chats_by_their_name_or_by_a_member_name() {
 }
 
 #[actix_web::test]
-#[serial]
 async fn search_only_sees_the_chats_of_the_caller_and_paginates_the_result() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
@@ -233,7 +229,6 @@ async fn search_only_sees_the_chats_of_the_caller_and_paginates_the_result() {
 }
 
 #[actix_web::test]
-#[serial]
 async fn members_come_with_their_names() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
@@ -267,7 +262,6 @@ async fn members_come_with_their_names() {
 }
 
 #[actix_web::test]
-#[serial]
 async fn opening_a_chat_returns_its_header_and_the_quotes_with_their_excerpt() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
@@ -336,7 +330,6 @@ async fn opening_a_chat_returns_its_header_and_the_quotes_with_their_excerpt() {
 }
 
 #[actix_web::test]
-#[serial]
 async fn an_administrator_outside_a_direct_chat_sees_both_names() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);

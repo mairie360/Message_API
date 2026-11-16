@@ -4,10 +4,8 @@ use message_api::database::chats::{
     create_chat::view::CreateChatQueryView,
     get_chat::view::{GetChatQueryView, Message},
 };
-use serial_test::serial;
 
 #[tokio::test]
-#[serial]
 async fn test_get_chat_success() {
     let db = get_smart_db().await;
 
@@ -27,7 +25,6 @@ async fn test_get_chat_success() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_get_chat_unknown_chat() {
     let db = get_smart_db().await;
 
@@ -39,7 +36,6 @@ async fn test_get_chat_unknown_chat() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_get_chat_pages_newest_first_with_a_cursor() {
     let db = get_smart_db().await;
 
@@ -82,7 +78,6 @@ async fn test_get_chat_pages_newest_first_with_a_cursor() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_get_chat_reads_the_citation_back() {
     let db = get_smart_db().await;
 

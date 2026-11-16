@@ -3,10 +3,8 @@ use message_api::database::chats::{
     add_message_to_chat::view::PostMessageInChatQueryView, create_chat::view::CreateChatQueryView,
     delete_message_from_chat::view::DeleteMessageQueryView,
 };
-use serial_test::serial;
 
 #[tokio::test]
-#[serial]
 async fn test_delete_message_success() {
     let db = get_smart_db().await;
     let fixtures = get_fixture_db().await;
@@ -30,7 +28,6 @@ async fn test_delete_message_success() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_delete_message_unknown_message() {
     let db = get_smart_db().await;
 
@@ -41,7 +38,6 @@ async fn test_delete_message_unknown_message() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_delete_message_is_scoped_to_its_chat() {
     let db = get_smart_db().await;
 
@@ -68,7 +64,6 @@ async fn test_delete_message_is_scoped_to_its_chat() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_moderating_a_message_is_logged() {
     let db = get_smart_db().await;
     let fixtures = get_fixture_db().await;

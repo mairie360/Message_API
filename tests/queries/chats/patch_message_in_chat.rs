@@ -3,10 +3,8 @@ use message_api::database::chats::{
     add_message_to_chat::view::PostMessageInChatQueryView, create_chat::view::CreateChatQueryView,
     patch_message_in_chat::view::PatchMessageQueryView,
 };
-use serial_test::serial;
 
 #[tokio::test]
-#[serial]
 async fn test_patch_message_success() {
     let db = get_smart_db().await;
 
@@ -30,7 +28,6 @@ async fn test_patch_message_success() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_patch_message_unknown_message() {
     let db = get_smart_db().await;
 

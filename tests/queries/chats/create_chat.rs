@@ -6,10 +6,8 @@ use message_api::database::chats::{
     create_chat::view::CreateChatQueryView,
     get_chat_users::view::GetChatMembersQueryView,
 };
-use serial_test::serial;
 
 #[tokio::test]
-#[serial]
 async fn test_create_chat_success() {
     let db = get_smart_db().await;
 
@@ -22,7 +20,6 @@ async fn test_create_chat_success() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_create_chat_by_group() {
     let db = get_smart_db().await;
 
@@ -35,7 +32,6 @@ async fn test_create_chat_by_group() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_create_chat_by_group_unknown_group() {
     let db = get_smart_db().await;
 
@@ -47,7 +43,6 @@ async fn test_create_chat_by_group_unknown_group() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_create_chat_with_members_records_the_creator() {
     let db = get_smart_db().await;
     let fixtures = get_fixture_db().await;
@@ -86,7 +81,6 @@ async fn test_create_chat_with_members_records_the_creator() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_create_chat_with_an_unknown_member_creates_nothing() {
     let db = get_smart_db().await;
     let fixtures = get_fixture_db().await;

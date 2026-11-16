@@ -8,7 +8,6 @@ use actix_web::test::TestRequest;
 use jsonwebtoken::{encode, EncodingKey, Header};
 use mairie360_api_lib::jwt_manager::Claims;
 use serde_json::json;
-use serial_test::serial;
 
 use super::harness::{admin_id, now, request, set_jwt_env, states};
 use crate::common::{get_fixture_db, plain_user};
@@ -25,7 +24,6 @@ fn hs256(user_id: u64, secret: &[u8]) -> TestRequest {
 }
 
 #[actix_web::test]
-#[serial]
 async fn mair_680_runs_without_jwt_secret() {
     set_jwt_env();
     assert!(std::env::var_os("JWT_SECRET").is_none());
@@ -34,7 +32,6 @@ async fn mair_680_runs_without_jwt_secret() {
 }
 
 #[actix_web::test]
-#[serial]
 async fn mair_680_eddsa_token_signed_with_core_key_is_accepted() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
@@ -45,7 +42,6 @@ async fn mair_680_eddsa_token_signed_with_core_key_is_accepted() {
 }
 
 #[actix_web::test]
-#[serial]
 async fn mair_680_hs256_token_is_refused_without_jwt_secret() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
@@ -67,7 +63,6 @@ async fn mair_680_hs256_token_is_refused_without_jwt_secret() {
 /// Business journey with Core's tokens: an agent opens a group chat with a colleague, both write
 /// in it, and the creator deletes it; the creator's HS256 token is refused on that chat.
 #[actix_web::test]
-#[serial]
 async fn mair_680_agents_chat_with_core_tokens_only() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);

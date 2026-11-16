@@ -5,7 +5,6 @@ use std::time::Duration;
 use mairie360_api_lib::test_setup::redis_setup::start_redis_container;
 use message_api::sse::relay::RedisRelay;
 use message_api::sse::state::{AppState, ChatEvent};
-use serial_test::serial;
 use testcontainers::core::{ContainerPort, WaitFor};
 use testcontainers::runners::AsyncRunner;
 use testcontainers::GenericImage;
@@ -35,7 +34,6 @@ async fn received(rx: &mut broadcast::Receiver<ChatEvent>) -> ChatEvent {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_an_event_reaches_every_replica_once() {
     let (_redis, config) = start_redis_container().await;
     let (first, mut first_rx) = replica(&config.url, "sse:chat-events").await;
@@ -55,7 +53,6 @@ async fn test_an_event_reaches_every_replica_once() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_an_unreachable_redis_falls_back_to_the_local_bus() {
     // Nothing listens on this port: the relay never subscribes and publishing fails.
     let relay = RedisRelay::with_channel("redis://127.0.0.1:1", "sse:chat-events").unwrap();
@@ -68,7 +65,6 @@ async fn test_an_unreachable_redis_falls_back_to_the_local_bus() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_mair_524_every_event_kind_crosses_the_relay() {
     let (_redis, config) = start_redis_container().await;
     let (first, _first_rx) = replica(&config.url, "sse:chat-events").await;
@@ -97,7 +93,6 @@ const MESSAGE_API_ACL: &str = "message-api on >acl-test-password ~message-api:* 
      &message-api:* -@all +get +set +del +exists +expire +publish +subscribe";
 
 #[tokio::test]
-#[serial]
 async fn test_the_relay_works_under_the_platform_acl() {
     let mut cmd = vec!["redis-server".to_string()];
     for line in [

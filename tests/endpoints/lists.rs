@@ -6,13 +6,11 @@ use message_api::endpoints::rate_limit::{
     RATE_LIMIT_BURST_ENV, RATE_LIMIT_PER_SECOND_ENV,
 };
 use serde_json::json;
-use serial_test::serial;
 
 use super::harness::{request, states};
 use crate::common::{get_fixture_db, plain_user};
 
 #[actix_web::test]
-#[serial]
 async fn chats_and_members_are_paginated() {
     let (state, sse) = states().await;
     let app = test_app!(state, sse);
@@ -81,7 +79,6 @@ async fn chats_and_members_are_paginated() {
 }
 
 #[actix_web::test]
-#[serial]
 async fn rate_limit_is_per_user() {
     let (state, sse) = states().await;
     let limit = rate_limit_config(1, 2).unwrap();
@@ -117,7 +114,6 @@ async fn rate_limit_is_per_user() {
 /// `main.rs`. A user gets the whole burst, then `429` with a numeric `Retry-After` of at least one
 /// second, while another user is still served.
 #[actix_web::test]
-#[serial]
 async fn the_production_budget_refuses_a_user_past_its_burst() {
     std::env::remove_var(RATE_LIMIT_PER_SECOND_ENV);
     std::env::remove_var(RATE_LIMIT_BURST_ENV);
