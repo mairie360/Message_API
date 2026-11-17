@@ -1,16 +1,17 @@
 # Journal des releases — Message_API
 
-<!-- release-journal-state {"dev": "11f20b1b99ffc3b316f70b828f08cfc7d5660071", "prod": "b71b66c8994b824cfed1712dc602194fc6e94a17", "prod_tag": "v2.2.0", "staging": "b71b66c8994b824cfed1712dc602194fc6e94a17", "updated": {"dev": "2026-11-17 00:09 UTC", "prod": "2026-11-12 23:53 UTC", "staging": "2026-11-12 18:52 UTC"}} -->
+<!-- release-journal-state {"dev": "42f940f85f7e2902c9b730e68582fa8f2c0a492c", "prod": "b71b66c8994b824cfed1712dc602194fc6e94a17", "prod_tag": "v2.2.0", "staging": "b71b66c8994b824cfed1712dc602194fc6e94a17", "updated": {"dev": "2026-11-17 01:30 UTC", "prod": "2026-11-12 23:53 UTC", "staging": "2026-11-12 18:52 UTC"}} -->
 > Tenu à jour par la CI (`mairie360/CICD`, action `release/release-journal`) à chaque passage en dev, staging et prod. Ne pas modifier à la main : le fichier est réécrit au passage suivant.
 
 | Environnement | Version | Commit | Mis à jour |
 | --- | --- | --- | --- |
 | prod | v2.2.0 | `b71b66c` | 2026-11-12 23:53 UTC |
 | staging | — | `b71b66c` | 2026-11-12 18:52 UTC |
-| dev | — | `11f20b1` | 2026-11-17 00:09 UTC |
+| dev | — | `42f940f` | 2026-11-17 01:30 UTC |
 
 ## Ajouté sur main depuis la dernière release prod (v2.2.0)
 
+- test: MAIR-1002 Speed up the APIs' CI tests (Rust cache, one database per test, optimized dependencies) ([#253](https://github.com/mairie360/Message_API/pull/253))
 - test: MAIR-1002 Speed up the APIs' CI tests (Rust cache, one database per test, optimized dependencies) ([#252](https://github.com/mairie360/Message_API/pull/252))
 - chore(deps): update rust crate mairie360_api_lib to v4.4.0 (#232) ([#232](https://github.com/mairie360/Message_API/pull/232))
 - fix: MAIR-247 Translate the APIs' OpenAPI descriptions and messages into English (#243) ([#243](https://github.com/mairie360/Message_API/pull/243))
@@ -20,6 +21,7 @@
 
 ## Différence dev → staging (en dev, pas encore en staging)
 
+- test: MAIR-1002 Speed up the APIs' CI tests (Rust cache, one database per test, optimized dependencies) ([#253](https://github.com/mairie360/Message_API/pull/253))
 - test: MAIR-1002 Speed up the APIs' CI tests (Rust cache, one database per test, optimized dependencies) ([#252](https://github.com/mairie360/Message_API/pull/252))
 - chore(deps): update rust crate mairie360_api_lib to v4.4.0 (#232) ([#232](https://github.com/mairie360/Message_API/pull/232))
 - fix: MAIR-247 Translate the APIs' OpenAPI descriptions and messages into English (#243) ([#243](https://github.com/mairie360/Message_API/pull/243))
@@ -38,6 +40,7 @@ _Rien._
 <!-- release-journal-history:start -->
 | Date | Environnement | Version | Commit | Run |
 | --- | --- | --- | --- | --- |
+| 2026-11-17 01:30 UTC | dev | — | `42f940f` | [run](https://github.com/mairie360/Message_API/actions/runs/43994232469) |
 | 2026-11-17 00:09 UTC | dev | — | `11f20b1` | [run](https://github.com/mairie360/Message_API/actions/runs/43981561706) |
 | 2026-11-16 23:09 UTC | dev | — | `bfe0f63` | [run](https://github.com/mairie360/Message_API/actions/runs/43974682926) |
 | 2026-11-16 17:24 UTC | dev | — | `651e84c` | [run](https://github.com/mairie360/Message_API/actions/runs/43916545476) |
