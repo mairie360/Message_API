@@ -38,7 +38,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: mairie360/CICD
-          ref: v5.10.0
+          ref: v5.11.0
           path: cicd-repo
           sparse-checkout: actions
       - id: check
