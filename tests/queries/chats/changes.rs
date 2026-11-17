@@ -2,12 +2,14 @@
 //! (tombstones) and what every other read does with tombstones.
 
 use crate::common::{
-    force_updated_at, get_fixture_db, get_smart_db, plain_user, unread_count, RawQuery,
+    force_updated_at, get_fixture_db, get_smart_db, plain_user, smart_dbs_for, unread_count,
+    RawQuery,
 };
 use chrono::{DateTime, Duration, Utc};
 use mairie360_api_lib::database::error::DbError;
 use mairie360_api_lib::error::ApiLibError;
 use mairie360_api_lib::smart_db::SmartDatabase;
+use mairie360_api_lib::test_setup::isolated::isolated_db;
 use message_api::database::chats::{
     acknowledge_read::view::AcknowledgeReadQueryView,
     add_message_to_chat::view::PostMessageInChatQueryView,
@@ -161,8 +163,10 @@ async fn test_mair_524_since_is_scoped_to_its_chat() {
 
 #[tokio::test]
 async fn test_mair_524_since_query_uses_the_change_index() {
-    let db = get_smart_db().await;
-    let fixtures = get_fixture_db().await;
+    // Its own database (MAIR-1002): the plan depends on the statistics of the whole table, which
+    // the tests running in parallel change.
+    let isolated = isolated_db().await;
+    let (db, fixtures) = smart_dbs_for(&isolated).await;
     let author = plain_user(&fixtures).await;
     let chat_id = chat_with(&db, "Explain", vec![author]).await;
     post(&db, chat_id, author, "Index").await;
