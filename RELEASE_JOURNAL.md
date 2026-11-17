@@ -1,16 +1,17 @@
 # Journal des releases — Message_API
 
-<!-- release-journal-state {"dev": "f0d8e88a41a2633e015f5bfdec86bb3106eb1320", "prod": "b71b66c8994b824cfed1712dc602194fc6e94a17", "prod_tag": "v2.2.0", "staging": "b71b66c8994b824cfed1712dc602194fc6e94a17", "updated": {"dev": "2026-11-17 17:08 UTC", "prod": "2026-11-12 23:53 UTC", "staging": "2026-11-12 18:52 UTC"}} -->
+<!-- release-journal-state {"dev": "a754bd4dedf6844dc11537051245dc73b139860f", "prod": "b71b66c8994b824cfed1712dc602194fc6e94a17", "prod_tag": "v2.2.0", "staging": "b71b66c8994b824cfed1712dc602194fc6e94a17", "updated": {"dev": "2026-11-17 18:02 UTC", "prod": "2026-11-12 23:53 UTC", "staging": "2026-11-12 18:52 UTC"}} -->
 > Tenu à jour par la CI (`mairie360/CICD`, action `release/release-journal`) à chaque passage en dev, staging et prod. Ne pas modifier à la main : le fichier est réécrit au passage suivant.
 
 | Environnement | Version | Commit | Mis à jour |
 | --- | --- | --- | --- |
 | prod | v2.2.0 | `b71b66c` | 2026-11-12 23:53 UTC |
 | staging | — | `b71b66c` | 2026-11-12 18:52 UTC |
-| dev | — | `f0d8e88` | 2026-11-17 17:08 UTC |
+| dev | — | `a754bd4` | 2026-11-17 18:02 UTC |
 
 ## Ajouté sur main depuis la dernière release prod (v2.2.0)
 
+- test: MAIR-534 Add the missing business negative cases of the APIs ([#257](https://github.com/mairie360/Message_API/pull/257))
 - test: MAIR-534 Add the missing business negative cases of the APIs ([#256](https://github.com/mairie360/Message_API/pull/256))
 - feat: MAIR-998 Test stacks follow the moving upstream tag of the stage (#251) ([#251](https://github.com/mairie360/Message_API/pull/251))
 - chore(deps): pin actions/checkout action to 3d3c42e (#254) ([#254](https://github.com/mairie360/Message_API/pull/254))
@@ -25,6 +26,7 @@
 
 ## Différence dev → staging (en dev, pas encore en staging)
 
+- test: MAIR-534 Add the missing business negative cases of the APIs ([#257](https://github.com/mairie360/Message_API/pull/257))
 - test: MAIR-534 Add the missing business negative cases of the APIs ([#256](https://github.com/mairie360/Message_API/pull/256))
 - feat: MAIR-998 Test stacks follow the moving upstream tag of the stage (#251) ([#251](https://github.com/mairie360/Message_API/pull/251))
 - chore(deps): pin actions/checkout action to 3d3c42e (#254) ([#254](https://github.com/mairie360/Message_API/pull/254))
@@ -48,6 +50,7 @@ _Rien._
 <!-- release-journal-history:start -->
 | Date | Environnement | Version | Commit | Run |
 | --- | --- | --- | --- | --- |
+| 2026-11-17 18:02 UTC | dev | — | `a754bd4` | [run](https://github.com/mairie360/Message_API/actions/runs/44142236437) |
 | 2026-11-17 17:08 UTC | dev | — | `f0d8e88` | [run](https://github.com/mairie360/Message_API/actions/runs/44131781207) |
 | 2026-11-17 15:03 UTC | dev | — | `1535d24` | [run](https://github.com/mairie360/Message_API/actions/runs/44107638870) |
 | 2026-11-17 11:53 UTC | dev | — | `3ffcbba` | [run](https://github.com/mairie360/Message_API/actions/runs/44075598680) |
