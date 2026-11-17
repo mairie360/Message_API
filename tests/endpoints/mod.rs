@@ -11,6 +11,7 @@ mod chat_list;
 mod docs;
 mod flows;
 mod lists;
+mod mair_534_before;
 mod mair_680_session_keys;
 mod path_ids;
 mod ready;
