@@ -7,4 +7,5 @@ pub use fixtures::{
     RawQuery,
 };
 pub use plain_user::{named_user, plain_user};
-pub use smart_db::{get_fixture_db, get_smart_db, message_db_url, smart_db_at};
+#[allow(unused_imports)]
+pub use smart_db::{get_fixture_db, get_smart_db, message_db_url, smart_db_at, smart_dbs_for};

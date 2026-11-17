@@ -1,6 +1,7 @@
 use mairie360_api_lib::database::db_interface::Database;
 use mairie360_api_lib::redis::redis_interface::Redis;
 use mairie360_api_lib::smart_db::SmartDatabase;
+use mairie360_api_lib::test_setup::isolated::IsolatedDb;
 use mairie360_api_lib::test_setup::queries_setup::{get_shared_db, get_shared_db_as};
 
 /// Postgres role Message connects with in every deployment (Database `api_roles.sql`, MAIR-114).
@@ -37,4 +38,13 @@ pub async fn smart_db_at(db_url: &str) -> SmartDatabase {
     let db = Database::new(db_url).await;
     let redis = Redis::new("redis://127.0.0.1:6379");
     SmartDatabase::new(db, redis)
+}
+
+/// The two clients of a test that has its own database (`isolated_db()`, MAIR-1002): the
+/// `message_api` one for the query views under test and the superuser one for the fixtures.
+pub async fn smart_dbs_for(db: &IsolatedDb) -> (SmartDatabase, SmartDatabase) {
+    (
+        smart_db_at(&db.url_as(MESSAGE_DB_ROLE)).await,
+        smart_db_at(&db.url()).await,
+    )
 }
