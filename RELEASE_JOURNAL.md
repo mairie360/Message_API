@@ -1,16 +1,17 @@
 # Journal des releases — Message_API
 
-<!-- release-journal-state {"dev": "839164dcd31b32397ca4d5cf3a832eaaa210456a", "prod": "b71b66c8994b824cfed1712dc602194fc6e94a17", "prod_tag": "v2.2.0", "staging": "b71b66c8994b824cfed1712dc602194fc6e94a17", "updated": {"dev": "2026-11-18 05:57 UTC", "prod": "2026-11-12 23:53 UTC", "staging": "2026-11-12 18:52 UTC"}} -->
+<!-- release-journal-state {"dev": "f6c0cd9b1638057e1ee8aa8a3633bf2cf35c4012", "prod": "b71b66c8994b824cfed1712dc602194fc6e94a17", "prod_tag": "v2.2.0", "staging": "b71b66c8994b824cfed1712dc602194fc6e94a17", "updated": {"dev": "2026-11-18 14:33 UTC", "prod": "2026-11-12 23:53 UTC", "staging": "2026-11-12 18:52 UTC"}} -->
 > Tenu à jour par la CI (`mairie360/CICD`, action `release/release-journal`) à chaque passage en dev, staging et prod. Ne pas modifier à la main : le fichier est réécrit au passage suivant.
 
 | Environnement | Version | Commit | Mis à jour |
 | --- | --- | --- | --- |
 | prod | v2.2.0 | `b71b66c` | 2026-11-12 23:53 UTC |
 | staging | — | `b71b66c` | 2026-11-12 18:52 UTC |
-| dev | — | `839164d` | 2026-11-18 05:57 UTC |
+| dev | — | `f6c0cd9` | 2026-11-18 14:33 UTC |
 
 ## Ajouté sur main depuis la dernière release prod (v2.2.0)
 
+- chore: MAIR-1083 Set the Codecov target to 60 % on the code repositories ([#260](https://github.com/mairie360/Message_API/pull/260))
 - chore(deps): update rust crate redis to v1.8.2 (#258) ([#258](https://github.com/mairie360/Message_API/pull/258))
 - test: MAIR-534 Add the missing business negative cases of the APIs ([#257](https://github.com/mairie360/Message_API/pull/257))
 - test: MAIR-534 Add the missing business negative cases of the APIs ([#256](https://github.com/mairie360/Message_API/pull/256))
@@ -27,6 +28,7 @@
 
 ## Différence dev → staging (en dev, pas encore en staging)
 
+- chore: MAIR-1083 Set the Codecov target to 60 % on the code repositories ([#260](https://github.com/mairie360/Message_API/pull/260))
 - chore(deps): update rust crate redis to v1.8.2 (#258) ([#258](https://github.com/mairie360/Message_API/pull/258))
 - test: MAIR-534 Add the missing business negative cases of the APIs ([#257](https://github.com/mairie360/Message_API/pull/257))
 - test: MAIR-534 Add the missing business negative cases of the APIs ([#256](https://github.com/mairie360/Message_API/pull/256))
@@ -52,6 +54,7 @@ _Rien._
 <!-- release-journal-history:start -->
 | Date | Environnement | Version | Commit | Run |
 | --- | --- | --- | --- | --- |
+| 2026-11-18 14:33 UTC | dev | — | `f6c0cd9` | [run](https://github.com/mairie360/Message_API/actions/runs/44323141755) |
 | 2026-11-18 05:57 UTC | dev | — | `839164d` | [run](https://github.com/mairie360/Message_API/actions/runs/44246584462) |
 | 2026-11-17 18:02 UTC | dev | — | `a754bd4` | [run](https://github.com/mairie360/Message_API/actions/runs/44142236437) |
 | 2026-11-17 17:08 UTC | dev | — | `f0d8e88` | [run](https://github.com/mairie360/Message_API/actions/runs/44131781207) |
