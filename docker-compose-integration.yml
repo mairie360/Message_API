@@ -123,6 +123,8 @@ services:
       # Serves /api-docs/openapi.json, read by the collection's contract checks (MAIR-262). Off on
       # the deployed instances (MAIR-424): tests/endpoints/docs.rs checks the 404 without it.
       SWAGGER_ENABLED: "true"
+      # The collection replays hundreds of calls as a few users: no per-user quota.
+      RATE_LIMIT_PER_SECOND: "0"
     depends_on:
       seeder:
         condition: service_completed_successfully
