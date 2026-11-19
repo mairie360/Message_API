@@ -2,7 +2,6 @@ pub mod error;
 pub mod headers;
 pub mod health;
 pub mod pagination;
-pub mod rate_limit;
 pub mod ready;
 pub mod swagger;
 pub mod v1;

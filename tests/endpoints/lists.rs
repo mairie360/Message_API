@@ -1,11 +1,15 @@
-//! Bounded lists and per-user rate limiting (MAIR-425).
+//! Bounded lists and per-user rate limiting.
 
 use actix_web::http::{Method, StatusCode};
-use message_api::endpoints::rate_limit::{
-    rate_limit_config, rate_limit_from_env, rate_limiter, DEFAULT_BURST, DEFAULT_PER_SECOND,
-    RATE_LIMIT_BURST_ENV, RATE_LIMIT_PER_SECOND_ENV,
+use mairie360_api_lib::security::{
+    rate_limit_middleware, JwtMiddleware, RateLimitConfig, RateLimiter,
 };
 use serde_json::json;
+use std::num::NonZeroU32;
+
+/// The lib's defaults (`RATE_LIMIT_PER_SECOND` / `RATE_LIMIT_BURST` unset).
+const DEFAULT_PER_SECOND: u64 = 20;
+const DEFAULT_BURST: u32 = 50;
 
 use super::harness::{request, states};
 use crate::common::{get_fixture_db, plain_user};
@@ -81,15 +85,20 @@ async fn chats_and_members_are_paginated() {
 #[actix_web::test]
 async fn rate_limit_is_per_user() {
     let (state, sse) = states().await;
-    let limit = rate_limit_config(1, 2).unwrap();
+    let limiter = RateLimiter::new(RateLimitConfig {
+        per_second: NonZeroU32::MIN,
+        burst: NonZeroU32::new(2).unwrap(),
+        trust_forwarded: false,
+    });
     let app = actix_web::test::init_service(
         actix_web::App::new()
             .app_data(sse.clone())
             .app_data(state.clone())
+            .app_data(limiter)
             .service(
                 actix_web::web::scope("/api")
-                    .wrap(rate_limiter(Some(&limit)))
-                    .wrap(mairie360_api_lib::security::JwtMiddleware)
+                    .wrap(actix_web::middleware::from_fn(rate_limit_middleware))
+                    .wrap(JwtMiddleware)
                     .configure(message_api::endpoints::config),
             ),
     )
@@ -110,23 +119,23 @@ async fn rate_limit_is_per_user() {
     assert_eq!(status, StatusCode::OK);
 }
 
-/// The production budget (MAIR-474): `rate_limit_from_env()` without overrides, mounted like
-/// `main.rs`. A user gets the whole burst, then `429` with a numeric `Retry-After` of at least one
+/// The production budget: `RateLimiter::from_env()` without overrides, mounted like `main.rs`. A user gets the whole burst, then `429` with a numeric `Retry-After` of at least one
 /// second, while another user is still served.
 #[actix_web::test]
 async fn the_production_budget_refuses_a_user_past_its_burst() {
-    std::env::remove_var(RATE_LIMIT_PER_SECOND_ENV);
-    std::env::remove_var(RATE_LIMIT_BURST_ENV);
+    std::env::remove_var("RATE_LIMIT_PER_SECOND");
+    std::env::remove_var("RATE_LIMIT_BURST");
+    std::env::remove_var("RATE_LIMIT_TRUST_FORWARDED");
     let (state, sse) = states().await;
-    let limit = rate_limit_from_env().expect("the limit is on by default");
     let app = actix_web::test::init_service(
         actix_web::App::new()
             .app_data(sse.clone())
             .app_data(state.clone())
+            .app_data(RateLimiter::from_env())
             .service(
                 actix_web::web::scope("/api")
-                    .wrap(rate_limiter(Some(&limit)))
-                    .wrap(mairie360_api_lib::security::JwtMiddleware)
+                    .wrap(actix_web::middleware::from_fn(rate_limit_middleware))
+                    .wrap(JwtMiddleware)
                     .configure(message_api::endpoints::config),
             ),
     )
@@ -175,8 +184,28 @@ async fn the_production_budget_refuses_a_user_past_its_burst() {
     assert_eq!(status, StatusCode::OK);
 }
 
-#[test]
-fn zero_per_second_disables_the_limit() {
-    assert!(rate_limit_config(0, 50).is_none());
-    assert!(rate_limit_config(10, 50).is_some());
+/// A disabled limiter (`RATE_LIMIT_PER_SECOND=0`, set by the ZAP and k6 stacks) lets every request
+/// through.
+#[actix_web::test]
+async fn mair_688_a_disabled_limiter_lets_every_request_through() {
+    let (state, sse) = states().await;
+    let app = actix_web::test::init_service(
+        actix_web::App::new()
+            .app_data(sse.clone())
+            .app_data(state.clone())
+            .app_data(RateLimiter::disabled())
+            .service(
+                actix_web::web::scope("/api")
+                    .wrap(actix_web::middleware::from_fn(rate_limit_middleware))
+                    .wrap(JwtMiddleware)
+                    .configure(message_api::endpoints::config),
+            ),
+    )
+    .await;
+    let db = get_fixture_db().await;
+    let user = plain_user(&db).await;
+    for _ in 0..10 {
+        let (status, _) = send!(app, request(Method::GET, "/api/v1/", Some(user)));
+        assert_eq!(status, StatusCode::OK);
+    }
 }
