@@ -129,7 +129,7 @@ impl Modify for SecurityAddon {
     }
 }
 
-/// Adds the `429` of the per-user rate limiter (`rate_limit.rs`, MAIR-425) to every operation that
+/// Adds the `429` of the per-user rate limiter (the lib's `rate_limit_middleware`) to every operation that
 /// requires a JWT: the limiter answers before any handler runs, so the handlers cannot declare it.
 struct RateLimitAddon;
 
@@ -137,8 +137,8 @@ impl Modify for RateLimitAddon {
     fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
         let too_many_requests = ResponseBuilder::new()
             .description(
-                "The caller sent more requests than their rate limit allows (per user, 10 per second \
-                 with bursts of 50 by default). Retry after the delay given in the body.",
+                "The caller sent more requests than their rate limit allows (per user, 20 per second \
+                 with bursts of 50 by default; the counters are kept per instance of the API). Retry after the delay given in the body.",
             )
             .content(
                 "text/plain",

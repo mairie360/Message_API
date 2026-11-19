@@ -49,8 +49,8 @@ new refusal gets its test there, since `endpoints/` is part of the coverage gate
 operation of `ApiDoc` declaring `jwt` (`401` without a token, with another scheme, garbage, an HS256 token
 whatever its secret, an EdDSA token signed with another key under Core's `kid` or without/with another `aud`, an
 expired token, `alg: none`, a swapped payload or an asymmetric algorithm; `404` for an unknown or archived account),
-and `lists.rs` checks the production quota of `rate_limit_from_env()` (`429` past the burst, `Retry-After` of at
-least 1 s).
+and `lists.rs` checks the production quota of the lib's `RateLimiter::from_env()` (`429` past the burst, `Retry-After` of at
+least 1 s) and that a disabled limiter lets everything through.
 They are plain `#[tokio::test]` and use `mairie360_api_lib`'s
 `get_shared_db()`, which spins up **real Docker containers via testcontainers** —
 `ghcr.io/mairie360/database:dev` (`TEST_DB_VERSION` in `.cargo/config.toml`, which overrides the lib default; MAIR-998) plus a Liquibase
@@ -115,7 +115,7 @@ reaches the API. The compose files require them (`${VAR:?}`); newman gets its to
 sandbox cannot sign EdDSA), k6 a JSON file of tokens mounted at `/tokens.json` (k6 cannot sign Ed25519 either). No
 key or token valid anywhere is committed. The dev stack defaults `JWT_PUBLIC_KEY` to the lib's test public key with
 `JWT_ALLOW_WEAK_SECRET=true` (dev only); sign a dev token in a subshell with the lib's test key:
-`(export JWT_PRIVATE_KEY="$(openssl pkey -inform DER -in ~/.cargo/registry/src/*/mairie360_api_lib-4.4.0/src/test_setup/fixtures/session_test_key.der)"; export JWT_PUBLIC_KEY="$(printf '%s\n' "$JWT_PRIVATE_KEY" | openssl pkey -pubout)"; source ./test_secrets.sh && sign_jwt 1 admin 3600)`.
+`(export JWT_PRIVATE_KEY="$(openssl pkey -inform DER -in ~/.cargo/registry/src/*/mairie360_api_lib-4.5.0/src/test_setup/fixtures/session_test_key.der)"; export JWT_PUBLIC_KEY="$(printf '%s\n' "$JWT_PRIVATE_KEY" | openssl pkey -pubout)"; source ./test_secrets.sh && sign_jwt 1 admin 3600)`.
 
 The ZAP scan is authenticated: `security-scan` injects `ADMIN_JWT` on every request, waits for the `seeder`
 service (`init-test.sql`: plain `User` accounts 2 and 3, user 1 is the Admin created by liquibase) and fails on any
@@ -407,11 +407,10 @@ the container tests.
 `offset`) and answer `has_more`: the query views' `page()` fetch `limit + 1` rows and `split_page` trims the extra one.
 Their `new()` stays unbounded (`LIMIT NULL`) for the SSE fan-out and the query tests. Messages use their own keyset.
 
-`/api` is rate limited per authenticated user (`endpoints::rate_limit`, `actix-governor`): the BFFs share a few IPs,
-so the key is the `AuthenticatedUser` that `JwtMiddleware` stored, hence `rate_limiter()` is wrapped *before*
-`JwtMiddleware` (inner). `RATE_LIMIT_PER_SECOND` (default 10, `0` disables) and `RATE_LIMIT_BURST` (default 50); `CallerKey` answers the
-`429` itself so that `Retry-After` / `X-RateLimit-After` say at least 1 s (actix-governor rounds them down to `0`);
-the ZAP and k6 stacks disable it. `swagger::RateLimitAddon` adds the `429` to every operation with
+`/api` is rate limited per authenticated user by the lib's `rate_limit_middleware` (`mairie360_api_lib::security`): the BFFs
+share a few IPs, so the key is the `AuthenticatedUser` that `JwtMiddleware` stored, hence the middleware is wrapped *before*
+`JwtMiddleware` (inner). `RATE_LIMIT_PER_SECOND` (default 20, `0` disables) and `RATE_LIMIT_BURST` (default 50); the `429`
+carries `Retry-After` / `X-RateLimit-After` of at least 1 s; the counters are per pod; the ZAP and k6 stacks disable it. `swagger::RateLimitAddon` adds the `429` to every operation with
 `security(("jwt" = []))`, so handlers do not declare it.
 
 ### Probes and startup (MAIR-423)

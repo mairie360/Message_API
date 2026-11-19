@@ -3,14 +3,13 @@ use std::sync::Arc;
 use actix_web::{middleware, web, App, HttpServer};
 
 use message_api::database::pg_url::build_pg_url;
-use message_api::endpoints::rate_limit::{rate_limit_from_env, rate_limiter};
 use message_api::endpoints::swagger::{docs_config, swagger_enabled};
 use message_api::endpoints::{config, health, ready};
 
 use mairie360_api_lib::env_manager::{get_critical_env_var, get_env_var};
 use mairie360_api_lib::logging::telemetry::{init_telemetry, TracingLogger};
 use mairie360_api_lib::request_log::{hide_query, restore_query, RedactedRootSpanBuilder};
-use mairie360_api_lib::security::JwtMiddleware;
+use mairie360_api_lib::security::{rate_limit_middleware, JwtMiddleware, RateLimiter};
 use mairie360_api_lib::state::AppState;
 
 use message_api::sse::event_manager::start_internal_event_listener;
@@ -69,10 +68,8 @@ async fn main() -> std::io::Result<()> {
         state.get_smart_db().clone(),
     ));
     let data = web::Data::new(state);
-    let rate_limit = rate_limit_from_env();
-    if rate_limit.is_none() {
-        tracing::warn!("RATE_LIMIT_PER_SECOND=0: /api is not rate limited");
-    }
+    // One limiter for every worker (counters are per pod). `RATE_LIMIT_PER_SECOND=0` disables it.
+    let rate_limiter = RateLimiter::from_env();
     let swagger = swagger_enabled();
     if swagger {
         tracing::warn!("SWAGGER_ENABLED: serving /swagger-ui/ and /api-docs/openapi.json");
@@ -82,6 +79,7 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .app_data(web::Data::from(app_state.clone()))
             .app_data(data.clone())
+            .app_data(rate_limiter.clone())
             // One span per request (request id, method, route, status): the errors logged by the
             // handlers carry it. It records the path without the query string and no error
             // `Debug` (MAIR-290, see `mairie360_api_lib::request_log`): `hide_query` runs before
@@ -101,7 +99,7 @@ async fn main() -> std::io::Result<()> {
             // wrapped first, so it runs after JwtMiddleware and sees the authenticated user).
             .service(
                 web::scope("/api")
-                    .wrap(rate_limiter(rate_limit.as_ref()))
+                    .wrap(middleware::from_fn(rate_limit_middleware))
                     .wrap(JwtMiddleware)
                     .configure(config),
             )
