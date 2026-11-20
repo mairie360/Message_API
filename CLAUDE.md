@@ -372,6 +372,12 @@ the container tests.
 
 ### Real-time SSE (`src/sse/`)
 
+The real-time channel is moving to WebSocket (epic MAIR-655), SSE and WebSocket coexisting until MAIR-662 removes
+the SSE. The decision is `docs/en/adr/0001-messaging-websocket.md` and the frozen contract shared with BFF_Message
+and Messages_Web_Service (routes, frames, close codes, limits, client behaviour) is `docs/en/realtime-websocket.md`
+(French copies under `docs/fr/`): implement against it and update it, in both languages, before changing the
+behaviour.
+
 - `state.rs`: `AppState { online_agents: DashMap<u64 /*user id*/, Vec<Connection>>, internal_bus:
   broadcast::Sender<ChatEvent>, relay: Option<Arc<RedisRelay>> }`, built with `AppState::new`. A `Connection` holds its
   sender and a `close: Arc<Notify>`. `register` keeps at most `MAX_CONNECTIONS_PER_USER` (5) per user and notifies the
