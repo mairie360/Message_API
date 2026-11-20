@@ -19,7 +19,7 @@ const PING_INTERVAL: Duration = Duration::from_secs(15);
 const REVALIDATE_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Time left before `exp` (seconds since the epoch), `None` when the token carries no readable
-/// expiry (a Keycloak token: it is still checked every [`REVALIDATE_INTERVAL`]).
+/// expiry (it is still checked every [`REVALIDATE_INTERVAL`]).
 fn time_left(exp: Option<usize>) -> Option<Duration> {
     let exp = Duration::from_secs(u64::try_from(exp?).ok()?);
     let now = SystemTime::now().duration_since(UNIX_EPOCH).ok()?;
@@ -129,7 +129,6 @@ async fn sse_stream_route(
                     let still_valid = authenticate_token(
                         &jwt,
                         api_state.get_smart_db(),
-                        api_state.get_keycloak(),
                     )
                     .await;
                     if !matches!(still_valid, Ok(id) if id == user_id) {
