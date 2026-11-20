@@ -23,7 +23,8 @@ Any change to this file is a contract change for the three repos.
 |---|---|---|---|
 | `101` | upgraded | upgraded, once the API accepted its own handshake | upgraded, once the BFF accepted |
 | `400` | not a WebSocket handshake | not a WebSocket handshake | not a WebSocket handshake |
-| `401` | missing, invalid or expired JWT, revoked session, unknown account | missing or invalid session (before any upstream call); the API answered `401` | missing or expired cookie |
+| `401` | missing, invalid or expired JWT, revoked session | missing or invalid session (before any upstream call); the API answered `401` or `404` | missing or expired cookie |
+| `404` | the token is valid but its account is unknown or archived (as on every route of the API) | — | — |
 | `403` | — | — | `Origin` missing or not the front's own |
 | `429` | rate limit of `/api` | rate limit of the caller | — |
 | `502` | — | the API refused otherwise or did not answer the handshake within 10 s | the BFF did not answer within 10 s |

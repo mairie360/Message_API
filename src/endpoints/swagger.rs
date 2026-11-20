@@ -53,6 +53,10 @@ included as tombstones (`deleted: true`). The event contract is described on `GE
 A `: ping` comment is sent every 15 seconds to keep the connection open through proxies; SSE \
 clients ignore it.
 
+`GET /api/v1/ws` (MAIR-657) carries the same signals over a **WebSocket**, one text frame per \
+`ChatSignal`, with explicit close codes (`4001` session ended, `4008` evicted). Both transports \
+coexist until MAIR-662 removes the SSE; the contract is `docs/en/realtime-websocket.md`.
+
 ## Access control
 
 Every `/api/v1/{chat_id}/**` operation checks the caller against the chat: a caller who is neither \
@@ -96,7 +100,7 @@ the body says when to retry. |
         (name = "Chats", description = "Chats: list, creation, reading the messages, read acknowledgement and deletion."),
         (name = "Messages", description = "Messages of a chat: posting, editing and deletion."),
         (name = "Users", description = "Members of a chat: listing, adding and removing."),
-        (name = "Stream", description = "Real-time SSE notification channel."),
+        (name = "Stream", description = "Real-time notification channels: SSE stream and WebSocket."),
         (name = "Service", description = "Unauthenticated liveness and readiness probes, used by Docker and Kubernetes.")
     ),
     nest(

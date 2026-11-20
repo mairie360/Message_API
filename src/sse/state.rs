@@ -9,11 +9,32 @@ use crate::sse::relay::RedisRelay;
 
 pub type SseSender = tokio::sync::mpsc::Sender<Result<actix_web::web::Bytes, String>>;
 
-/// Identifies one SSE connection of a user (a user may have several open at once).
+/// Identifies one real-time connection of a user (a user may have several open at once).
 pub type ConnectionId = u64;
 
-/// Open streams kept per user (tabs, devices). Opening one more closes the oldest.
+/// Open connections kept per user (tabs, devices), SSE and WebSocket counted together (MAIR-656).
+/// Opening one more closes the oldest.
 pub const MAX_CONNECTIONS_PER_USER: usize = 5;
+
+/// How a connection receives its signals: the payload pushed on its channel differs (MAIR-657).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Transport {
+    /// `GET /api/v1/stream`: each signal is a whole `data: {...}\n\n` SSE event.
+    #[default]
+    Sse,
+    /// `GET /api/v1/ws`: each signal is the bare `ChatSignal` JSON, sent as one text frame.
+    WebSocket,
+}
+
+impl Transport {
+    /// What the connection's channel receives for the serialized `ChatSignal` `payload`.
+    pub fn frame(self, payload: &str) -> actix_web::web::Bytes {
+        match self {
+            Transport::Sse => actix_web::web::Bytes::from(format!("data: {payload}\n\n")),
+            Transport::WebSocket => actix_web::web::Bytes::copy_from_slice(payload.as_bytes()),
+        }
+    }
+}
 
 static NEXT_CONNECTION_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -121,17 +142,20 @@ impl ChatEvent {
     }
 }
 
-/// One open SSE stream. `close` ends the HTTP response when it is notified (eviction, expired or
-/// revoked token).
+/// One open real-time connection. `close` ends it when it is notified: the SSE response ends,
+/// the WebSocket is closed with `4008` (eviction). Expired or revoked tokens are handled by each
+/// transport's own supervisor.
 #[derive(Clone)]
 pub struct Connection {
     pub id: ConnectionId,
     pub sender: SseSender,
     pub close: Arc<Notify>,
+    pub transport: Transport,
 }
 
 pub struct AppState {
-    /// SSE connections of each online agent (one entry per open tab/device), oldest first.
+    /// Real-time connections (SSE and WebSocket) of each online agent (one entry per open
+    /// tab/device), oldest first.
     pub online_agents: DashMap<u64, Vec<Connection>>,
     /// Events to fan out to the connections of this process (see `event_manager`).
     pub internal_bus: broadcast::Sender<ChatEvent>,
@@ -171,10 +195,18 @@ impl AppState {
     /// Registers a new SSE connection for `user_id`. Beyond [`MAX_CONNECTIONS_PER_USER`] the
     /// oldest connections of that user are removed and told to close.
     pub fn register(&self, user_id: u64, sender: SseSender) -> Connection {
+        self.register_as(user_id, sender, Transport::Sse)
+    }
+
+    /// Registers a new connection of `transport` for `user_id`. Beyond
+    /// [`MAX_CONNECTIONS_PER_USER`] (whatever their transport) the oldest connections of that user
+    /// are removed and told to close.
+    pub fn register_as(&self, user_id: u64, sender: SseSender, transport: Transport) -> Connection {
         let connection = Connection {
             id: NEXT_CONNECTION_ID.fetch_add(1, Ordering::Relaxed),
             sender,
             close: Arc::new(Notify::new()),
+            transport,
         };
         let evicted: Vec<Connection> = {
             let mut connections = self.online_agents.entry(user_id).or_default();
@@ -200,19 +232,34 @@ impl AppState {
 
     /// Snapshot of the live connections of `user_id`.
     pub fn connections_of(&self, user_id: u64) -> Vec<(ConnectionId, SseSender)> {
+        self.transports_of(user_id)
+            .into_iter()
+            .map(|(id, sender, _)| (id, sender))
+            .collect()
+    }
+
+    /// Snapshot of the live connections of `user_id` with their transport.
+    pub fn transports_of(&self, user_id: u64) -> Vec<(ConnectionId, SseSender, Transport)> {
         self.online_agents
             .get(&user_id)
             .map(|connections| {
                 connections
                     .iter()
-                    .map(|connection| (connection.id, connection.sender.clone()))
+                    .map(|connection| {
+                        (
+                            connection.id,
+                            connection.sender.clone(),
+                            connection.transport,
+                        )
+                    })
                     .collect()
             })
             .unwrap_or_default()
     }
 }
 
-/// Signal pushed on the SSE stream when a chat changes (one `data:` line per signal).
+/// Signal pushed when a chat changes: one `data:` line of the SSE stream, or one text frame of the
+/// WebSocket (MAIR-657).
 #[derive(Debug, Serialize, ToSchema)]
 pub struct ChatSignal {
     /// What happened, without the content:

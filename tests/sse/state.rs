@@ -96,3 +96,45 @@ fn test_mair_524_signal_types() {
         assert_eq!(signal.get("unread_count").is_some(), kind == "CHAT_READ");
     }
 }
+
+/// MAIR-657: SSE and WebSocket connections share the limit; the oldest is evicted whatever its
+/// transport.
+#[tokio::test]
+async fn mair_657_the_limit_counts_sse_and_websocket_connections_together() {
+    use message_api::sse::state::Transport;
+    let (bus, _) = broadcast::channel(4);
+    let state = AppState::new(bus, None);
+
+    let oldest_sse = state.register(8, sender());
+    for _ in 1..MAX_CONNECTIONS_PER_USER {
+        state.register_as(8, sender(), Transport::WebSocket);
+    }
+    let newest = state.register_as(8, sender(), Transport::WebSocket);
+
+    let ids: Vec<u64> = state
+        .transports_of(8)
+        .iter()
+        .map(|(id, _, _)| *id)
+        .collect();
+    assert_eq!(ids.len(), MAX_CONNECTIONS_PER_USER);
+    assert!(
+        !ids.contains(&oldest_sse.id),
+        "the oldest (SSE) one is evicted"
+    );
+    assert!(ids.contains(&newest.id));
+    tokio::time::timeout(Duration::from_secs(1), oldest_sse.close.notified())
+        .await
+        .expect("the evicted stream is told to close");
+}
+
+/// MAIR-657: an SSE connection receives a whole `data:` event, a WebSocket the bare JSON.
+#[test]
+fn mair_657_each_transport_frames_the_signal_its_way() {
+    use message_api::sse::state::Transport;
+    let payload = r#"{"type":"NEW_MSG","chat_id":5,"message_id":118}"#;
+    assert_eq!(
+        Transport::Sse.frame(payload),
+        Bytes::from(format!("data: {payload}\n\n"))
+    );
+    assert_eq!(Transport::WebSocket.frame(payload), Bytes::from(payload));
+}
