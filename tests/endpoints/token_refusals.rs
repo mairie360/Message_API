@@ -6,7 +6,7 @@
 //! all, another scheme, garbage, an HS256 token (no `JWT_SECRET` here, whatever secret signs it),
 //! an `EdDSA` token signed with another key under Core's `kid`, one without `iss`/`aud` or for
 //! another audience, an expired one, `alg: none`, a payload swapped under a valid signature, an
-//! asymmetric algorithm (the Keycloak path, disabled here), plus well-signed tokens for an unknown
+//! asymmetric algorithm (refused), plus well-signed tokens for an unknown
 //! and for an archived account.
 
 use actix_web::http::Method;
