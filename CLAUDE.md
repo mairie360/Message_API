@@ -143,7 +143,9 @@ scenario (MAIR-524) sends the incremental reads that replaced the 2 s reloads at
 full page; `op:chats_since` `GET /api/v1/?since=`), each with a 200 ms `p(95)`. `GET /api/v1/stream` has its own 1-VU `stream`
 scenario: the SSE response never ends, so k6 cuts it after 1 s (error 1050), a timeout marked expected with
 `responseCallback: http.expectedStatuses(0, 200)` so it stays out of `http_req_failed`. One `p(95)` threshold per
-`op` tag (200 ms reads, 500 ms writes, 1.5 s stream), `checks == 100%` (status and seeded rows), `dropped_iterations == 0` and
+`op` tag (200 ms reads, 500 ms writes, 1.5 s stream). The same scenario covers `GET /api/v1/ws` (MAIR-657): k6/http
+cannot upgrade, so the counted request is a plain `GET` answering the expected `400`, then `k6/ws` opens the real
+socket, checks the `101` and that it stays open for 1 s (the WebSocket load scenario is MAIR-661), `checks == 100%` (status and seeded rows), `dropped_iterations == 0` and
 `http_req_failed == 0`. Two load profiles (`K6_PROFILE`, passed by the compose file): `ci` (default) is what the 4 vCPU CI runner holds with the strict thresholds (30 readers, 4 writers, rush at 30 req/s); `stress` is the high load (100 readers, 10 writers, 100 req/s), run by hand with `K6_PROFILE=stress ./performance_test.sh` to find the breaking point, not on every push. Keep `init-perf.sql` and the id ranges at the top of `load-test.js` in step. The spec k6 reads is the one served
 by the image under test, saved into the `openapi-spec` volume by `message-ready`. **Adding an endpoint = adding its
 handler in `load-test.js`** (k6 aborts at init otherwise), nothing to do for ZAP. `init-test.sql` also seeds the
@@ -275,7 +277,10 @@ from `init-test.sql`), `jwt_forged` (Core's `kid`, another key) and `jwt_expired
 forges `jwt_hs256`, an HS256 token that must be refused (MAIR-680). From a host shell, fill those variables
 yourself. The scenario creates
 its own chat and deletes it at the end, so it is replayable against a persistent database. `GET /api/v1/stream`
-is only checked unauthenticated (401): newman cannot consume an open SSE stream.
+is only checked unauthenticated (401): newman cannot consume an open SSE stream. Nor can it open a WebSocket:
+`GET /api/v1/ws` is checked for its refused handshakes (`401` without or with a forged JWT, `400` without
+`Upgrade`); the journeys over a real socket are the Rust tests of `tests/endpoints/mair_657_websocket.rs` (MAIR-661
+adds them to the stacks).
 
 Split of the tests (MAIR-262): `cargo test` (unit and handler tests) validates the code, newman validates that the
 running image works. The collection holds, for **every operation of the spec**, its success case and one case per
@@ -370,7 +375,7 @@ Endpoints (and `sse::event_manager`) call `state.get_smart_db()` then:
 There is no compile-time query checking, so schema mistakes surface only at runtime / in
 the container tests.
 
-### Real-time SSE (`src/sse/`)
+### Real-time SSE and WebSocket (`src/sse/`, `endpoints/v1/stream`, `endpoints/v1/ws`)
 
 The real-time channel is moving to WebSocket (epic MAIR-655), SSE and WebSocket coexisting until MAIR-662 removes
 the SSE. The decision is `docs/en/adr/0001-messaging-websocket.md` and the frozen contract shared with BFF_Message
@@ -380,8 +385,9 @@ behaviour.
 
 - `state.rs`: `AppState { online_agents: DashMap<u64 /*user id*/, Vec<Connection>>, internal_bus:
   broadcast::Sender<ChatEvent>, relay: Option<Arc<RedisRelay>> }`, built with `AppState::new`. A `Connection` holds its
-  sender and a `close: Arc<Notify>`. `register` keeps at most `MAX_CONNECTIONS_PER_USER` (5) per user and notifies the
-  evicted oldest ones.
+  sender, a `close: Arc<Notify>` and its `Transport` (`Sse` or `WebSocket`, MAIR-657). `register` (SSE) and
+  `register_as` keep at most `MAX_CONNECTIONS_PER_USER` (5) per user, **both transports counted together**, and notify
+  the evicted oldest ones. `transports_of` lists a user's connections with their transport.
 - `relay.rs`: Redis pub/sub so every replica notifies its own streams. The channel is
   `<lib key prefix>:sse:chat-events` (`message-api:sse:chat-events` on the platform, whose Redis ACL grants that role
   `&message-api:*` + `PUBLISH`/`SUBSCRIBE`, `redis.pubSubRoles` in Deploiment). `RedisRelay::run` subscribes and pushes
@@ -395,7 +401,8 @@ behaviour.
   otherwise (a duplicate signal only makes a client read once more). `ChatEvent.kind` / `message_id` /
   `unread_count` are `#[serde(default)]`, so an event of an older replica reads as `MessageCreated`, and an older replica
   ignores them (signals everything as `NEW_MSG`) during a rolling update.
-- The listener pushes a serde-serialized `ChatSignal` frame (`data: {...}\n\n`, `ChatSignal::from_event`): `type`
+- The listener pushes a serde-serialized `ChatSignal` (`ChatSignal::from_event`), framed by `Transport::frame`: a whole
+  `data: {...}\n\n` event for an SSE connection, the bare JSON (one text frame) for a WebSocket. `type`
   `NEW_MSG` / `MSG_EDITED` / `MSG_DELETED` to every connection of each online non-excluded member but the actor (one
   `get_chat_users` query), `CHAT_READ` (with `unread_count`) to every connection of the reader only, no query. The frame
   of a post stays `{"type":"NEW_MSG","chat_id":…}` plus the additive `message_id`. The table of the event contract is
@@ -405,7 +412,17 @@ behaviour.
   actix sends the head of a streaming response with its first chunk only) and spawns a supervisor (`actix_web::rt::spawn`): 15 s
   keep-alive ping, `authenticate_token` again every 30 s (revoked session, deleted account), and a timer on the JWT
   `exp` when it is readable. Any failure notifies `close`, which ends the response (`take_until`); the connection is
-  removed once its receiver is gone.
+  removed once its receiver is gone. `sse::supervision` holds what the two transports share (15 s ping, 30 s
+  revalidation, `time_left` / `expiry` on the JWT `exp`, `still_valid`).
+- `GET /api/v1/ws` (MAIR-657, `endpoints/v1/ws/endpoint.rs`) is the WebSocket twin, on `actix-ws`: `JwtMiddleware`
+  refuses the handshake before any upgrade (`401`, `404` for an unknown or archived account), a plain `GET` without
+  `Upgrade` answers `400`. The route registers a `Transport::WebSocket` connection and spawns `serve`, one loop per
+  socket: signals → text frames, a ping every 15 s and `1001` after 45 s without pong, `4001` on the JWT expiry or a
+  failed revalidation (30 s), `4008` when `close` is notified (eviction), `1003` on any client data frame, `1009` beyond
+  4 KiB, then it removes the connection and sends the close frame. `serve` takes its `Timings`, so
+  `tests/endpoints/mair_657_websocket.rs` mounts it with short intervals (`/api/test/ws`) to test keep-alive and
+  revalidation on a real server (`actix-test` + `awc` client); `tests/sse/relay.rs` covers a WebSocket on another
+  replica. The contract is `docs/en/realtime-websocket.md`.
 
 ### Lists and rate limiting (MAIR-425)
 

@@ -15,7 +15,7 @@
 // - `writes`: every other operation with the write VUs of the profile. Each handler is self-contained: it creates what it
 //   needs through `fixture()`, sends its request, then deletes what it created, so the handlers
 //   do not depend on their order and the database ends as it started;
-// - `stream`: GET /api/v1/stream alone, 1 VU every few seconds. The SSE response never ends, so
+// - `stream`: GET /api/v1/stream and GET /api/v1/ws (MAIR-657) alone, 1 VU every few seconds. The SSE response never ends, so
 //   every call ends on a k6 timeout, which k6 logs as a warning: keeping it out of the 20 VUs
 //   keeps the CI log readable;
 // - `chats_rush`: `GET /api/v1/` as agents at the fixed arrival rate of the profile, failing if k6 has to drop
@@ -25,6 +25,7 @@
 //   messages, 5 tombstones) from its latest cursor (nothing changed, the common case) or, one
 //   time in four, from the beginning (catching up a full page), and `GET /api/v1/?since=`.
 import http from 'k6/http';
+import ws from 'k6/ws';
 import { check, fail, sleep } from 'k6';
 import { createCoverage, loadSpec } from '/coverage.js';
 
@@ -116,6 +117,11 @@ const STREAM_BUDGET_MS = 1500;
 
 const READ_METHODS = ['get', 'head', 'options'];
 const STREAM_PATH = '/api/v1/stream';
+// MAIR-657: the WebSocket twin of the stream, run in the same 1-VU scenario.
+const WS_PATH = '/api/v1/ws';
+const REALTIME_PATHS = [STREAM_PATH, WS_PATH];
+// How long the WebSocket of the `stream` scenario stays open before the VU closes it.
+const WS_HOLD_MS = 1000;
 
 /** The served spec restricted to the operations whose method and path pass `keep`. */
 function specSubset(spec, keep) {
@@ -235,6 +241,24 @@ const streamHandlers = {
       request({ params: { timeout: STREAM_HOLD, responseCallback: http.expectedStatuses(0, 200) } }),
       { 'stream stays open': (r) => r.error_code === 1050 || r.status === 200 },
     ),
+  // k6/http cannot upgrade a connection: the plain GET answers 400 (it is what the coverage counts),
+  // then k6/ws opens the real socket, which must be upgraded (101) and stay open until the VU closes
+  // it. The load scenario of the WebSocket itself is MAIR-661.
+  'GET /api/v1/ws': ({ request }) => {
+    check(request({ params: { responseCallback: http.expectedStatuses(400) } }), {
+      'ws plain GET 400': (r) => r.status === 400,
+    });
+    let closing = false;
+    let closedByServer = false;
+    const res = ws.connect(`${BASE_URL.replace(/^http/, 'ws')}${WS_PATH}`, { headers: AUTH, tags: { op: 'ws_session' } }, (socket) => {
+      socket.on('close', () => { closedByServer = !closing; });
+      socket.setTimeout(() => { closing = true; socket.close(); }, WS_HOLD_MS);
+    });
+    check(res, {
+      'ws upgraded': (r) => r && r.status === 101,
+      'ws stays open': () => !closedByServer,
+    });
+  },
 };
 
 const writeHandlers = {
@@ -316,10 +340,10 @@ const writeHandlers = {
 };
 
 const reads = createCoverage(readHandlers, {
-  spec: specSubset(spec, (method, path) => READ_METHODS.includes(method) && path !== STREAM_PATH),
+  spec: specSubset(spec, (method, path) => READ_METHODS.includes(method) && !REALTIME_PATHS.includes(path)),
 });
 const stream = createCoverage(streamHandlers, {
-  spec: specSubset(spec, (method, path) => READ_METHODS.includes(method) && path === STREAM_PATH),
+  spec: specSubset(spec, (method, path) => READ_METHODS.includes(method) && REALTIME_PATHS.includes(path)),
 });
 const writes = createCoverage(writeHandlers, {
   spec: specSubset(spec, (method) => !READ_METHODS.includes(method)),

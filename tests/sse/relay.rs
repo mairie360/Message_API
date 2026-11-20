@@ -132,3 +132,38 @@ async fn test_the_relay_works_under_the_platform_acl() {
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert!(!other.is_subscribed());
 }
+
+/// MAIR-657 (MAIR-655 CA4): a WebSocket connected to another replica receives the signal of an
+/// event published on the first one, through Redis, framed as bare JSON.
+#[tokio::test]
+async fn mair_657_a_websocket_on_another_replica_receives_the_signal() {
+    use message_api::sse::event_manager::start_internal_event_listener;
+    use message_api::sse::state::Transport;
+    use std::sync::Arc;
+
+    let (_redis, config) = start_redis_container().await;
+    let (first, _first_rx) = replica(&config.url, "sse:chat-events").await;
+    let (second, _second_rx) = replica(&config.url, "sse:chat-events").await;
+    let second = Arc::new(second);
+    tokio::spawn(start_internal_event_listener(
+        second.clone(),
+        crate::common::get_smart_db().await,
+    ));
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let (sender, mut socket) = tokio::sync::mpsc::channel(4);
+    second.register_as(77, sender, Transport::WebSocket);
+    // A read acknowledgement only goes to the reader: no chat needs to exist in the database.
+    first.publish(ChatEvent::chat_read(5, 77, 118, 0)).await;
+
+    let frame = tokio::time::timeout(Duration::from_secs(5), socket.recv())
+        .await
+        .expect("signal relayed in time")
+        .expect("channel open")
+        .unwrap();
+    let signal: serde_json::Value = serde_json::from_slice(&frame).unwrap();
+    assert_eq!(
+        signal,
+        serde_json::json!({ "type": "CHAT_READ", "chat_id": 5, "message_id": 118, "unread_count": 0 })
+    );
+}
