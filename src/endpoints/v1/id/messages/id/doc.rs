@@ -1,6 +1,7 @@
 use crate::endpoints::v1::id::messages::id::delete::endpoint::__path_delete_message;
 use crate::endpoints::v1::id::messages::id::patch::endpoint::__path_patch_message;
 use crate::endpoints::v1::id::messages::id::patch::view::PatchMessageView;
+use crate::endpoints::v1::id::messages::id::reactions::doc::ReactionsDoc;
 use crate::endpoints::v1::id::ChatPathParams;
 use utoipa::OpenApi;
 
@@ -14,5 +15,6 @@ struct Doc;
 #[derive(OpenApi)]
 #[openapi(nest(
     (path = "/", api = Doc),
+    (path = "/reactions", api = ReactionsDoc),
 ))]
 pub struct IdDoc;

@@ -24,8 +24,19 @@ impl PostMessageInChatQueryView {
                 QueryParam::Text(message.to_string()),
                 // No optional BIGINT in `QueryParam`: 0 (never a message id) stands for "none".
                 QueryParam::I64(reply_to.map_or(0, bigint_to_sql)),
+                QueryParam::Bool(false),
             ],
         }
+    }
+
+    /// Whether the message mentions every member of the chat (MAIR-1155). Default `false`.
+    pub fn mentioning_everyone(mut self, everyone: bool) -> Self {
+        self.params[4] = QueryParam::Bool(everyone);
+        self
+    }
+
+    pub fn mentions_everyone(&self) -> bool {
+        self.params[4].as_bool()
     }
 
     pub fn chat_id(&self) -> u64 {
@@ -65,8 +76,8 @@ impl ApiRequestDto for PostMessageInChatQueryView {
     fn query_sql(&self) -> &'static str {
         // A deleted message (tombstone, MAIR-524) cannot be quoted: no row is inserted then
         // (`DbError::NotFound`). An unknown one still fails on `fk_messages_reply_to`.
-        "INSERT INTO messages (conversation_id, owner_id, content, reply_to_id) \
-         SELECT $1, $2, $3, NULLIF($4::bigint, 0) \
+        "INSERT INTO messages (conversation_id, owner_id, content, reply_to_id, mentions_everyone) \
+         SELECT $1, $2, $3, NULLIF($4::bigint, 0), $5 \
          WHERE $4::bigint = 0 OR NOT EXISTS ( \
              SELECT 1 FROM messages q \
              WHERE q.id = $4::bigint AND q.conversation_id = $1 AND q.deleted_at IS NOT NULL) \

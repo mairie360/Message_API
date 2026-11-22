@@ -224,6 +224,28 @@ const readHandlers = {
         r.status === 200 && r.json('users').every((user) => user.first_name === 'Agent' && user.last_name.startsWith('Perf ')),
     });
   },
+  // MAIR-1155: search in one of the agent's chats, its messages ("Perf message <n>", 25 per chat)
+  // or its members (8 "Agent Perf <id>").
+  'GET /api/v1/{chat_id}/search/': ({ request }) => {
+    const agent = randomAgent();
+    const people = randomInt(2) === 0;
+    const res = request({
+      path: { chat_id: agent.chatId },
+      query: people ? { q: 'Agent Perf', type: 'people' } : { q: 'Perf message 1', limit: 20 },
+      headers: agent.headers,
+    });
+    check(res, {
+      'search chat 200': (r) => r.status === 200,
+      'search chat finds the seeded rows': (r) =>
+        r.status === 200 && r.json('items').length > 0 && r.json('total') >= r.json('items').length,
+    });
+  },
+  'GET /api/v1/{chat_id}/mention-groups/': ({ request }) => {
+    const agent = randomAgent();
+    check(request({ path: { chat_id: agent.chatId }, headers: agent.headers }), {
+      'mention groups 200': (r) => r.status === 200 && Array.isArray(r.json('groups')),
+    });
+  },
 };
 
 const streamHandlers = {
@@ -281,6 +303,31 @@ const writeHandlers = {
     check(request({ path: { chat_id: data.writeChatId, message_id: messageId } }), {
       'delete message 204': (r) => r.status === 204,
     });
+  },
+
+  // Reactions (MAIR-1155), on a message of the write sandbox: react → remove.
+  'POST /api/v1/{chat_id}/messages/{message_id}/reactions/': ({ request, data }) => {
+    const messageId = postMessage(data.writeChatId, 'k6 message to react to');
+    check(
+      request({ path: { chat_id: data.writeChatId, message_id: messageId }, body: { emoji: '👍' } }),
+      {
+        'add reaction 200': (r) => r.status === 200,
+        'add reaction answers the reactions': (r) => r.status === 200 && r.json('reactions.0.count') === 1,
+      },
+    );
+    deleteMessage(data.writeChatId, messageId);
+  },
+  'DELETE /api/v1/{chat_id}/messages/{message_id}/reactions/': ({ request, data }) => {
+    const messageId = postMessage(data.writeChatId, 'k6 message to unreact');
+    fixture('POST', `/api/v1/${data.writeChatId}/messages/${messageId}/reactions/`, { emoji: '👍' });
+    check(
+      request({ path: { chat_id: data.writeChatId, message_id: messageId }, query: { emoji: '👍' } }),
+      {
+        'remove reaction 200': (r) => r.status === 200,
+        'remove reaction answers what is left': (r) => r.status === 200 && r.json('reactions').length === 0,
+      },
+    );
+    deleteMessage(data.writeChatId, messageId);
   },
 
   // Read acknowledgement, on a chat of its own: the Admin posts a message and acknowledges it.

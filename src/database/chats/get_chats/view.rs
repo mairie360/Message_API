@@ -22,7 +22,7 @@ fn page_offset(offset: u32) -> QueryParam {
 
 /// `ILIKE` pattern matching `term` anywhere: `%`, `_` and `\` of the term are escaped so that they
 /// only match themselves. The empty string (no search) is passed as is and disables the filter.
-fn search_pattern(term: Option<&str>) -> QueryParam {
+pub fn search_pattern(term: Option<&str>) -> QueryParam {
     let term = term.map(str::trim).unwrap_or_default();
     if term.is_empty() {
         return QueryParam::Text(String::new());
