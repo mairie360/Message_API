@@ -11,7 +11,10 @@ use crate::endpoints::v1::id::access::{
 use crate::database::chats::delete_message_from_chat::view::{
     DeleteMessageQueryView, LockChatMessagesQueryView,
 };
+use crate::database::chats::message_reactions::view::{MessageState, MessageStateQueryView};
+use crate::database::chats::message_tags::view::PurgeMessageExtrasQueryView;
 use crate::endpoints::error::{classify, unexpected, DbFailure};
+use crate::endpoints::v1::id::messages::id::patch::endpoint::SYSTEM_NOTE_MESSAGE;
 use crate::endpoints::v1::id::messages::id::MessagePathParams;
 use crate::sse::state::ChatEvent;
 
@@ -20,6 +23,8 @@ pub enum DeleteMessageError {
     DatabaseError,
     UnknownMessage,
     Forbidden,
+    /// The message is a system note (MAIR-1155).
+    SystemNote,
 }
 
 impl std::fmt::Display for DeleteMessageError {
@@ -34,6 +39,7 @@ impl std::fmt::Display for DeleteMessageError {
             DeleteMessageError::UnknownMessage => {
                 write!(f, "Unknown message.")
             }
+            DeleteMessageError::SystemNote => f.write_str(SYSTEM_NOTE_MESSAGE),
         }
     }
 }
@@ -44,6 +50,7 @@ impl ResponseError for DeleteMessageError {
             DeleteMessageError::Forbidden => StatusCode::FORBIDDEN,
             DeleteMessageError::DatabaseError => StatusCode::INTERNAL_SERVER_ERROR,
             DeleteMessageError::UnknownMessage => StatusCode::NOT_FOUND,
+            DeleteMessageError::SystemNote => StatusCode::BAD_REQUEST,
         }
     }
 
@@ -58,6 +65,16 @@ async fn trigger_delete_message(
     message_id: u64,
     performed_by: u64,
 ) -> Result<(), DeleteMessageError> {
+    let state: MessageState = tx
+        .fetch_one(&MessageStateQueryView::new(chat_id, message_id))
+        .await
+        .map_err(|e| match classify("message state", e) {
+            DbFailure::NotFound => DeleteMessageError::UnknownMessage,
+            _ => DeleteMessageError::DatabaseError,
+        })?;
+    if state.is_system() {
+        return Err(DeleteMessageError::SystemNote);
+    }
     // The unread counters it lowers must not race an acknowledgement of the chat.
     tx.execute(&LockChatMessagesQueryView::new(chat_id))
         .await
@@ -72,6 +89,14 @@ async fn trigger_delete_message(
         .map_err(|e| match classify("delete message", e) {
             DbFailure::NotFound => DeleteMessageError::UnknownMessage,
             _ => DeleteMessageError::DatabaseError,
+        })?;
+    // A tombstone keeps no reaction, mention nor link (MAIR-1155). A statement of its own: it
+    // also sees a reaction committed while the deletion waited for the row.
+    tx.execute(&PurgeMessageExtrasQueryView::new(message_id))
+        .await
+        .map_err(|e| {
+            unexpected("purge message extras", e);
+            DeleteMessageError::DatabaseError
         })?;
 
     Ok(())
@@ -90,7 +115,9 @@ async fn trigger_delete_message(
                    every other connected member.\n\n \
                    Only the author of the message may delete it (`403` for another member). Administrators may \
                    delete any message, even in a chat they are not a member of (moderation): the deletion of a \
-                   message written by someone else is recorded, with its content, in the moderation log.",
+                   message written by someone else is recorded, with its content, in the moderation log.\n\n \
+                   The reactions, mentions and links of the message are deleted with it (MAIR-1155). A system \
+                   note (the record of a member change) cannot be deleted (`400`).",
     responses(
         (
             status = 204,
@@ -98,7 +125,7 @@ async fn trigger_delete_message(
         ),
         (
             status = 400,
-            description = "A URL segment is not an integer.",
+            description = "A URL segment is not an integer, or the message is a system note (`A system note cannot be changed.`, MAIR-1155).",
             body = String,
             content_type = "text/plain",
             example = json!("Invalid path: ids are integers.")

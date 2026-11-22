@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use utoipa::{IntoParams, ToSchema};
 
-use crate::database::chats::get_chat::view::Message;
+use crate::database::chats::get_chat::view::{LinkRow, Message, ReactionRow, SystemEventRow};
 use crate::database::ids::{bigint_from_sql, id_from_sql};
 use crate::endpoints::v1::get::view::ChatView;
 use crate::endpoints::validation::{Validate, ValidationError, MAX_MESSAGE_ID};
@@ -138,6 +138,186 @@ impl QuotedMessageView {
     }
 }
 
+/// Who wrote a message (MAIR-1155).
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ToSchema,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum MessageKind {
+    /// Written by a member: `content` holds the text.
+    #[default]
+    User,
+    /// Written by the API when the members change: `content` is empty and `system_event` tells
+    /// what happened. It never counts as unread, cannot be edited, deleted, quoted or reacted to.
+    System,
+}
+
+/// What a system note records (MAIR-1155).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SystemEventAction {
+    /// `actor_id` added `user_ids` to the chat.
+    MembersAdded,
+    /// `actor_id` removed `user_ids` (one member) from the chat.
+    MemberRemoved,
+    /// `actor_id` left the chat (`user_ids` holds `actor_id`).
+    MemberLeft,
+}
+
+impl SystemEventAction {
+    fn parse(action: &str) -> Option<Self> {
+        match action {
+            "members_added" => Some(Self::MembersAdded),
+            "member_removed" => Some(Self::MemberRemoved),
+            "member_left" => Some(Self::MemberLeft),
+            _ => None,
+        }
+    }
+}
+
+/// The member change a system note records.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ToSchema)]
+pub struct SystemEventView {
+    /// What happened.
+    #[schema(example = "members_added")]
+    action: SystemEventAction,
+    /// Core API id of the member who made the change.
+    #[schema(example = 42)]
+    actor_id: u64,
+    /// Core API ids of the members added, removed or leaving.
+    #[schema(example = json!([51, 63]))]
+    user_ids: Vec<u64>,
+}
+
+impl SystemEventView {
+    pub fn new(action: SystemEventAction, actor_id: u64, user_ids: Vec<u64>) -> Self {
+        Self {
+            action,
+            actor_id,
+            user_ids,
+        }
+    }
+
+    pub fn action(&self) -> SystemEventAction {
+        self.action
+    }
+
+    pub fn actor_id(&self) -> u64 {
+        self.actor_id
+    }
+
+    pub fn user_ids(&self) -> &[u64] {
+        &self.user_ids
+    }
+
+    fn from_row(row: SystemEventRow) -> Option<Self> {
+        Some(Self::new(
+            SystemEventAction::parse(&row.action)?,
+            id_from_sql(row.actor_id),
+            row.user_ids.into_iter().map(id_from_sql).collect(),
+        ))
+    }
+}
+
+/// Kind of business object a message links to (MAIR-1155).
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, ToSchema,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum LinkKind {
+    /// A project of Project API.
+    Project,
+    /// A task of Project API.
+    Task,
+    /// An event of Calendar API.
+    Event,
+}
+
+impl LinkKind {
+    /// The `kind` stored in the tags document and read back from the database.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LinkKind::Project => "project",
+            LinkKind::Task => "task",
+            LinkKind::Event => "event",
+        }
+    }
+
+    fn parse(kind: &str) -> Option<Self> {
+        match kind {
+            "project" => Some(Self::Project),
+            "task" => Some(Self::Task),
+            "event" => Some(Self::Event),
+            _ => None,
+        }
+    }
+}
+
+/// A business object a message links to: a project, a task or an event.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, ToSchema,
+)]
+pub struct MessageLinkView {
+    /// Kind of the object.
+    #[schema(example = "project")]
+    kind: LinkKind,
+    /// Id of the object in its API.
+    #[schema(example = 12, minimum = 1, maximum = 2147483647)]
+    id: u64,
+}
+
+impl MessageLinkView {
+    pub fn new(kind: LinkKind, id: u64) -> Self {
+        Self { kind, id }
+    }
+
+    pub fn kind(&self) -> LinkKind {
+        self.kind
+    }
+
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+}
+
+/// The reactions of a message with one emoji.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ToSchema)]
+pub struct ReactionView {
+    /// The emoji (1 to 32 characters, no whitespace).
+    #[schema(example = "👍")]
+    emoji: String,
+    /// Number of members who reacted with it (`user_ids.len()`).
+    #[schema(example = 2)]
+    count: u32,
+    /// Core API ids of the members who reacted with it, in reaction order.
+    #[schema(example = json!([42, 51]))]
+    user_ids: Vec<u64>,
+}
+
+impl ReactionView {
+    pub fn emoji(&self) -> &str {
+        &self.emoji
+    }
+
+    pub fn count(&self) -> u32 {
+        self.count
+    }
+
+    pub fn user_ids(&self) -> &[u64] {
+        &self.user_ids
+    }
+}
+
+impl From<ReactionRow> for ReactionView {
+    fn from(row: ReactionRow) -> Self {
+        Self {
+            emoji: row.emoji,
+            count: u32::try_from(row.count).unwrap_or_default(),
+            user_ids: row.user_ids.into_iter().map(id_from_sql).collect(),
+        }
+    }
+}
+
 /// A message of a chat.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, ToSchema)]
 pub struct MessageView {
@@ -172,6 +352,28 @@ pub struct MessageView {
     /// `null`. Always `false` in the history.
     #[schema(example = false)]
     deleted: bool,
+    /// `user` for a message of a member, `system` for a note the API wrote when the members
+    /// changed (MAIR-1155).
+    #[schema(example = "user")]
+    kind: MessageKind,
+    /// `system` notes only: the member change they record; `null` for a message of a member.
+    #[schema(nullable = true, required = true)]
+    system_event: Option<SystemEventView>,
+    /// Core API ids of the members the message mentions, by increasing id.
+    #[schema(example = json!([51]))]
+    mentions: Vec<u64>,
+    /// Whether the message mentions every member of the chat (`@everyone`).
+    #[schema(example = false)]
+    mentions_everyone: bool,
+    /// Core API ids of the groups the message mentions (their members present in the chat are
+    /// notified), by increasing id.
+    #[schema(example = json!([]))]
+    group_mentions: Vec<u64>,
+    /// Business objects the message links to, in the order they were given.
+    links: Vec<MessageLinkView>,
+    /// Reactions, one entry per emoji in the order of its first reaction; empty for a deleted
+    /// message and a system note.
+    reactions: Vec<ReactionView>,
 }
 
 impl MessageView {
@@ -192,6 +394,13 @@ impl MessageView {
             edited_at: None,
             updated_at: created_at,
             deleted: false,
+            kind: MessageKind::User,
+            system_event: None,
+            mentions: Vec::new(),
+            mentions_everyone: false,
+            group_mentions: Vec::new(),
+            links: Vec::new(),
+            reactions: Vec::new(),
         }
     }
 
@@ -248,6 +457,34 @@ impl MessageView {
     pub fn deleted(&self) -> bool {
         self.deleted
     }
+
+    pub fn kind(&self) -> MessageKind {
+        self.kind
+    }
+
+    pub fn system_event(&self) -> Option<&SystemEventView> {
+        self.system_event.as_ref()
+    }
+
+    pub fn mentions(&self) -> &[u64] {
+        &self.mentions
+    }
+
+    pub fn mentions_everyone(&self) -> bool {
+        self.mentions_everyone
+    }
+
+    pub fn group_mentions(&self) -> &[u64] {
+        &self.group_mentions
+    }
+
+    pub fn links(&self) -> &[MessageLinkView] {
+        &self.links
+    }
+
+    pub fn reactions(&self) -> &[ReactionView] {
+        &self.reactions
+    }
 }
 
 impl From<Message> for MessageView {
@@ -263,7 +500,7 @@ impl From<Message> for MessageView {
             )),
             _ => None,
         };
-        Self::new(
+        let mut view = Self::new(
             bigint_from_sql(message.id),
             &message.content,
             message.owner_id.map(id_from_sql),
@@ -274,7 +511,33 @@ impl From<Message> for MessageView {
                 .map(bigint_from_sql),
         )
         .with_quoted(quoted)
-        .with_changes(message.edited_at, message.updated_at, message.deleted)
+        .with_changes(message.edited_at, message.updated_at, message.deleted);
+        view.system_event = message.system_event.and_then(SystemEventView::from_row);
+        view.kind = if message.kind == "system" {
+            MessageKind::System
+        } else {
+            MessageKind::User
+        };
+        view.mentions_everyone = message.mentions_everyone;
+        view.mentions = message.mentions.into_iter().map(id_from_sql).collect();
+        view.group_mentions = message
+            .group_mentions
+            .into_iter()
+            .map(id_from_sql)
+            .collect();
+        view.links = message
+            .links
+            .into_iter()
+            .filter_map(|LinkRow { kind, id }| {
+                LinkKind::parse(&kind).map(|kind| MessageLinkView::new(kind, id_from_sql(id)))
+            })
+            .collect();
+        view.reactions = message
+            .reactions
+            .into_iter()
+            .map(ReactionView::from)
+            .collect();
+        view
     }
 }
 
@@ -416,6 +679,13 @@ mod tests {
             updated_at: Utc::now(),
             edited_at: None,
             deleted: false,
+            kind: "user".to_string(),
+            system_event: None,
+            mentions_everyone: false,
+            mentions: vec![],
+            group_mentions: vec![],
+            links: vec![],
+            reactions: vec![],
         }
     }
 
@@ -463,6 +733,64 @@ mod tests {
             (3, Some(51), "Le permis ?")
         );
         assert!(MessageView::from(message(8)).quoted().is_none());
+    }
+
+    #[test]
+    fn the_messaging_v2_fields_are_converted() {
+        let mut note = message(9);
+        note.kind = "system".to_string();
+        note.content = String::new();
+        note.system_event = Some(SystemEventRow {
+            action: "members_added".to_string(),
+            actor_id: 42,
+            user_ids: vec![51, 63],
+        });
+        let view = MessageView::from(note);
+        assert_eq!(view.kind(), MessageKind::System);
+        let event = view.system_event().expect("system event");
+        assert_eq!(
+            (event.action(), event.actor_id(), event.user_ids()),
+            (SystemEventAction::MembersAdded, 42, &[51, 63][..])
+        );
+
+        let mut tagged = message(10);
+        tagged.mentions = vec![51];
+        tagged.mentions_everyone = true;
+        tagged.group_mentions = vec![3];
+        tagged.links = vec![
+            LinkRow {
+                kind: "task".to_string(),
+                id: 7,
+            },
+            LinkRow {
+                kind: "unknown".to_string(),
+                id: 8,
+            },
+        ];
+        tagged.reactions = vec![ReactionRow {
+            emoji: "👍".to_string(),
+            count: 2,
+            user_ids: vec![42, 51],
+        }];
+        let view = MessageView::from(tagged);
+        assert_eq!(view.kind(), MessageKind::User);
+        assert!(view.system_event().is_none());
+        assert_eq!(view.mentions(), &[51]);
+        assert!(view.mentions_everyone());
+        assert_eq!(view.group_mentions(), &[3]);
+        assert_eq!(view.links(), &[MessageLinkView::new(LinkKind::Task, 7)]);
+        let reaction = &view.reactions()[0];
+        assert_eq!(
+            (reaction.emoji(), reaction.count(), reaction.user_ids()),
+            ("👍", 2, &[42, 51][..])
+        );
+        let json = serde_json::to_value(&view).unwrap();
+        assert_eq!(json["kind"], "user");
+        assert_eq!(
+            json["links"][0],
+            serde_json::json!({ "kind": "task", "id": 7 })
+        );
+        assert_eq!(json["system_event"], serde_json::Value::Null);
     }
 
     #[test]

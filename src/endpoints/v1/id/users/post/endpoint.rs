@@ -10,10 +10,13 @@ use crate::endpoints::v1::id::access::{
 };
 
 use crate::database::chats::add_users_to_chat::view::AddMembersToChatQueryView;
+use crate::database::chats::system_notes::view::SystemAction;
 use crate::endpoints::error::{classify, DbFailure};
 use crate::endpoints::v1::id::users::post::view::{AddUsersToChat, AddUsersToChatResultView};
+use crate::endpoints::v1::id::users::{post_system_note, SystemNoteFailed};
 use crate::endpoints::v1::id::ChatPathParams;
 use crate::endpoints::validation::ValidatedJson;
+use crate::sse::state::ChatEvent;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AddUsersToChatError {
@@ -63,6 +66,7 @@ impl ResponseError for AddUsersToChatError {
 async fn trigger_add_users_to_chat(
     tx: &mut SmartTransaction,
     chat_id: u64,
+    actor_id: u64,
     view: AddUsersToChat,
 ) -> Result<AddUsersToChatResultView, AddUsersToChatError> {
     let added = view.users_id().to_vec();
@@ -83,7 +87,9 @@ async fn trigger_add_users_to_chat(
             _ => AddUsersToChatError::DatabaseError,
         })?;
 
-    Ok(AddUsersToChatResultView::new(chat_id, added))
+    // The history records the addition (MAIR-1155), in the same transaction.
+    let note = post_system_note(tx, chat_id, actor_id, SystemAction::MembersAdded, &added).await?;
+    Ok(AddUsersToChatResultView::new(chat_id, added).with_system_message(note))
 }
 
 #[utoipa::path(
@@ -98,13 +104,24 @@ async fn trigger_add_users_to_chat(
                    any other member gets `403`. A caller who is neither a member nor an administrator gets \
                    the same `404` as for an unknown chat.\n\n \
                    A **direct** chat keeps its two participants: adding anyone to it answers `409`, create a \
-                   group chat with `POST /api/v1/` instead.",
+                   group chat with `POST /api/v1/` instead.\n\n \
+                   **System note** (MAIR-1155): the addition is recorded in the history as a message of `kind` \
+                   `system` (action `members_added`, the caller as `actor_id`, the users added as `user_ids`), \
+                   returned as `system_message`. Once committed, it is signalled as `NEW_MSG` to the members but \
+                   the caller, and `MEMBERS_CHANGED` goes to every member, the caller and the new ones included.",
     responses(
         (
             status = 200,
-            description = "Users added. `added` lists them (every id of `users_id`).",
+            description = "Users added. `added` lists them (every id of `users_id`); `system_message` is the note the history now shows (MAIR-1155).",
             body = AddUsersToChatResultView,
-            example = json!({ "chat_id": 5, "added": [42, 51] })
+            example = json!({ "chat_id": 5, "added": [42, 51], "system_message": {
+                "id": 119, "content": "", "sender_id": 1, "created_at": "2026-09-16T09:20:00Z",
+                "citation": null, "quoted": null, "edited_at": null,
+                "updated_at": "2026-09-16T09:20:00.120411Z", "deleted": false,
+                "kind": "system",
+                "system_event": { "action": "members_added", "actor_id": 1, "user_ids": [42, 51] },
+                "mentions": [], "mentions_everyone": false, "group_mentions": [], "links": [], "reactions": []
+            } })
         ),
         (
             status = 400,
@@ -162,6 +179,7 @@ async fn trigger_add_users_to_chat(
 #[post("/")]
 pub async fn add_users_to_chat(
     state: web::Data<AppState>,
+    sse_state: web::Data<crate::sse::state::AppState>,
     auth_user: AuthenticatedUser,
     view: ValidatedJson<AddUsersToChat>,
     params: web::Path<ChatPathParams>,
@@ -175,9 +193,32 @@ pub async fn add_users_to_chat(
     if !role.can_manage_members() {
         return Err(AddUsersToChatError::Forbidden);
     }
-    let result = trigger_add_users_to_chat(&mut tx, params.chat_id, view).await?;
+    let result = trigger_add_users_to_chat(&mut tx, params.chat_id, auth_user.id, view).await?;
     commit(tx).await?;
+    // Only once committed: the new members can read the chat when they get the signals.
+    if let Some(note) = result.system_message() {
+        sse_state
+            .publish(ChatEvent::message_created(
+                params.chat_id,
+                auth_user.id,
+                note.id(),
+            ))
+            .await;
+    }
+    sse_state
+        .publish(ChatEvent::members_changed(
+            params.chat_id,
+            auth_user.id,
+            Vec::new(),
+        ))
+        .await;
     Ok(HttpResponse::Ok().json(result))
+}
+
+impl From<SystemNoteFailed> for AddUsersToChatError {
+    fn from(_: SystemNoteFailed) -> Self {
+        AddUsersToChatError::DatabaseError
+    }
 }
 
 impl From<AccessDenied> for AddUsersToChatError {

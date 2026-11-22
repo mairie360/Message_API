@@ -56,8 +56,8 @@ async fn chats_and_members_are_paginated() {
     assert_eq!(
         body["users"],
         json!([
-            { "id": user, "first_name": "Chat", "last_name": "Member" },
-            { "id": second, "first_name": "Chat", "last_name": "Member" }
+            { "id": user, "first_name": "Chat", "last_name": "Member", "is_admin": true },
+            { "id": second, "first_name": "Chat", "last_name": "Member", "is_admin": false }
         ])
     );
     assert_eq!(body["has_more"], true);
@@ -65,7 +65,7 @@ async fn chats_and_members_are_paginated() {
     let (_, body) = send_json!(app, request(Method::GET, &uri, Some(user)));
     assert_eq!(
         body["users"],
-        json!([{ "id": third, "first_name": "Chat", "last_name": "Member" }])
+        json!([{ "id": third, "first_name": "Chat", "last_name": "Member", "is_admin": false }])
     );
     assert_eq!(body["has_more"], false);
 

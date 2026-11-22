@@ -195,9 +195,23 @@ macro_rules! fixtures {
             .set_json(json!({ "content": "Message de la matrice" }))
         );
         assert!(status.is_success(), "fixture: post the message: {status}");
+        let message = posted["id"].as_u64().unwrap();
+        // Everyone of the chat reacted (MAIR-1155), so that removing one's reaction is possible.
+        for who in [$people.creator, $people.member, $people.author] {
+            let (status, _) = send_json!(
+                $app,
+                as_caller(
+                    Method::POST,
+                    &format!("/api/v1/{chat}/messages/{message}/reactions/"),
+                    Some(who)
+                )
+                .set_json(json!({ "emoji": "👍" }))
+            );
+            assert!(status.is_success(), "fixture: react: {status}");
+        }
         Fixtures {
             chat,
-            message: posted["id"].as_u64().unwrap(),
+            message,
             extra,
         }
     }};
@@ -213,10 +227,18 @@ fn request(
     joiner: u64,
 ) -> TestRequest {
     let (method, path) = name.split_once(' ').unwrap();
-    let uri = path
+    let mut uri = path
         .replace("{chat_id}", &f.chat.to_string())
         .replace("{message_id}", &f.message.to_string())
         .replace("{user_id}", &f.extra.to_string());
+    // Required query parameters (MAIR-1155).
+    match name {
+        "GET /api/v1/{chat_id}/search/" => uri.push_str("?q=Message"),
+        "DELETE /api/v1/{chat_id}/messages/{message_id}/reactions/" => {
+            uri.push_str("?emoji=%F0%9F%91%8D");
+        }
+        _ => {}
+    }
     let example = spec["paths"][path][method.to_lowercase()]["requestBody"]["content"]
         ["application/json"]["example"]
         .clone();
@@ -224,6 +246,7 @@ fn request(
         "POST /api/v1/" => Some(json!({ "name": "Nouvelle discussion", "members": [joiner] })),
         "POST /api/v1/direct/" => Some(json!({ "contact_id": joiner })),
         "POST /api/v1/{chat_id}/messages/" => Some(json!({ "content": "Bonjour" })),
+        "PATCH /api/v1/{chat_id}/messages/{message_id}/" => Some(json!({ "content": "Modifié" })),
         "POST /api/v1/{chat_id}/read/" => Some(json!({ "readUntilMessageId": f.message })),
         "POST /api/v1/{chat_id}/users/" => Some(json!({ "users_id": [joiner] })),
         _ if example.is_null() => None,

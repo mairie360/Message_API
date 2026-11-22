@@ -13,6 +13,9 @@ use crate::database::chats::reveal_direct_chat::view::RevealDirectChatQueryView;
 use crate::database::ids::bigint_from_sql;
 use crate::endpoints::error::{classify, unexpected, DbFailure};
 use crate::endpoints::v1::id::messages::post::view::{PostMessageResultView, PostMessageView};
+use crate::endpoints::v1::id::messages::tags::{
+    check_tags, mention_recipients, write_tags, TagsFailure,
+};
 use crate::endpoints::v1::id::ChatPathParams;
 use crate::endpoints::validation::ValidatedJson;
 use crate::sse::state::ChatEvent;
@@ -23,6 +26,8 @@ pub enum PosteMessageError {
     UnknownChat,
     UnknownCitation,
     NotAMember,
+    /// A mention or link the author may not make (MAIR-1155): the body of the `400`.
+    RefusedTag(&'static str),
 }
 
 impl std::fmt::Display for PosteMessageError {
@@ -36,6 +41,7 @@ impl std::fmt::Display for PosteMessageError {
                 write!(f, "`citation` is not a message of this chat.")
             }
             PosteMessageError::NotAMember => f.write_str(NOT_A_MEMBER_MESSAGE),
+            PosteMessageError::RefusedTag(message) => f.write_str(message),
         }
     }
 }
@@ -45,7 +51,9 @@ impl ResponseError for PosteMessageError {
         match self {
             PosteMessageError::DatabaseError => StatusCode::INTERNAL_SERVER_ERROR,
             PosteMessageError::UnknownChat => StatusCode::NOT_FOUND,
-            PosteMessageError::UnknownCitation => StatusCode::BAD_REQUEST,
+            PosteMessageError::UnknownCitation | PosteMessageError::RefusedTag(_) => {
+                StatusCode::BAD_REQUEST
+            }
             PosteMessageError::NotAMember => StatusCode::FORBIDDEN,
         }
     }
@@ -55,13 +63,21 @@ impl ResponseError for PosteMessageError {
     }
 }
 
+/// The message posted and the members it mentions.
+struct Posted {
+    result: PostMessageResultView,
+    mentioned: Vec<u64>,
+}
+
 async fn trigger_post_message(
     tx: &mut SmartTransaction,
     user_id: u64,
     view: PostMessageView,
     chat_id: u64,
     is_direct: bool,
-) -> Result<PostMessageResultView, PosteMessageError> {
+) -> Result<Posted, PosteMessageError> {
+    let tags = view.tags();
+    check_tags(tx, chat_id, user_id, &tags).await?;
     if is_direct {
         // A participant who hid the direct chat sees it again, before the insert so that the
         // unread-counter trigger counts this message for them.
@@ -73,7 +89,8 @@ async fn trigger_post_message(
             })?;
     }
     let view =
-        PostMessageInChatQueryView::replying_to(chat_id, user_id, view.content(), view.citation());
+        PostMessageInChatQueryView::replying_to(chat_id, user_id, view.content(), view.citation())
+            .mentioning_everyone(tags.mentions_everyone.unwrap_or(false));
     let result =
         tx.fetch_scalar::<i64, _>(&view)
             .await
@@ -88,7 +105,17 @@ async fn trigger_post_message(
                 _ => PosteMessageError::DatabaseError,
             })?;
 
-    Ok(PostMessageResultView::new(bigint_from_sql(result)))
+    let message_id = bigint_from_sql(result);
+    write_tags(tx, message_id, &tags).await?;
+    let mentioned = if tags.has_lists() || tags.mentions_everyone == Some(true) {
+        mention_recipients(tx, message_id).await?
+    } else {
+        Vec::new()
+    };
+    Ok(Posted {
+        result: PostMessageResultView::new(message_id),
+        mentioned,
+    })
 }
 
 #[utoipa::path(
@@ -103,6 +130,12 @@ async fn trigger_post_message(
                    `GET /api/v1/{chat_id}/` (`null` once the quoted message is deleted).\n\n \
                    The signal is `NEW_MSG` with the new `message_id`, pushed once the message is committed.\n\n \
                    The response only holds the id given to the message.\n\n \
+                   **Mentions and links** (MAIR-1155, optional): `mentions` (members of the chat), \
+                   `mentions_everyone`, `group_mentions` (groups one of the members belongs to, see \
+                   `GET /api/v1/{chat_id}/mention-groups/`) and `links` (`{kind: project | task | event, id}` the \
+                   author may read). They are read back on the message by `GET /api/v1/{chat_id}/`. Every member \
+                   mentioned (by id, by `@everyone` or through a group) but the author also gets a `MENTIONED` \
+                   signal. A tag the author may not make answers `400` and posts nothing.\n\n \
                    In a **direct** chat, a participant who hid it sees it again (in `GET /api/v1/`, with this \
                    message unread, and on their SSE stream): a direct chat is only hidden until its next message.\n\n \
                    Only the members of the chat may post. An administrator who is not a member gets `403` \
@@ -117,7 +150,7 @@ async fn trigger_post_message(
         ),
         (
             status = 400,
-            description = "Malformed JSON body, `chat_id` not an integer, `content` breaking its rules (not blank, at most 5000 characters, no control character other than line breaks and tabs), `citation` above 9223372036854775807, or `citation` not a message of this chat or a deleted one (`` `citation` is not a message of this chat.``).",
+            description = "Malformed JSON body, `chat_id` not an integer, `content` breaking its rules (not blank, at most 5000 characters, no control character other than line breaks and tabs), `citation` above 9223372036854775807, `citation` not a message of this chat or a deleted one (`` `citation` is not a message of this chat.``), `mentions` / `group_mentions` / `links` holding more than 50 entries, a duplicate or an id outside 1..=2147483647, a mention of a user who is not a member of the chat, a group no member belongs to, or a link to an object that does not exist or that the author may not read.",
             body = String,
             content_type = "text/plain",
             example = json!("Invalid `content`: must be at most 5000 characters")
@@ -154,7 +187,7 @@ async fn trigger_post_message(
     request_body(
         content = PostMessageView,
         description = "Content of the message and, optionally, the message it answers.",
-        example = json!({ "content": "The meeting is moved to 3 pm.", "citation": 118 })
+        example = json!({ "content": "The meeting is moved to 3 pm.", "citation": 118, "mentions": [42], "mentions_everyone": false, "group_mentions": [], "links": [] })
     ),
     security(
         ("jwt" = [])
@@ -174,17 +207,28 @@ pub async fn post_message(
     let mut tx = begin(&state).await?;
     let role = require_chat_access_in(&mut tx, chat_id, auth_user.id).await?;
     role.require_member()?;
-    let result = trigger_post_message(&mut tx, auth_user.id, view, chat_id, role.is_direct).await?;
+    let posted = trigger_post_message(&mut tx, auth_user.id, view, chat_id, role.is_direct).await?;
     commit(tx).await?;
     // Only once committed: the members read the new message as soon as they get the signal.
+    let message_id = posted.result.id();
     sse_state
         .publish(ChatEvent::message_created(
             chat_id,
             auth_user.id,
-            result.id(),
+            message_id,
         ))
         .await;
-    Ok(HttpResponse::Ok().json(result))
+    if !posted.mentioned.is_empty() {
+        sse_state
+            .publish(ChatEvent::mentioned(
+                chat_id,
+                auth_user.id,
+                message_id,
+                posted.mentioned,
+            ))
+            .await;
+    }
+    Ok(HttpResponse::Ok().json(posted.result))
 }
 
 impl From<AccessDenied> for PosteMessageError {
@@ -192,6 +236,15 @@ impl From<AccessDenied> for PosteMessageError {
         match denied {
             AccessDenied::NotFound => PosteMessageError::UnknownChat,
             AccessDenied::DatabaseError => PosteMessageError::DatabaseError,
+        }
+    }
+}
+
+impl From<TagsFailure> for PosteMessageError {
+    fn from(failure: TagsFailure) -> Self {
+        match failure {
+            TagsFailure::Refused(message) => PosteMessageError::RefusedTag(message),
+            TagsFailure::DatabaseError => PosteMessageError::DatabaseError,
         }
     }
 }
