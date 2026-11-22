@@ -243,6 +243,48 @@ MAIR-507, what a client needs to display the list and to open a chat, in one que
   for each message that quotes another, `quoted` (`id`, `sender_id`, first 100 characters), joined in the page query so
   it is there even when the quoted message is older than the page.
 
+MAIR-1155, messaging V2 (epic MAIR-821; **this API needs Database `releases/v4.0.0`** `mair-1155-01`–`03`:
+`message_reactions`, `messages.kind` / `system_event` / `mentions_everyone`, `message_group_mentions`, the grants on them
+and `SELECT (id, name)` on `groups`). Every change is additive, no field was removed or renamed:
+
+- `MessageView` (history, `since` reads, `PATCH` answer, system notes) adds `kind` (`user` / `system`), `system_event`
+  (`{action: members_added | member_removed | member_left, actor_id, user_ids}`, `null` for a user message),
+  `mentions`, `mentions_everyone`, `group_mentions`, `links` (`[{kind: project | task | event, id}]`) and `reactions`
+  (`[{emoji, count, user_ids}]` by first reaction). The columns live in one `message_v2_columns!()` macro of
+  `database/chats/get_chat/view.rs` (correlated subqueries on the primary keys), shared by `GetChatQueryView`,
+  `GetChatChangesQueryView` and `GetMessageQueryView`; `tests/queries/chats/changes.rs` only forbids a `Sort` outside
+  those subplans.
+- Tags (`endpoints/v1/id/messages/tags.rs`, `database/chats/message_tags`): `POST` and `PATCH` of a message take
+  `mentions`, `mentions_everyone`, `group_mentions`, `links` (50 of each, no duplicate). They travel as one JSON text
+  parameter (`QueryParam` has no array). `CheckMessageTagsQueryView` answers the first refused field (`mentions`: not a
+  non-excluded member; `group_mentions`: no non-excluded member in the group; `links`: `check_access(author,
+  'projects' | 'tasks' | 'events', 'read', id) <> 1`) → `400` before anything is written. In a `PATCH` an absent field
+  keeps, a present one replaces (`ClearMessageTagsQueryView` then `InsertMessageTagsQueryView`, two statements). A
+  `PATCH` now answers the message (`200` with a body, empty before). A system note cannot be edited, deleted or reacted
+  to (`400 A system note cannot be changed.`); deleting a message also runs `PurgeMessageExtrasQueryView` (its
+  reactions, mentions and links) as a statement of its own after the soft delete.
+- Reactions: `POST /{chat_id}/messages/{message_id}/reactions/` `{emoji}` and `DELETE …/reactions/?emoji=` (members
+  only, `validation::check_emoji`: 1–32 characters, no whitespace nor control character) answer `{reactions}`; adding
+  twice is idempotent (`ON CONFLICT DO NOTHING`), removing one never made is `404 Unknown reaction.`, a tombstone `404`.
+  `TouchMessageQueryView` (`UPDATE … SET updated_at = updated_at`) runs first: the trigger moves `updated_at` (the
+  `since` reads return the message with its reactions) and the row lock makes a concurrent deletion wait, then purge.
+- System notes (`database/chats/system_notes`, `endpoints/v1/id/users::post_system_note`): adding members writes a
+  `members_added` note in the transaction and answers it as `system_message`; removing someone writes
+  `member_removed`, leaving `member_left` (no body: `204`). A note has the actor as `owner_id`, an empty content, and
+  Database keeps it out of the unread counters. Hiding a direct chat writes nothing; the last member leaving writes
+  nothing (the chat is deleted).
+- `GET /{chat_id}/users/` adds `is_admin` (the creator of a group chat). `GET /{chat_id}/search/?q=&type=messages |
+  people | files&limit=1..50 (20)&offset=` answers `{type, items, has_more, total}` (one statement, `total` counted on
+  the same CTE; `files` is always empty: no attachments). `GET /{chat_id}/mention-groups/?q=` answers `{groups: [{id,
+  name}]}`, the groups of the non-excluded members, by name, 20 at most. Both are open to members and administrators.
+- SSE: `ChatEventKind::MessageReacted` (`MSG_REACTED`, members but the actor), `MembersChanged` (`MEMBERS_CHANGED`,
+  every member, the actor included, plus `ChatEvent.recipients`: the removed member) and `Mentioned` (`MENTIONED`, only
+  the `recipients` resolved at write time by `MentionRecipientsQueryView`; an edit signals the newly mentioned only).
+  `recipients` is `#[serde(default)]`; a replica older than MAIR-1155 cannot read the new kinds and drops them during a
+  rolling update. A system note is published as `message_created`.
+- Tests: `tests/endpoints/mair_1155_messaging_v2.rs`, the Postman folder "Messaging V2 (MAIR-1155)", `init-test.sql`
+  seeds the Admin's 👍 on message 118 so ZAP removes a real reaction.
+
 Unread counters are only lowered by the explicit `POST /api/v1/{chat_id}/read/` (`{ "readUntilMessageId": n }`, answers
 `{ "unread_count": k }`); `GET /api/v1/{chat_id}/` and `GET /api/v1/` never touch them, so polling is safe. The route is
 `endpoints::v1::id::read` and one call to the Postgres function `fn_acknowledge_read` (`database::chats::acknowledge_read`),
@@ -251,7 +293,7 @@ which lives in `Devops/Database` (`releases/v1.5.0` + `repeatable/messages/`): i
 when the id belongs to another chat. Sends and acknowledgements of one conversation are serialized by a transaction advisory
 lock taken by a `BEFORE INSERT` trigger on `messages`, which also draws the message id after the lock so a single cursor is
 sound. **This API needs a Database image that ships that release, `releases/v1.8.0`** (MAIR-394: `created_by`,
-`reply_to_id`, `messaging_moderation_log`) **and `releases/v1.9.0`** (MAIR-478: direct chat pair) **and `releases/v3.1.0`** (MAIR-524: change tracking) **and the MAIR-556 role passwords** (`3.4.0`): the compose files (`${UPSTREAM_TAG:-dev}`) and
+`reply_to_id`, `messaging_moderation_log`) **and `releases/v1.9.0`** (MAIR-478: direct chat pair) **and `releases/v3.1.0`** (MAIR-524: change tracking) **and the MAIR-556 role passwords** (`3.4.0`) **and `releases/v4.0.0`** (MAIR-1155: messaging V2): the compose files (`${UPSTREAM_TAG:-dev}`) and
 `TEST_DB_VERSION` (`dev`) in `.cargo/config.toml` run the Database of the stage (MAIR-998), so nothing is bumped when the
 Database releases. To try an unmerged Database branch, build `ghcr.io/mairie360/database:<tag>` and `…/liquibase-migrations:<tag>`
 from `Devops/Database` and run `TEST_DB_VERSION=<tag> cargo test`.
@@ -390,8 +432,9 @@ the container tests.
   `unread_count` are `#[serde(default)]`, so an event of an older replica reads as `MessageCreated`, and an older replica
   ignores them (signals everything as `NEW_MSG`) during a rolling update.
 - The listener pushes a serde-serialized `ChatSignal` frame (`data: {...}\n\n`, `ChatSignal::from_event`): `type`
-  `NEW_MSG` / `MSG_EDITED` / `MSG_DELETED` to every connection of each online non-excluded member but the actor (one
-  `get_chat_users` query), `CHAT_READ` (with `unread_count`) to every connection of the reader only, no query. The frame
+  `NEW_MSG` / `MSG_EDITED` / `MSG_DELETED` / `MSG_REACTED` to every connection of each online non-excluded member but
+  the actor (one `get_chat_users` query), `MEMBERS_CHANGED` to every member and the `recipients` (actor included),
+  `MENTIONED` to the `recipients` only, `CHAT_READ` (with `unread_count`) to every connection of the reader only, no query. The frame
   of a post stays `{"type":"NEW_MSG","chat_id":…}` plus the additive `message_id`. The table of the event contract is
   the description of `GET /api/v1/stream` (what BFF_Message relays). A `Lagged` bus error is logged and the loop
   resumes; only closed senders are removed.
