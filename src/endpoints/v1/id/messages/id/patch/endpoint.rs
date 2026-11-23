@@ -59,13 +59,14 @@ impl ResponseError for PatchMessageError {
     fn status_code(&self) -> StatusCode {
         match self {
             PatchMessageError::Forbidden => StatusCode::FORBIDDEN,
-            PatchMessageError::UnknownChat | PatchMessageError::DeletedMessage => {
-                StatusCode::NOT_FOUND
-            }
+            // An unknown message is a `404`, as for `DELETE` and the reactions of the same message.
+            PatchMessageError::UnknownChat
+            | PatchMessageError::UnknownMessage
+            | PatchMessageError::DeletedMessage => StatusCode::NOT_FOUND,
             PatchMessageError::DatabaseError => StatusCode::INTERNAL_SERVER_ERROR,
-            PatchMessageError::UnknownMessage
-            | PatchMessageError::SystemNote
-            | PatchMessageError::RefusedTag(_) => StatusCode::BAD_REQUEST,
+            PatchMessageError::SystemNote | PatchMessageError::RefusedTag(_) => {
+                StatusCode::BAD_REQUEST
+            }
         }
     }
 
@@ -187,10 +188,10 @@ async fn trigger_patch_message(
         ),
         (
             status = 400,
-            description = "Malformed JSON body, URL segment not an integer, `content` breaking its rules (`content` not blank, at most 5000 characters, no control character other than line breaks and tabs), no message with this id in the chat (`Unknown message.`), the message is a system note (`A system note cannot be changed.`), or a tag breaks the rules of `POST /api/v1/{chat_id}/messages/` (more than 50 entries, a duplicate, an id out of range, a user who is not a member, a group no member belongs to, an object the author may not read).",
+            description = "Malformed JSON body, URL segment not an integer, `content` breaking its rules (`content` not blank, at most 5000 characters, no control character other than line breaks and tabs), the message is a system note (`A system note cannot be changed.`), or a tag breaks the rules of `POST /api/v1/{chat_id}/messages/` (more than 50 entries, a duplicate, an id out of range, a user who is not a member, a group no member belongs to, an object the author may not read).",
             body = String,
             content_type = "text/plain",
-            example = json!("Unknown message.")
+            example = json!("A system note cannot be changed.")
         ),
         (
             status = 401,
@@ -208,7 +209,7 @@ async fn trigger_patch_message(
         ),
         (
             status = 404,
-            description = "No chat matches `chat_id`, or the caller is neither one of its members nor an administrator (both cases are deliberately indistinguishable, body `Unknown chat.`); or the message was deleted (body `Unknown message.`).",
+            description = "No chat matches `chat_id`, or the caller is neither one of its members nor an administrator (both cases are deliberately indistinguishable, body `Unknown chat.`); or no live message with this id belongs to the chat: never written, written in another chat, or deleted (body `Unknown message.`).",
             body = String,
             content_type = "text/plain",
             example = json!("Unknown chat.")
