@@ -66,7 +66,7 @@ Examples:
   the conversation since its cursor (`GET /conversations/{id}` → API `GET /api/v1/{chat_id}/?since=&since_id=`) and
   refreshes the list line (`?since=`); on `CHAT_READ` it sets the unread badge to `unreadCount`.
 - Delivery is **at most once per connection and not guaranteed**: a signal may be duplicated (Redis relay
-  reconnecting) or lost (full buffer, reconnection). Reads since a cursor are idempotent, so a duplicate costs one
+  reconnecting) or lost during a reconnection (a full buffer closes the socket with `1013` rather than drop silently). Reads since a cursor are idempotent, so a duplicate costs one
   read and a loss is caught up at the next (re)connection.
 
 ## Frames client → server
@@ -96,7 +96,7 @@ WebSocket libraries.
 | `1003` | API | the client sent a data frame | do not send data; reconnect with backoff |
 | `1009` | any | frame larger than 4 KiB | reconnect with backoff |
 | `1011` | any | unexpected server error | reconnect with backoff |
-| `1013` | BFF, front | the upstream hop closed abnormally or is unreachable | reconnect with backoff |
+| `1013` | API, BFF, front | API: the send buffer of this connection overflowed (a signal would be lost); BFF, front: the upstream hop closed abnormally or is unreachable | reconnect with backoff (the catch-up on `open` reads what was missed) |
 | `4001` | API (relayed) | the session expired, was revoked, or the account was removed (token checked every **30 s** and at its `exp`) | **do not reconnect** before a session renewal (see below) |
 | `4008` | API (relayed) | evicted: the same user opened a 6th connection on this API replica, the oldest is closed | **do not reconnect automatically** (it would evict another tab); reconnect on focus or explicit retry |
 
@@ -115,8 +115,9 @@ WebSocket libraries.
   each; the Redis relay delivers to all of them.
 - The handshake goes through the usual per-user rate limit of each layer (the API's `/api` limiter, the BFF's
   caller limiter); the open connection does not consume the limit.
-- Per-connection send buffer of the API: **10 frames**, as for the SSE; when full, the frame is dropped for that connection only
-  (the client catches up at its next read).
+- Per-connection send buffer of the API: **10 frames**, as for the SSE. When it is full, a WebSocket is closed with
+  `1013` instead of losing the signal silently: the client reconnects and catches up since its cursors on `open`. (The
+  SSE keeps dropping the frame for that connection only.)
 
 ## Client behaviour (Messages_Web_Service)
 
@@ -125,8 +126,10 @@ WebSocket libraries.
    missed while disconnected), then stop the 2 s polling.
 3. On `close` (or `error` then `close`):
    - `4001`, or `1006` before the first `open` of this attempt (a refused handshake looks the same): check the
-     session with one REST read through the proxy (it renews the session when it can). Renewed → reconnect once;
-     refused (`401`) → go to Login. Never loop on `4001`.
+     session with one REST read through the proxy (it renews the session when it can). Refused (`401`) → go to
+     Login. Never loop on `4001`. Valid or renewed → count the attempt as a failure and continue as for any other
+     code below, so repeated `1006` with a valid session (BFF or ingress down) reach the 5-failure fallback; the
+     session check runs at most once per sequence of failures.
    - `4008`: stay disconnected, poll every 2 s, show the explicit retry; reconnect on focus or retry.
    - anything else: reconnect after `min(30 s, 1 s × 2^attempt)` ± 20 % jitter. After **5** consecutive failures
      without an `open`, fall back to the 2 s polling and show a French message without blocking the page
@@ -134,7 +137,9 @@ WebSocket libraries.
      action; keep trying on `online`, focus and retry.
 4. On `visibilitychange` to hidden, close with `1000` after 60 s hidden; when visible again, reconnect and catch
    up as in step 2.
-5. Deduplicate on `(type, messageId)` within a bounded window; reads are idempotent anyway.
+5. Do not deduplicate signals: two `MSG_EDITED` of the same message are two edits. Each signal triggers a read since
+   the cursor, which is idempotent, so a duplicate only costs one read; reads of the same conversation may be
+   coalesced while one is in flight, as long as one more read follows the last signal.
 6. Until MAIR-662, the SSE client stays as the fallback when `WebSocket` is unavailable.
 
 ## Coexistence and removal

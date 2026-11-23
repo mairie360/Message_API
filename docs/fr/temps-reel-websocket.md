@@ -71,7 +71,7 @@ Exemples :
   `GET /api/v1/{chat_id}/?since=&since_id=`) et actualise la ligne de la liste (`?since=`) ; sur `CHAT_READ` il met
   le badge de non-lus à `unreadCount`.
 - La livraison est **au plus une fois par connexion et non garantie** : un signal peut être dupliqué (reconnexion du
-  relais Redis) ou perdu (tampon plein, reconnexion). Les lectures depuis un curseur sont idempotentes : un doublon
+  relais Redis) ou perdu pendant une reconnexion (un tampon plein ferme le socket avec `1013` plutôt que de perdre en silence). Les lectures depuis un curseur sont idempotentes : un doublon
   coûte une lecture et une perte est rattrapée à la (re)connexion suivante.
 
 ## Trames client → serveur
@@ -100,7 +100,7 @@ navigateur. Taille maximale de trame acceptée à chaque saut : **4 Kio** (`1009
 | `1003` | API | le client a envoyé une trame de données | ne rien envoyer ; se reconnecter avec temporisation |
 | `1009` | tous | trame de plus de 4 Kio | se reconnecter avec temporisation |
 | `1011` | tous | erreur serveur inattendue | se reconnecter avec temporisation |
-| `1013` | BFF, front | le saut amont a fermé anormalement ou est injoignable | se reconnecter avec temporisation |
+| `1013` | API, BFF, front | API : le tampon d'envoi de cette connexion a débordé (un signal serait perdu) ; BFF, front : le saut amont a fermé anormalement ou est injoignable | se reconnecter avec temporisation (le rattrapage à l'`open` relit ce qui a été manqué) |
 | `4001` | API (relayé) | session expirée, révoquée ou compte supprimé (jeton revérifié toutes les **30 s** et à son `exp`) | **ne pas se reconnecter** avant un renouvellement de session (voir plus bas) |
 | `4008` | API (relayé) | éviction : le même utilisateur a ouvert une 6e connexion sur ce réplica d'API, la plus ancienne est fermée | **ne pas se reconnecter automatiquement** (cela évincerait un autre onglet) ; se reconnecter au focus ou sur demande |
 
@@ -121,8 +121,9 @@ navigateur. Taille maximale de trame acceptée à chaque saut : **4 Kio** (`1009
   utilisateur peut en tenir 5 sur chacun ; le relais Redis les sert toutes.
 - La poignée de main passe par la limite de débit habituelle de chaque couche (limiteur `/api` de l'API, limiteur
   par appelant du BFF) ; la connexion ouverte ne consomme pas la limite.
-- Tampon d'envoi par connexion côté API : **10 trames**, comme pour le SSE ; plein, la trame est abandonnée pour
-  cette seule connexion (le client rattrape à sa prochaine lecture).
+- Tampon d'envoi par connexion côté API : **10 trames**, comme pour le SSE. Plein, un WebSocket est fermé avec
+  `1013` au lieu de perdre le signal en silence : le client se reconnecte et rattrape depuis ses curseurs à l'`open`.
+  (Le SSE continue d'abandonner la trame pour cette seule connexion.)
 
 ## Comportement du client (Messages_Web_Service)
 
@@ -131,8 +132,11 @@ navigateur. Taille maximale de trame acceptée à chaque saut : **4 Kio** (`1009
    ce qui a été manqué hors connexion), puis arrêter le polling de 2 s.
 3. Au `close` (ou `error` puis `close`) :
    - `4001`, ou `1006` avant le premier `open` de cette tentative (une poignée de main refusée y ressemble) :
-     vérifier la session par une lecture REST via le proxy (qui renouvelle la session quand il le peut). Renouvelée
-     → se reconnecter une fois ; refusée (`401`) → aller vers Login. Jamais de boucle sur `4001`.
+     vérifier la session par une lecture REST via le proxy (qui renouvelle la session quand il le peut). Refusée
+     (`401`) → aller vers Login. Jamais de boucle sur `4001`. Valide ou renouvelée → compter la tentative comme un
+     échec et continuer comme pour tout autre code ci-dessous, afin que des `1006` répétés avec une session valide
+     (BFF ou ingress indisponible) atteignent le repli après 5 échecs ; la session n'est vérifiée qu'une fois par
+     suite d'échecs.
    - `4008` : rester déconnecté, interroger toutes les 2 s, afficher la reprise explicite ; se reconnecter au focus
      ou sur demande.
    - tout autre code : se reconnecter après `min(30 s, 1 s × 2^tentative)` ± 20 % d'aléa. Après **5** échecs
@@ -141,7 +145,9 @@ navigateur. Taille maximale de trame acceptée à chaque saut : **4 Kio** (`1009
      action de reprise ; continuer d'essayer sur `online`, au focus et à la reprise.
 4. Quand la page est masquée depuis 60 s (`visibilitychange`), fermer avec `1000` ; redevenue visible, se
    reconnecter et rattraper comme à l'étape 2.
-5. Dédupliquer sur `(type, messageId)` dans une fenêtre bornée ; les lectures sont de toute façon idempotentes.
+5. Ne pas dédupliquer les signaux : deux `MSG_EDITED` du même message sont deux modifications. Chaque signal
+   déclenche une lecture depuis le curseur, idempotente, donc un doublon ne coûte qu'une lecture ; les lectures d'une
+   même conversation peuvent être regroupées pendant qu'une est en cours, tant qu'une lecture suit le dernier signal.
 6. Jusqu'à MAIR-662, le client SSE reste le repli quand `WebSocket` n'est pas disponible.
 
 ## Coexistence et retrait
