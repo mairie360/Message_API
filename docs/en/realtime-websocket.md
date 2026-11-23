@@ -122,7 +122,7 @@ WebSocket libraries.
 
 ## Client behaviour (Messages_Web_Service)
 
-1. Open `wss://<front origin>/ws` once the session is known (bootstrap done) and the page is visible.
+1. Open `/ws` on the front origin (`wss://` for an HTTPS page, `ws://` for a plain HTTP one, e.g. a local run) once the session is known (bootstrap done) and the page is visible.
 2. On `open`: read the conversation list and the open conversation **since their cursors** (catch-up for anything
    missed while disconnected), then stop the 2 s polling.
 3. On `close` (or `error` then `close`):
@@ -141,7 +141,8 @@ WebSocket libraries.
 5. Do not deduplicate signals: two `MSG_EDITED` of the same message are two edits. Each signal triggers a read since
    the cursor, which is idempotent, so a duplicate only costs one read; reads of the same conversation may be
    coalesced while one is in flight, as long as one more read follows the last signal.
-6. Until MAIR-662, the SSE client stays as the fallback when `WebSocket` is unavailable.
+6. Until MAIR-662, the SSE client is only used by a browser without the `WebSocket` API; a failing WebSocket falls
+   back to the 2 s polling (step 3), never to the SSE stream.
 
 ## Coexistence and removal
 
