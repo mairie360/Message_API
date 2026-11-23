@@ -3,6 +3,35 @@ use std::fmt::Display;
 use crate::database::ids::{bigint_from_sql, bigint_to_sql, id_from_sql, id_to_sql};
 use mairie360_api_lib::database::db_interface::{ApiRequestDto, QueryParam};
 
+/// Columns of a message added by MAIR-1155 (messaging V2), on the alias `m`: its kind and system
+/// event, the user / group / everyone mentions, the business links and the reactions grouped by
+/// emoji (in the order of their first reaction). Shared by every read of messages so that the
+/// history, the incremental reads and the single message read always carry the same fields.
+macro_rules! message_v2_columns {
+    () => {
+        "m.kind, m.system_event, m.mentions_everyone, \
+         COALESCE((SELECT jsonb_agg(mm.user_id ORDER BY mm.user_id) FROM message_mentions mm \
+                   WHERE mm.message_id = m.id), '[]'::jsonb) AS mentions, \
+         COALESCE((SELECT jsonb_agg(gm.group_id ORDER BY gm.group_id) FROM message_group_mentions gm \
+                   WHERE gm.message_id = m.id), '[]'::jsonb) AS group_mentions, \
+         COALESCE((SELECT jsonb_agg(jsonb_build_object( \
+                       'kind', CASE WHEN l.project_id IS NOT NULL THEN 'project' \
+                                    WHEN l.task_id IS NOT NULL THEN 'task' ELSE 'event' END, \
+                       'id', COALESCE(l.project_id, l.task_id, l.event_id), \
+                       'project_id', t.project_id, 'start', e.start_date) ORDER BY l.id) \
+                   FROM message_business_links l \
+                   LEFT JOIN tasks t ON t.id = l.task_id LEFT JOIN events e ON e.id = l.event_id \
+                   WHERE l.message_id = m.id), '[]'::jsonb) AS links, \
+         COALESCE((SELECT jsonb_agg(jsonb_build_object('emoji', r.emoji, 'count', r.count, \
+                       'user_ids', r.user_ids) ORDER BY r.first_at, r.emoji) \
+                   FROM (SELECT mr.emoji, COUNT(*)::int AS count, \
+                                jsonb_agg(mr.user_id ORDER BY mr.created_at, mr.user_id) AS user_ids, \
+                                MIN(mr.created_at) AS first_at \
+                         FROM message_reactions mr WHERE mr.message_id = m.id GROUP BY mr.emoji) r), \
+                  '[]'::jsonb) AS reactions"
+    };
+}
+
 /// One page of the messages of a chat, newest first: the `limit` messages whose id is below
 /// `before` (or the latest ones without `before`). Message ids grow in commit order within a chat
 /// (Database `fn_before_message_insert`), so the id is a stable keyset cursor.
@@ -60,12 +89,14 @@ impl ApiRequestDto for GetChatQueryView {
         //
         // Tombstones (MAIR-524, `deleted_at`) are not part of the history, and the excerpt of a
         // deleted quoted message is hidden (`citation` reads `NULL` as before the soft delete).
-        "SELECT to_jsonb(t) FROM ( \
+        concat!(
+            "SELECT to_jsonb(t) FROM ( \
              SELECT m.id, m.owner_id, m.content, m.created_at, \
                     CASE WHEN q.id IS NOT NULL THEN m.reply_to_id END AS reply_to_id, \
                     q.owner_id AS reply_owner_id, left(q.content, 100) AS reply_excerpt, \
-                    m.updated_at, m.edited_at, FALSE AS deleted \
-             FROM messages m \
+                    m.updated_at, m.edited_at, FALSE AS deleted, ",
+            message_v2_columns!(),
+            " FROM messages m \
              LEFT JOIN messages q ON q.id = m.reply_to_id AND q.conversation_id = m.conversation_id \
                  AND q.deleted_at IS NULL \
              WHERE m.conversation_id = $1 AND m.deleted_at IS NULL \
@@ -73,6 +104,7 @@ impl ApiRequestDto for GetChatQueryView {
              ORDER BY m.id DESC \
              LIMIT $3 \
          ) t"
+        )
     }
 
     fn query_params(&self) -> &[QueryParam] {
@@ -100,6 +132,59 @@ pub struct Message {
     pub edited_at: Option<chrono::DateTime<chrono::Utc>>,
     /// A tombstone: the message was deleted, its content is empty.
     pub deleted: bool,
+    /// `user` or `system` (MAIR-1155); `user` when read from a database older than v4.0.0.
+    #[serde(default = "user_kind")]
+    pub kind: String,
+    /// What a system note records, `NULL` for a message of a user.
+    #[serde(default)]
+    pub system_event: Option<SystemEventRow>,
+    #[serde(default)]
+    pub mentions_everyone: bool,
+    /// Members mentioned by id.
+    #[serde(default)]
+    pub mentions: Vec<i32>,
+    /// Groups mentioned by id.
+    #[serde(default)]
+    pub group_mentions: Vec<i32>,
+    /// Business objects the message links to.
+    #[serde(default)]
+    pub links: Vec<LinkRow>,
+    /// Reactions grouped by emoji, in the order of their first reaction.
+    #[serde(default)]
+    pub reactions: Vec<ReactionRow>,
+}
+
+fn user_kind() -> String {
+    "user".to_string()
+}
+
+/// `messages.system_event` of a system note (MAIR-1155).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SystemEventRow {
+    /// `members_added`, `member_removed` or `member_left`.
+    pub action: String,
+    pub actor_id: i32,
+    pub user_ids: Vec<i32>,
+}
+
+/// A row of `message_business_links`: `kind` is `project`, `task` or `event`. A task link also
+/// carries its project and an event link its start (MAIR-1166): the fronts address them by both.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct LinkRow {
+    pub kind: String,
+    pub id: i32,
+    #[serde(default)]
+    pub project_id: Option<i32>,
+    #[serde(default)]
+    pub start: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// The reactions of a message with one emoji: who reacted, in reaction order.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ReactionRow {
+    pub emoji: String,
+    pub count: i32,
+    pub user_ids: Vec<i32>,
 }
 
 /// The messages of chat `chat_id` changed since the cursor `(since, since_id)` (MAIR-524): posted,
@@ -156,12 +241,14 @@ impl ApiRequestDto for GetChatChangesQueryView {
     fn query_sql(&self) -> &'static str {
         // A tombstone carries no content nor quote; a live message quoting a deleted one loses
         // its quote like in the history.
-        "SELECT to_jsonb(t) FROM ( \
+        concat!(
+            "SELECT to_jsonb(t) FROM ( \
              SELECT m.id, m.owner_id, m.content, m.created_at, \
                     CASE WHEN q.id IS NOT NULL THEN m.reply_to_id END AS reply_to_id, \
                     q.owner_id AS reply_owner_id, left(q.content, 100) AS reply_excerpt, \
-                    m.updated_at, m.edited_at, m.deleted_at IS NOT NULL AS deleted \
-             FROM messages m \
+                    m.updated_at, m.edited_at, m.deleted_at IS NOT NULL AS deleted, ",
+            message_v2_columns!(),
+            " FROM messages m \
              LEFT JOIN messages q ON q.id = m.reply_to_id AND q.conversation_id = m.conversation_id \
                  AND q.deleted_at IS NULL AND m.deleted_at IS NULL \
              WHERE m.conversation_id = $1 \
@@ -169,6 +256,7 @@ impl ApiRequestDto for GetChatChangesQueryView {
              ORDER BY m.updated_at, m.id \
              LIMIT $4 \
          ) t"
+        )
     }
 
     fn query_params(&self) -> &[QueryParam] {
@@ -268,4 +356,64 @@ pub struct ChatHeader {
     pub latest_change_at: chrono::DateTime<chrono::Utc>,
     /// Id of that message, `0` when the chat has no message.
     pub latest_change_id: i64,
+}
+
+/// One message of chat `chat_id`, tombstone included (MAIR-1155): the answer of an edit and the
+/// system note of a member change. Same columns as [`GetChatQueryView`]. No row when the message
+/// is not in that chat.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct GetMessageQueryView {
+    params: Vec<QueryParam>,
+}
+
+impl GetMessageQueryView {
+    pub fn new(chat_id: u64, message_id: u64) -> Self {
+        Self {
+            params: vec![
+                QueryParam::I32(id_to_sql(chat_id)),
+                QueryParam::I64(bigint_to_sql(message_id)),
+            ],
+        }
+    }
+
+    pub fn chat_id(&self) -> u64 {
+        id_from_sql(self.params[0].as_i32())
+    }
+
+    pub fn message_id(&self) -> u64 {
+        bigint_from_sql(self.params[1].as_i64())
+    }
+}
+
+impl Display for GetMessageQueryView {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "GetMessageQueryView: chat_id={} message_id={}",
+            self.chat_id(),
+            self.message_id()
+        )
+    }
+}
+
+impl ApiRequestDto for GetMessageQueryView {
+    fn query_sql(&self) -> &'static str {
+        concat!(
+            "SELECT to_jsonb(t) FROM ( \
+             SELECT m.id, m.owner_id, m.content, m.created_at, \
+                    CASE WHEN q.id IS NOT NULL THEN m.reply_to_id END AS reply_to_id, \
+                    q.owner_id AS reply_owner_id, left(q.content, 100) AS reply_excerpt, \
+                    m.updated_at, m.edited_at, m.deleted_at IS NOT NULL AS deleted, ",
+            message_v2_columns!(),
+            " FROM messages m \
+             LEFT JOIN messages q ON q.id = m.reply_to_id AND q.conversation_id = m.conversation_id \
+                 AND q.deleted_at IS NULL AND m.deleted_at IS NULL \
+             WHERE m.conversation_id = $1 AND m.id = $2 \
+         ) t"
+        )
+    }
+
+    fn query_params(&self) -> &[QueryParam] {
+        &self.params
+    }
 }

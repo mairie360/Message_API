@@ -526,6 +526,39 @@ fn mair_657_close_causes_map_to_the_contract_codes() {
     assert_eq!(code(CloseCause::TooBig), 1009);
     assert_eq!(code(CloseCause::SessionEnded), 4001);
     assert_eq!(code(CloseCause::Evicted), 4008);
+    assert_eq!(code(CloseCause::Overloaded), 1013);
+}
+
+/// A socket whose send buffer overflowed is closed with `1013` (its client reconnects and catches
+/// up) and leaves the registry; the other connections of the user stay open.
+#[actix_web::test]
+async fn mair_657_an_overflowing_socket_is_closed_with_1013() {
+    let (srv, sse) = server().await;
+    let db = get_fixture_db().await;
+    let user = plain_user(&db).await;
+    let mut overflowing = connect(&srv, user).await;
+    let mut other = connect(&srv, user).await;
+
+    // What `AppState::deliver` does when the buffer of this socket is full.
+    let first = sse.online_agents.get(&user).unwrap()[0].clone();
+    first
+        .overflowed
+        .store(true, std::sync::atomic::Ordering::Release);
+    first.close.notify_one();
+
+    assert_eq!(
+        close_code(&mut overflowing, Duration::from_secs(3)).await,
+        Some(1013)
+    );
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let left: Vec<u64> = sse
+        .transports_of(user)
+        .iter()
+        .map(|(id, _, _)| *id)
+        .collect();
+    assert_eq!(left.len(), 1, "only the overflowing socket left");
+    assert!(!left.contains(&first.id));
+    assert!(silent(&mut other).await, "the other socket stays open");
 }
 
 /// Archives an account, as Core does when it is removed.

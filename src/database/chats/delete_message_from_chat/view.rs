@@ -62,9 +62,9 @@ impl ApiRequestDto for DeleteMessageQueryView {
         // the message and who was already a member when it was posted.
         "WITH target AS ( \
              SELECT id, conversation_id, owner_id, content, created_at FROM messages \
-             WHERE id = $2 AND conversation_id = $1 AND deleted_at IS NULL \
+             WHERE id = $2 AND conversation_id = $1 AND deleted_at IS NULL AND kind = 'user' \
          ), deleted AS ( \
-             UPDATE messages m SET deleted_at = now() FROM target t \
+             UPDATE messages m SET deleted_at = now(), mentions_everyone = FALSE FROM target t \
              WHERE m.id = t.id AND m.deleted_at IS NULL \
              RETURNING m.id, m.conversation_id, t.owner_id, t.content, t.created_at \
          ), logged AS ( \

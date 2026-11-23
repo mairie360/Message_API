@@ -47,6 +47,10 @@ operations:
   POST /api/v1/direct/:
     access: authenticated
     roles: [Admin, Maire, Responsable, User, Guest]
+  GET /api/v1/unread/:
+    access: authenticated
+    roles: [Admin, Maire, Responsable, User, Guest]
+    note: "the caller's own unread total only"
   GET /api/v1/stream:
     access: authenticated
     roles: [Admin, Maire, Responsable, User, Guest]
@@ -60,14 +64,27 @@ operations:
     access: authenticated
     roles: [Admin]
     ownership: [creator, member, author]
-    personal: [messages.sender_id, messages.content]
+    personal: [messages.sender_id, messages.content, messages.mentions, messages.reactions.user_ids, messages.system_event.user_ids]
   DELETE /api/v1/{chat_id}/:
     access: authenticated
     roles: [Admin]
     ownership: [creator]
     note: "also anyone check_access(conversations, delete) grants (global delete_all, ACL)"
   POST /api/v1/{chat_id}/messages/: {access: authenticated, ownership: [creator, member, author]}
-  PATCH /api/v1/{chat_id}/messages/{message_id}/: {access: authenticated, ownership: [author]}
+  PATCH /api/v1/{chat_id}/messages/{message_id}/:
+    access: authenticated
+    ownership: [author]
+    personal: [sender_id, content, mentions, reactions.user_ids]
+  POST /api/v1/{chat_id}/messages/{message_id}/reactions/:
+    access: authenticated
+    ownership: [creator, member, author]
+    personal: [reactions.user_ids]
+    note: "members only (MAIR-1155): an administrator who is not a member gets 403"
+  DELETE /api/v1/{chat_id}/messages/{message_id}/reactions/:
+    access: authenticated
+    ownership: [creator, member, author]
+    personal: [reactions.user_ids]
+    note: "removes the caller's own reaction only"
   DELETE /api/v1/{chat_id}/messages/{message_id}/:
     access: authenticated
     roles: [Admin]
@@ -82,7 +99,22 @@ operations:
     roles: [Admin]
     ownership: [creator, member, author]
     personal: [users.id]
-  POST /api/v1/{chat_id}/users/: {access: authenticated, roles: [Admin], ownership: [creator]}
+  GET /api/v1/{chat_id}/search/:
+    access: authenticated
+    roles: [Admin]
+    ownership: [creator, member, author]
+    personal: [items.sender_id, items.content, items.first_name, items.last_name]
+    note: "search inside one chat (MAIR-1155): messages, members, files (always empty)"
+  GET /api/v1/{chat_id}/mention-groups/:
+    access: authenticated
+    roles: [Admin]
+    ownership: [creator, member, author]
+    note: "groups at least one member of the chat belongs to (MAIR-1155)"
+  POST /api/v1/{chat_id}/users/:
+    access: authenticated
+    roles: [Admin]
+    ownership: [creator]
+    personal: [system_message.system_event.user_ids]
   DELETE /api/v1/{chat_id}/users/{user_id}/:
     access: authenticated
     roles: [Admin]

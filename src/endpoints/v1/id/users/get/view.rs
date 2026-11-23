@@ -13,6 +13,10 @@ pub struct User {
     /// Last name of the member, as in Core API.
     #[schema(example = "Bertrand")]
     last_name: String,
+    /// The member created the group chat and administers it (MAIR-1155): adds members and removes
+    /// the others. Always `false` in a direct chat.
+    #[schema(example = false)]
+    is_admin: bool,
 }
 
 impl User {
@@ -21,7 +25,17 @@ impl User {
             id,
             first_name: first_name.to_string(),
             last_name: last_name.to_string(),
+            is_admin: false,
         }
+    }
+
+    pub fn administering(mut self, is_admin: bool) -> Self {
+        self.is_admin = is_admin;
+        self
+    }
+
+    pub fn is_admin(&self) -> bool {
+        self.is_admin
     }
 
     pub fn id(&self) -> u64 {

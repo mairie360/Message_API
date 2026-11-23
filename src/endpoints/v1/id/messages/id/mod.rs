@@ -1,6 +1,7 @@
 pub mod delete;
 pub mod doc;
 pub mod patch;
+pub mod reactions;
 
 /// Path parameters of the routes of a message.
 #[derive(serde::Deserialize, utoipa::IntoParams, utoipa::ToSchema)]
@@ -37,6 +38,7 @@ pub fn config(cfg: &mut actix_web::web::ServiceConfig) {
     cfg.service(
         actix_web::web::scope("/{message_id}")
             .service(delete::endpoint::delete_message)
-            .service(patch::endpoint::patch_message),
+            .service(patch::endpoint::patch_message)
+            .configure(reactions::config),
     );
 }

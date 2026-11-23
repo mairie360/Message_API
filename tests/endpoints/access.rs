@@ -25,6 +25,10 @@ async fn every_api_route_requires_a_valid_jwt() {
         (Method::GET, "/api/v1/1/users/"),
         (Method::POST, "/api/v1/1/users/"),
         (Method::DELETE, "/api/v1/1/users/1/"),
+        (Method::POST, "/api/v1/1/messages/1/reactions/"),
+        (Method::DELETE, "/api/v1/1/messages/1/reactions/?emoji=x"),
+        (Method::GET, "/api/v1/1/search/?q=x"),
+        (Method::GET, "/api/v1/1/mention-groups/"),
     ] {
         let (status, _) = send!(app, request(method.clone(), uri, None));
         assert_eq!(status, StatusCode::UNAUTHORIZED, "{method} {uri}");
@@ -105,6 +109,22 @@ async fn outsiders_get_the_same_404_as_for_an_unknown_chat() {
             format!("/api/v1/{chat}/users/{member}/"),
             None,
         ),
+        (
+            Method::POST,
+            format!("/api/v1/{chat}/messages/{message}/reactions/"),
+            Some(json!({ "emoji": "👍" })),
+        ),
+        (
+            Method::DELETE,
+            format!("/api/v1/{chat}/messages/{message}/reactions/?emoji=%F0%9F%91%8D"),
+            None,
+        ),
+        (
+            Method::GET,
+            format!("/api/v1/{chat}/search/?q=Message"),
+            None,
+        ),
+        (Method::GET, format!("/api/v1/{chat}/mention-groups/"), None),
     ];
     for (method, uri, body) in calls {
         for target in [

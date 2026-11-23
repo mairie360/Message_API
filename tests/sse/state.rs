@@ -88,6 +88,8 @@ fn test_mair_524_signal_types() {
         (ChatEvent::message_edited(5, 1, 117), "MSG_EDITED"),
         (ChatEvent::message_deleted(5, 1, 117), "MSG_DELETED"),
         (ChatEvent::chat_read(5, 1, 117, 0), "CHAT_READ"),
+        (ChatEvent::message_reacted(5, 1, 117), "MSG_REACTED"),
+        (ChatEvent::mentioned(5, 1, 117, vec![2]), "MENTIONED"),
     ];
     for (event, kind) in cases {
         let signal = serde_json::to_value(ChatSignal::from_event(&event)).unwrap();
@@ -137,4 +139,65 @@ fn mair_657_each_transport_frames_the_signal_its_way() {
         Bytes::from(format!("data: {payload}\n\n"))
     );
     assert_eq!(Transport::WebSocket.frame(payload), Bytes::from(payload));
+}
+
+#[test]
+fn test_mair_1155_recipients_cross_the_relay_and_default_to_none() {
+    let changed = serde_json::to_value(ChatSignal::from_event(&ChatEvent::members_changed(
+        5,
+        1,
+        vec![9],
+    )))
+    .unwrap();
+    assert_eq!(
+        changed,
+        serde_json::json!({ "type": "MEMBERS_CHANGED", "chat_id": 5 }),
+        "no message id, the recipients stay server-side"
+    );
+    let event = ChatEvent::mentioned(5, 1, 117, vec![2, 3]);
+    let json = serde_json::to_string(&event).unwrap();
+    assert_eq!(serde_json::from_str::<ChatEvent>(&json).unwrap(), event);
+    let older: ChatEvent =
+        serde_json::from_str(r#"{"chat_id":5,"sender_id":42,"kind":"MessageEdited"}"#).unwrap();
+    assert!(older.recipients.is_empty());
+    let plain = serde_json::to_value(ChatEvent::message_created(5, 1, 117)).unwrap();
+    assert!(
+        plain.get("recipients").is_none(),
+        "no empty list on the wire"
+    );
+}
+
+/// MAIR-657 review: a WebSocket whose buffer is full is told to close (`1013`) instead of losing the
+/// signal silently; an SSE stream keeps dropping the frame; a closed channel is removed.
+#[tokio::test]
+async fn mair_657_a_full_websocket_buffer_closes_the_socket_and_an_sse_one_drops() {
+    use message_api::sse::state::{Delivery, Transport};
+    let (bus, _) = broadcast::channel(4);
+    let state = AppState::new(bus, None);
+    // Channels of one frame, never read: the second signal finds them full.
+    let (ws_tx, _ws_rx) = mpsc::channel(1);
+    let (sse_tx, _sse_rx) = mpsc::channel(1);
+    let ws = state.register_as(9, ws_tx, Transport::WebSocket);
+    let sse = state.register_as(9, sse_tx, Transport::Sse);
+    let dead = state.register_as(9, sender(), Transport::WebSocket); // receiver dropped
+
+    let first = state.deliver(9, r#"{"type":"NEW_MSG","chat_id":5}"#);
+    assert!(first.contains(&(ws.id, Delivery::Queued)));
+    assert!(first.contains(&(sse.id, Delivery::Queued)));
+    assert!(first.contains(&(dead.id, Delivery::Removed)));
+
+    let second = state.deliver(9, r#"{"type":"NEW_MSG","chat_id":5}"#);
+    assert!(second.contains(&(ws.id, Delivery::Overflowed)));
+    assert!(second.contains(&(sse.id, Delivery::Dropped)));
+    assert!(ws.overflowed.load(std::sync::atomic::Ordering::Acquire));
+    tokio::time::timeout(Duration::from_secs(1), ws.close.notified())
+        .await
+        .expect("the overflowing socket is told to close");
+    assert!(!sse.overflowed.load(std::sync::atomic::Ordering::Acquire));
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), sse.close.notified())
+            .await
+            .is_err(),
+        "the SSE stream stays open"
+    );
 }

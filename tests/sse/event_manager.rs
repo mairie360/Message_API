@@ -295,3 +295,53 @@ async fn test_mair_524_a_read_acknowledgement_only_reaches_the_reader() {
         "the other members never learn who read what"
     );
 }
+
+#[tokio::test]
+async fn test_mair_1155_reactions_member_changes_and_mentions_reach_who_they_concern() {
+    let db = get_smart_db().await;
+    let chat_id = db
+        .fetch_scalar::<i32, _>(&CreateChatQueryView::new("SSE V2", None))
+        .await
+        .unwrap() as u64;
+    db.execute(AddMembersToChatQueryView::new(chat_id, vec![1, 2]))
+        .await
+        .unwrap();
+    let (state, bus_tx) = spawn_listener().await;
+    let (actor_tx, mut actor_rx): SseChannel = mpsc::channel(16);
+    let (member_tx, mut member_rx): SseChannel = mpsc::channel(16);
+    let (removed_tx, mut removed_rx): SseChannel = mpsc::channel(16);
+    state.register_connection(1, actor_tx);
+    state.register_connection(2, member_tx);
+    // User 99 is no member: they only hear of what names them.
+    state.register_connection(99, removed_tx);
+
+    // A reaction: the members but the actor.
+    assert!(bus_tx
+        .send(ChatEvent::message_reacted(chat_id, 1, 118))
+        .is_ok());
+    assert_eq!(
+        next_signal(&mut member_rx).await,
+        serde_json::json!({ "type": "MSG_REACTED", "chat_id": chat_id, "message_id": 118 })
+    );
+    assert!(nothing_received(&mut actor_rx).await);
+
+    // A member change: every member, the actor included, and the removed member.
+    assert!(bus_tx
+        .send(ChatEvent::members_changed(chat_id, 1, vec![99]))
+        .is_ok());
+    let expected = serde_json::json!({ "type": "MEMBERS_CHANGED", "chat_id": chat_id });
+    assert_eq!(next_signal(&mut actor_rx).await, expected);
+    assert_eq!(next_signal(&mut member_rx).await, expected);
+    assert_eq!(next_signal(&mut removed_rx).await, expected);
+
+    // A mention: the members named only, no query.
+    assert!(bus_tx
+        .send(ChatEvent::mentioned(chat_id, 1, 119, vec![2]))
+        .is_ok());
+    assert_eq!(
+        next_signal(&mut member_rx).await,
+        serde_json::json!({ "type": "MENTIONED", "chat_id": chat_id, "message_id": 119 })
+    );
+    assert!(nothing_received(&mut actor_rx).await);
+    assert!(nothing_received(&mut removed_rx).await);
+}

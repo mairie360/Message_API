@@ -6,7 +6,6 @@ use crate::{
 use mairie360_api_lib::smart_db::SmartDatabase;
 use std::sync::Arc;
 use tokio::sync::broadcast::{self, error::RecvError};
-use tokio::sync::mpsc::error::TrySendError;
 
 pub async fn start_internal_event_listener(state: Arc<AppState>, smart_db: SmartDatabase) {
     let rx = state.internal_bus.subscribe();
@@ -49,6 +48,13 @@ pub async fn listen(
                 push(&state_clone, event.sender_id, &payload);
                 return;
             }
+            // A mention only concerns the members it names, resolved by the writer.
+            if event.kind == ChatEventKind::Mentioned {
+                for user_id in &event.recipients {
+                    push(&state_clone, *user_id, &payload);
+                }
+                return;
+            }
 
             let view = GetChatMembersQueryView::new(event.chat_id);
             let members: Vec<i32> = match smart_db.fetch_all::<i32, _>(&view).await {
@@ -59,9 +65,19 @@ pub async fn listen(
                 }
             };
 
-            for user_id in members {
-                let user_id = id_from_sql(user_id);
-                if user_id == event.sender_id {
+            // A member change is signalled to everyone concerned, its actor (other tabs) and the
+            // removed member included; any other change to the members but its author.
+            let members_changed = event.kind == ChatEventKind::MembersChanged;
+            let mut recipients: Vec<u64> = members.into_iter().map(id_from_sql).collect();
+            if members_changed {
+                for user_id in &event.recipients {
+                    if !recipients.contains(user_id) {
+                        recipients.push(*user_id);
+                    }
+                }
+            }
+            for user_id in recipients {
+                if user_id == event.sender_id && !members_changed {
                     continue; // The author of a change is never notified of it.
                 }
                 push(&state_clone, user_id, &payload);
@@ -70,15 +86,9 @@ pub async fn listen(
     }
 }
 
-/// Pushes the signal to every connection of `user_id` on this replica, framed for its transport
-/// (an SSE `data:` event or a WebSocket text frame).
+/// Pushes the signal to every connection of `user_id` on this replica (see [`AppState::deliver`]:
+/// a full SSE buffer drops it, a full WebSocket buffer closes that socket with `1013`, a closed
+/// channel removes the connection).
 fn push(state: &AppState, user_id: u64, payload: &str) {
-    for (connection_id, tx, transport) in state.transports_of(user_id) {
-        let frame = transport.frame(payload);
-        // A full buffer only drops this notification; a closed channel is a dead connection and
-        // is the only thing removed.
-        if let Err(TrySendError::Closed(_)) = tx.try_send(Ok(frame)) {
-            state.remove_connection(user_id, connection_id);
-        }
-    }
+    state.deliver(user_id, payload);
 }
