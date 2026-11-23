@@ -5,6 +5,7 @@ use crate::endpoints::v1::id::doc::IdDoc;
 use crate::endpoints::v1::post::endpoint::__path_create_chat;
 use crate::endpoints::v1::post::view::{CreateChatResultView, CreateChatView};
 use crate::endpoints::v1::stream::doc::StreamDoc;
+use crate::endpoints::v1::unread::doc::UnreadDoc;
 use utoipa::OpenApi;
 
 #[derive(OpenApi)]
@@ -19,6 +20,7 @@ struct Doc;
     (path = "/direct", api = DirectDoc),
     (path = "/{chat_id}", api = IdDoc),
     (path = "/stream", api = StreamDoc),
+    (path = "/unread", api = UnreadDoc),
     (path = "/", api = Doc)
 ))]
 pub struct V1Doc;

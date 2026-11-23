@@ -194,6 +194,14 @@ const readHandlers = {
         r.status === 200 && r.json('chats').every((chat) => chat.name.length > 0 && chat.member_count >= 2),
     });
   },
+  // The unread badge (MAIR-1106): one aggregate over the agent's 16 group chats.
+  'GET /api/v1/unread/': ({ request }) =>
+    check(request({ headers: randomAgent().headers }), {
+      'unread total 200': (r) => r.status === 200,
+      'unread total is a count': (r) =>
+        // Every chat counted in `unread_chats` holds at least one unread message.
+        r.status === 200 && r.json('unread_chats') >= 0 && r.json('unread_chats') <= r.json('unread_count'),
+    }),
   // A third of the reads page through the hot chat at a random depth.
   'GET /api/v1/{chat_id}/': ({ request, data }) => {
     const hot = randomInt(3) === 0;

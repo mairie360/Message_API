@@ -21,3 +21,4 @@ pub mod remove_user_from_chat;
 pub mod reveal_direct_chat;
 pub mod search;
 pub mod system_notes;
+pub mod unread_total;

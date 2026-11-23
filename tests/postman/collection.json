@@ -2342,6 +2342,52 @@
           "response": []
         },
         {
+          "name": "The agent's unread total counts the new message (MAIR-1106)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_agent}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/unread/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "unread",
+                ""
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"The total holds at least the admin's new message\", function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.unread_count).to.be.at.least(1);",
+                  "    pm.expect(body.unread_chats).to.be.at.least(1);",
+                  "    pm.expect(body.unread_chats).to.be.at.most(body.unread_count);",
+                  "    pm.environment.set(\"unread_total_before\", String(body.unread_count));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
           "name": "Acknowledging the displayed message leaves the new one unread",
           "request": {
             "method": "POST",
@@ -2645,6 +2691,50 @@
                   "    const chat = pm.response.json().chats.find(c => c.id === Number(pm.environment.get(\"chat_id\")));",
                   "    pm.expect(chat, 'chat').to.exist;",
                   "    pm.expect(chat.unread_count).to.eql(0);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "The agent's unread total drops once the chat is read (MAIR-1106)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_agent}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/unread/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "unread",
+                ""
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"The acknowledged messages left the total\", function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.unread_count).to.be.below(Number(pm.environment.get(\"unread_total_before\")));",
+                  "    pm.expect(body.unread_chats).to.be.at.most(body.unread_count);",
                   "});"
                 ]
               }

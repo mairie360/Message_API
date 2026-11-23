@@ -47,6 +47,10 @@ operations:
   POST /api/v1/direct/:
     access: authenticated
     roles: [Admin, Maire, Responsable, User, Guest]
+  GET /api/v1/unread/:
+    access: authenticated
+    roles: [Admin, Maire, Responsable, User, Guest]
+    note: "the caller's own unread total only"
   GET /api/v1/stream:
     access: authenticated
     roles: [Admin, Maire, Responsable, User, Guest]
