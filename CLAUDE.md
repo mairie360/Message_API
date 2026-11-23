@@ -259,8 +259,9 @@ and `SELECT (id, name)` on `groups`). Every change is additive, no field was rem
 - Tags (`endpoints/v1/id/messages/tags.rs`, `database/chats/message_tags`): `POST` and `PATCH` of a message take
   `mentions`, `mentions_everyone`, `group_mentions`, `links` (50 of each, no duplicate). They travel as one JSON text
   parameter (`QueryParam` has no array). `CheckMessageTagsQueryView` answers the first refused field (`mentions`: not a
-  non-excluded member; `group_mentions`: no non-excluded member in the group; `links`: `check_access(author,
-  'projects' | 'tasks' | 'events', 'read', id) <> 1`) → `400` before anything is written. In a `PATCH` an absent field
+  non-excluded member; `group_mentions`: no non-excluded member in the group; `links`: a project, or the project
+  of a task, hidden from the author by Database's `project_visible_to_user` (the rule of Project_API; `check_access`
+  knows no `projects` / `tasks` resource, MAIR-1166), an event `check_access(author, 'events', 'read', id) <> 1`) → `400` before anything is written. In a `PATCH` an absent field
   keeps, a present one replaces (`ClearMessageTagsQueryView` then `InsertMessageTagsQueryView`, two statements). A
   `PATCH` now answers the message (`200` with a body, empty before). A system note cannot be edited, deleted or reacted
   to (`400 A system note cannot be changed.`); deleting a message also runs `PurgeMessageExtrasQueryView` (its

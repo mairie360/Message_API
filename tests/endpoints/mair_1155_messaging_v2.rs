@@ -867,4 +867,18 @@ async fn mair_1166_links_carry_the_project_of_a_task_and_the_start_of_an_event()
         chrono::DateTime::parse_from_rfc3339(start).is_ok(),
         "{start}"
     );
+
+    // A member who does not see the project may link neither it nor its task.
+    for link in [
+        json!({ "kind": "project", "id": project }),
+        json!({ "kind": "task", "id": task }),
+    ] {
+        let (status, body) = post!(
+            app,
+            chat,
+            member,
+            json!({ "content": "x", "links": [link] })
+        );
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    }
 }
