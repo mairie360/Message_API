@@ -148,11 +148,13 @@ scenario: the SSE response never ends, so k6 cuts it after 1 s (error 1050), a t
 `responseCallback: http.expectedStatuses(0, 200)` so it stays out of `http_req_failed`. One `p(95)` threshold per
 `op` tag (200 ms reads, 500 ms writes, 1.5 s stream). The same scenario counts `GET /api/v1/ws` (MAIR-657): k6/http
 cannot upgrade, so the counted request is a plain `GET` answering the expected `400`. The real sockets are the
-`websocket` scenario (MAIR-661, `wsVus` of the profile: 20 in `ci`, 200 in `stress`, for 2 min from 30 s): each VU is
-agent `401001 + n`, the only member besides the Admin of its own chat created in `setup()` (deleted in `teardown()`),
-holds one socket for 20 s while the Admin posts in that chat every 2 s (`op:ws_post`, 500 ms `p(95)`), and checks the
-`101`, that the server did not close the socket, that every post came back as a `NEW_MSG` frame of that chat within
-2 s of the last post, and that no other frame came. `ws_frame_delivery` (Trend, from the start of the `POST` to the
+`websocket` scenario (MAIR-661, `wsVus` of the profile: 20 in `ci`, 200 in `stress`, for 2 min from 30 s): each iteration
+creates a chat of the Admin and agent `401001 + exec.vu.idInTest` (unique per VU: a `__VU` modulo made two VUs share a
+chat), holds one socket as that agent for 20 s while the Admin posts in the chat every 2 s (`op:ws_post`, 500 ms
+`p(95)`, `Connection: close` so no keep-alive connection idles past the server's timeout between iterations), then
+deletes the chat. It checks the `101`, that the server did not close the socket, that every post came back as a
+`NEW_MSG` frame of that chat within 2 s of the last post, and that no unknown frame of that chat came (frames of the
+agent's seeded chats are ignored). `ws_frame_delivery` (Trend, from the start of the `POST` to the
 frame) has a 1 s `p(95)`, `ws_frames_lost == 0`, `ws_connecting{scenario:websocket}` a 500 ms `p(95)`.
 `checks == 100%` (status and seeded rows), `dropped_iterations == 0` and
 `http_req_failed == 0`. Two load profiles (`K6_PROFILE`, passed by the compose file): `ci` (default) is what the 4 vCPU CI runner holds with the strict thresholds (30 readers, 4 writers, rush at 30 req/s); `stress` is the high load (100 readers, 10 writers, 100 req/s), run by hand with `K6_PROFILE=stress ./performance_test.sh` to find the breaking point, not on every push. Keep `init-perf.sql` and the id ranges at the top of `load-test.js` in step. The spec k6 reads is the one served
