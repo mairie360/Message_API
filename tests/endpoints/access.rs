@@ -332,8 +332,8 @@ async fn ids_from_another_chat_are_refused() {
         )
         .set_json(json!({ "content": "Mauvaise conversation" }))
     );
-    // `400` for a message that is not one of the chat; the body said `Unknown event.` (MAIR-262).
-    assert_eq!(status, StatusCode::BAD_REQUEST);
+    // A message that is not one of the chat is unknown there: `404`, like `DELETE` below (MAIR-1172).
+    assert_eq!(status, StatusCode::NOT_FOUND);
     assert_eq!(body, "Unknown message.");
     let (status, _) = send!(
         app,
@@ -364,6 +364,53 @@ async fn ids_from_another_chat_are_refused() {
         .set_json(json!({ "content": "Réponse", "citation": message_b }))
     );
     assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+/// MAIR-1172: editing a message that the chat does not hold answers `404 Unknown message.`, as for
+/// `DELETE`, whether it never existed or was deleted; `400` stays for a body the API refuses.
+#[actix_web::test]
+async fn mair_1172_editing_an_unknown_message_answers_404() {
+    let (state, sse) = states().await;
+    let app = test_app!(state, sse);
+    let db = get_fixture_db().await;
+    let (author, other) = (plain_user(&db).await, plain_user(&db).await);
+    let (chat, message, _) = seeded_chat!(app, author, other);
+    let edit = |id: u64, content: &str| {
+        request(
+            Method::PATCH,
+            &format!("/api/v1/{chat}/messages/{id}/"),
+            Some(author),
+        )
+        .set_json(json!({ "content": content }))
+    };
+
+    let (status, body) = send!(app, edit(999_999_999, "Personne"));
+    assert_eq!(
+        (status, body.as_str()),
+        (StatusCode::NOT_FOUND, "Unknown message.")
+    );
+
+    let (status, _) = send!(app, edit(message, ""));
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "a blank content stays a 400"
+    );
+
+    let (status, _) = send!(
+        app,
+        request(
+            Method::DELETE,
+            &format!("/api/v1/{chat}/messages/{message}/"),
+            Some(author)
+        )
+    );
+    assert!(status.is_success());
+    let (status, body) = send!(app, edit(message, "Trop tard"));
+    assert_eq!(
+        (status, body.as_str()),
+        (StatusCode::NOT_FOUND, "Unknown message.")
+    );
 }
 
 #[actix_web::test]
