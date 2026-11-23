@@ -5304,6 +5304,11 @@
                   "pm.test(\"Status is 401, the connection is not upgraded\", function () {",
                   "    pm.response.to.have.status(401);",
                   "    pm.expect(pm.response.headers.get('Upgrade')).to.be.undefined;",
+                  "});",
+                  "// The refusal carries the API's error envelope (plain text naming the cause), never a frame.",
+                  "pm.test(\"MAIR-661 The refusal is the error envelope\", function () {",
+                  "    pm.expect(pm.response.headers.get('Content-Type')).to.include('text/plain');",
+                  "    pm.expect(pm.response.text()).to.include(\"No JWT token provided\");",
                   "});"
                 ]
               }
@@ -5358,6 +5363,11 @@
                   "pm.test(\"Status is 401, the connection is not upgraded\", function () {",
                   "    pm.response.to.have.status(401);",
                   "    pm.expect(pm.response.headers.get('Upgrade')).to.be.undefined;",
+                  "});",
+                  "// The refusal carries the API's error envelope (plain text naming the cause), never a frame.",
+                  "pm.test(\"MAIR-661 The refusal is the error envelope\", function () {",
+                  "    pm.expect(pm.response.headers.get('Content-Type')).to.include('text/plain');",
+                  "    pm.expect(pm.response.text()).to.include(\"Jeton invalide\");",
                   "});"
                 ]
               }

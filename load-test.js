@@ -15,9 +15,14 @@
 // - `writes`: every other operation with the write VUs of the profile. Each handler is self-contained: it creates what it
 //   needs through `fixture()`, sends its request, then deletes what it created, so the handlers
 //   do not depend on their order and the database ends as it started;
-// - `stream`: GET /api/v1/stream and GET /api/v1/ws (MAIR-657) alone, 1 VU every few seconds. The SSE response never ends, so
-//   every call ends on a k6 timeout, which k6 logs as a warning: keeping it out of the 20 VUs
-//   keeps the CI log readable;
+// - `stream`: GET /api/v1/stream (SSE) alone, 1 VU every few seconds, until the SSE is removed. The response never ends,
+//   so every call ends on a k6 timeout, which k6 logs as a warning: keeping it out of the 20 VUs
+//   keeps the CI log readable. It also counts the plain GET /api/v1/ws (400) for the coverage;
+// - `websocket`: the real-time channel under load. Each iteration creates a chat of the Admin and the
+//   VU's own listener, holds one socket of GET /api/v1/ws (WS_SESSION_MS) as the listener while the
+//   Admin posts in the chat every WS_POST_EVERY_MS, then deletes the chat: every post must reach the
+//   socket as a NEW_MSG frame, and `ws_frame_delivery` measures the time from the start of the POST to
+//   the frame;
 // - `chats_rush`: `GET /api/v1/` as agents at the fixed arrival rate of the profile, failing if k6 has to drop
 //   iterations (the API no longer keeps up);
 // - `chat_poll` (MAIR-524): what replaced the 2 s reload of the open chat and of the list, at a
@@ -26,7 +31,9 @@
 //   time in four, from the beginning (catching up a full page), and `GET /api/v1/?since=`.
 import http from 'k6/http';
 import ws from 'k6/ws';
+import exec from 'k6/execution';
 import { check, fail, sleep } from 'k6';
+import { Counter, Trend } from 'k6/metrics';
 import { createCoverage, loadSpec } from '/coverage.js';
 
 const BASE_URL = (__ENV.BASE_URL || 'http://localhost:3003').replace(/\/+$/, '');
@@ -64,8 +71,8 @@ const BUSY_CHATS = { firstRank: 1, count: 100, messages: 100 };
 // - `stress`: the high load, run by hand (`K6_PROFILE=stress ./performance_test.sh`) to find
 //   the breaking point on a larger machine, not on every push.
 const PROFILES = {
-  ci: { readVus: 30, writeVus: 4, rushRate: 30, pollRate: 30 },
-  stress: { readVus: 100, writeVus: 10, rushRate: 100, pollRate: 100 },
+  ci: { readVus: 30, writeVus: 4, rushRate: 30, pollRate: 30, wsVus: 20 },
+  stress: { readVus: 100, writeVus: 10, rushRate: 100, pollRate: 100, wsVus: 200 },
 };
 const PROFILE = PROFILES[__ENV.K6_PROFILE || 'ci'];
 if (!PROFILE) throw new Error(`Unknown K6_PROFILE ${__ENV.K6_PROFILE}: ${Object.keys(PROFILES).join(', ')}`);
@@ -117,11 +124,26 @@ const STREAM_BUDGET_MS = 1500;
 
 const READ_METHODS = ['get', 'head', 'options'];
 const STREAM_PATH = '/api/v1/stream';
-// MAIR-657: the WebSocket twin of the stream, run in the same 1-VU scenario.
+// The WebSocket twin of the stream; its plain GET is counted in the `stream` scenario.
 const WS_PATH = '/api/v1/ws';
 const REALTIME_PATHS = [STREAM_PATH, WS_PATH];
-// How long the WebSocket of the `stream` scenario stays open before the VU closes it.
-const WS_HOLD_MS = 1000;
+
+// `websocket` scenario. Sockets held at once: one per VU.
+const WS_VUS = PROFILE.wsVus;
+// How long a VU keeps its socket open, and how often the Admin posts in its chat meanwhile.
+const WS_SESSION_MS = 20000;
+const WS_POST_EVERY_MS = 2000;
+// A frame still missing this long after the last post counts as lost.
+const WS_DRAIN_MS = 2000;
+// p(95) budget from the start of the POST to the NEW_MSG frame (the epic asks for under a second).
+const WS_DELIVERY_BUDGET_MS = 1000;
+// p(95) budget of the handshake (upgrade included).
+const WS_CONNECT_BUDGET_MS = 500;
+// The listener of VU n (exec.vu.idInTest, unique in the run) is agent WS_AGENTS.first + n: ranks
+// 1001.. hold no hot or busy chat.
+const WS_AGENTS = { first: 401001 };
+const wsFrameDelivery = new Trend('ws_frame_delivery', true);
+const wsFramesLost = new Counter('ws_frames_lost');
 
 /** The served spec restricted to the operations whose method and path pass `keep`. */
 function specSubset(spec, keep) {
@@ -271,24 +293,12 @@ const streamHandlers = {
       request({ params: { timeout: STREAM_HOLD, responseCallback: http.expectedStatuses(0, 200) } }),
       { 'stream stays open': (r) => r.error_code === 1050 || r.status === 200 },
     ),
-  // k6/http cannot upgrade a connection: the plain GET answers 400 (it is what the coverage counts),
-  // then k6/ws opens the real socket, which must be upgraded (101) and stay open until the VU closes
-  // it. The load scenario of the WebSocket itself is MAIR-661.
-  'GET /api/v1/ws': ({ request }) => {
+  // k6/http cannot upgrade a connection: the plain GET answers 400, and it is what the coverage
+  // counts. The real sockets are the `websocket` scenario.
+  'GET /api/v1/ws': ({ request }) =>
     check(request({ params: { responseCallback: http.expectedStatuses(400) } }), {
       'ws plain GET 400': (r) => r.status === 400,
-    });
-    let closing = false;
-    let closedByServer = false;
-    const res = ws.connect(`${BASE_URL.replace(/^http/, 'ws')}${WS_PATH}`, { headers: AUTH, tags: { op: 'ws_session' } }, (socket) => {
-      socket.on('close', () => { closedByServer = !closing; });
-      socket.setTimeout(() => { closing = true; socket.close(); }, WS_HOLD_MS);
-    });
-    check(res, {
-      'ws upgraded': (r) => r && r.status === 101,
-      'ws stays open': () => !closedByServer,
-    });
-  },
+    }),
 };
 
 const writeHandlers = {
@@ -437,6 +447,13 @@ export const options = {
       vus: 1,
       duration: '3m20s',
     },
+    websocket: {
+      executor: 'constant-vus',
+      exec: 'websocketScenario',
+      startTime: '30s', // under the read and write load
+      vus: WS_VUS,
+      duration: '2m',
+    },
     chats_rush: {
       executor: 'constant-arrival-rate',
       exec: 'chatsRushScenario',
@@ -466,6 +483,11 @@ export const options = {
     'http_req_duration{op:chats_rush}': [`p(95)<${CHATS_RUSH_BUDGET_MS}`],
     'http_req_duration{op:chat_since}': [`p(95)<${POLL_BUDGET_MS}`],
     'http_req_duration{op:chats_since}': [`p(95)<${POLL_BUDGET_MS}`],
+    // The WebSocket: every post reached its socket, fast enough, and the handshakes stayed quick.
+    ws_frame_delivery: [`p(95)<${WS_DELIVERY_BUDGET_MS}`],
+    ws_frames_lost: ['count==0'],
+    'ws_connecting{scenario:websocket}': [`p(95)<${WS_CONNECT_BUDGET_MS}`],
+    'http_req_duration{op:ws_post}': [`p(95)<${WRITE_BUDGET_MS}`],
     dropped_iterations: ['count==0'], // the rush kept its rate
     // Strict (MAIR-474): one wrong status or one missing seeded row fails the run.
     checks: ['rate==1'],
@@ -517,6 +539,67 @@ export function chatsRushScenario() {
 export function streamScenario(data) {
   stream.run({ headers: AUTH, data });
   sleep(4);
+}
+
+/**
+ * A chat of the Admin and the VU's listener, one socket of GET /api/v1/ws held WS_SESSION_MS by the
+ * listener while the Admin posts in the chat, then the chat is deleted. A post is pending until its
+ * NEW_MSG frame arrives; one still pending WS_DRAIN_MS after the last post is lost. Frames are
+ * handled once the POST returned (one event loop per VU), so the delivery time is measured from the
+ * start of the POST. The listener is a member of seeded chats too: only the frames of this chat are
+ * checked.
+ */
+export function websocketScenario() {
+  const listenerId = WS_AGENTS.first + exec.vu.idInTest;
+  const chatId = createChat(`k6 websocket ${exec.vu.idInTest}-${exec.vu.iterationInScenario}`, [listenerId]);
+  const pending = {};
+  let posts = 0;
+  let closing = false;
+  let closedByServer = false;
+  let unexpected = 0;
+  const res = ws.connect(
+    `${BASE_URL.replace(/^http/, 'ws')}${WS_PATH}`,
+    { headers: agentAuth(listenerId), tags: { op: 'ws_session' } },
+    (socket) => {
+      socket.on('message', (raw) => {
+        const frame = JSON.parse(raw);
+        if (frame.chat_id !== chatId) return;
+        const startedAt = frame.type === 'NEW_MSG' ? pending[frame.message_id] : undefined;
+        if (startedAt === undefined) {
+          unexpected += 1;
+          return;
+        }
+        wsFrameDelivery.add(Date.now() - startedAt);
+        delete pending[frame.message_id];
+      });
+      socket.on('close', () => { closedByServer = !closing; });
+      const openedAt = Date.now();
+      socket.setInterval(() => {
+        // The last WS_DRAIN_MS only wait for the frames of the posts already sent.
+        if (Date.now() - openedAt >= WS_SESSION_MS) return;
+        const startedAt = Date.now();
+        const post = http.post(
+          `${BASE_URL}/api/v1/${chatId}/messages/`,
+          JSON.stringify({ content: `k6 websocket ${posts}`, citation: null }),
+          // A fresh connection per post: between two iterations the keep-alive connection idles past
+          // the server's keep-alive timeout, and reusing it as the server closes it resets the POST.
+          { headers: Object.assign({ 'Content-Type': 'application/json', Connection: 'close' }, AUTH), tags: { op: 'ws_post' } },
+        );
+        posts += 1;
+        if (check(post, { 'ws post 200': (r) => r.status === 200 })) pending[post.json('id')] = startedAt;
+      }, WS_POST_EVERY_MS);
+      socket.setTimeout(() => { closing = true; socket.close(); }, WS_SESSION_MS + WS_DRAIN_MS);
+    },
+  );
+  deleteChat(chatId);
+  const lost = Object.keys(pending).length;
+  wsFramesLost.add(lost);
+  check(res, {
+    'ws upgraded': (r) => r && r.status === 101,
+    'ws stays open': () => !closedByServer,
+    'ws every post delivered': () => posts > 0 && lost === 0,
+    'ws no unknown signal of the chat': () => unexpected === 0,
+  });
 }
 
 /**

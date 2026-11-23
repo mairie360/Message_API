@@ -158,3 +158,20 @@ operations and `MessageStreamEvent`, with a `feat!` / `BREAKING CHANGE:` in the 
 | BFF (MAIR-658) | translation, unknown frames dropped, close-code mapping, max lifetime | handshake `401` before any upstream call, `503` unconfigured; frame relayed after a `POST` | same journey through the BFF ids |
 | Front (MAIR-818) | reconnection policy, close-code handling, fallback | server upgrade: `403` bad origin, `401` no cookie, cookie stripped and Bearer set | message appears without polling; reconnection catches up without duplicate |
 | Stacks (MAIR-661) | — | ZAP rules for `/ws`, k6 WebSocket scenario | newman + a Node `ws` script for the journeys |
+
+### Test stacks
+
+- **newman** (`integration_test.sh`) checks the refused handshakes (`401` without or with a forged JWT, with the
+  plain-text error body; `400` without `Upgrade`). newman cannot open a WebSocket, so the journey over real sockets
+  is `tests/websocket/journey.mjs` (plain Node), run on the same stack once the collection passed: A and B members,
+  C outsider; A posts: only B gets `NEW_MSG`, once; B's 6th connection evicts the oldest with `4008` and the 5 others
+  keep receiving.
+- **ZAP** (`security_test.sh`): `/api/v1/ws` is scanned like any route. ZAP cannot upgrade, so it sees the plain
+  `GET` (`401` without a token, `400` without `Upgrade`, plain text, no alert). The `OUTOFSCOPE` regex of rule
+  `100001` still lists `/api/v1/stream`: the SSE response never ends and would hold the scan until ZAP's timeout. It
+  goes away with the SSE.
+- **k6** (`performance_test.sh`): the `websocket` scenario holds one socket per VU (20 in the `ci` profile, 200 in
+  `stress`) while the Admin posts in each VU's chat every 2 s. Every post must come back as a `NEW_MSG` frame
+  (`ws_frames_lost == 0`), `ws_frame_delivery` (start of the `POST` → frame) has a 1 s `p(95)` and the handshake
+  (`ws_connecting`) a 500 ms `p(95)`, on top of the strict `checks`, `http_req_failed` and `dropped_iterations`. The
+  `stream` scenario keeps the SSE at 1 VU until its removal.

@@ -167,3 +167,20 @@ leurs opérations OpenAPI et `MessageStreamEvent`, avec un `feat!` / `BREAKING C
 | BFF (MAIR-658) | traduction, trames inconnues abandonnées, correspondance des codes de fermeture, durée de vie maximale | poignée de main `401` avant tout appel amont, `503` non configuré ; trame relayée après un `POST` | même parcours avec les identifiants du BFF |
 | Front (MAIR-818) | politique de reconnexion, gestion des codes de fermeture, repli | upgrade du serveur : `403` mauvaise origine, `401` sans cookie, cookie retiré et Bearer posé | un message apparaît sans polling ; la reconnexion rattrape sans doublon |
 | Stacks (MAIR-661) | — | règles ZAP pour `/ws`, scénario k6 WebSocket | newman + un script Node `ws` pour les parcours |
+
+### Stacks de test
+
+- **newman** (`integration_test.sh`) vérifie les poignées de main refusées (`401` sans JWT ou avec un JWT forgé, avec
+  le corps d'erreur en texte brut ; `400` sans `Upgrade`). newman ne sait pas ouvrir de WebSocket : le parcours sur de
+  vrais sockets est `tests/websocket/journey.mjs` (Node seul), lancé sur la même stack une fois la collection passée :
+  A et B membres, C extérieur ; A poste : seul B reçoit `NEW_MSG`, une fois ; la 6e connexion de B évince la plus
+  ancienne avec `4008` et les 5 autres continuent de recevoir.
+- **ZAP** (`security_test.sh`) : `/api/v1/ws` est scanné comme toute route. ZAP ne sait pas faire l'upgrade, il voit le
+  `GET` simple (`401` sans jeton, `400` sans `Upgrade`, en texte brut, sans alerte). L'expression `OUTOFSCOPE` de la
+  règle `100001` garde `/api/v1/stream` : la réponse SSE ne se termine jamais et bloquerait le scan jusqu'au délai de
+  ZAP. Elle part avec le SSE.
+- **k6** (`performance_test.sh`) : le scénario `websocket` tient un socket par VU (20 en profil `ci`, 200 en `stress`)
+  pendant que l'Admin poste dans le chat de chaque VU toutes les 2 s. Chaque message doit revenir en trame `NEW_MSG`
+  (`ws_frames_lost == 0`), `ws_frame_delivery` (début du `POST` → trame) a un `p(95)` de 1 s et la poignée de main
+  (`ws_connecting`) un `p(95)` de 500 ms, en plus des seuils stricts `checks`, `http_req_failed` et
+  `dropped_iterations`. Le scénario `stream` garde le SSE à 1 VU jusqu'à son retrait.
