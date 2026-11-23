@@ -55,6 +55,10 @@ operations:
     access: authenticated
     roles: [Admin, Maire, Responsable, User, Guest]
     note: "events of the caller's own chats only"
+  GET /api/v1/ws:
+    access: authenticated
+    roles: [Admin, Maire, Responsable, User, Guest]
+    note: "WebSocket twin of /stream (MAIR-657): events of the caller's own chats only"
 
   GET /api/v1/{chat_id}/:
     access: authenticated

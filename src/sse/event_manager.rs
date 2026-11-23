@@ -3,11 +3,9 @@ use crate::{
     database::chats::get_chat_users::view::GetChatMembersQueryView,
     sse::state::{AppState, ChatEventKind, ChatSignal},
 };
-use actix_web::web;
 use mairie360_api_lib::smart_db::SmartDatabase;
 use std::sync::Arc;
 use tokio::sync::broadcast::{self, error::RecvError};
-use tokio::sync::mpsc::error::TrySendError;
 
 pub async fn start_internal_event_listener(state: Arc<AppState>, smart_db: SmartDatabase) {
     let rx = state.internal_bus.subscribe();
@@ -88,14 +86,9 @@ pub async fn listen(
     }
 }
 
-/// Pushes one `data:` frame to every connection of `user_id` on this replica.
+/// Pushes the signal to every connection of `user_id` on this replica (see [`AppState::deliver`]:
+/// a full SSE buffer drops it, a full WebSocket buffer closes that socket with `1013`, a closed
+/// channel removes the connection).
 fn push(state: &AppState, user_id: u64, payload: &str) {
-    for (connection_id, tx) in state.connections_of(user_id) {
-        let frame = web::Bytes::from(format!("data: {}\n\n", payload));
-        // A full buffer only drops this notification; a closed channel is a dead connection and
-        // is the only thing removed.
-        if let Err(TrySendError::Closed(_)) = tx.try_send(Ok(frame)) {
-            state.remove_connection(user_id, connection_id);
-        }
-    }
+    state.deliver(user_id, payload);
 }

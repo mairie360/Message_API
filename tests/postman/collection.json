@@ -5260,6 +5260,147 @@
             }
           ],
           "response": []
+        },
+        {
+          "name": "MAIR-657 WebSocket handshake without JWT is rejected",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Connection",
+                "value": "Upgrade"
+              },
+              {
+                "key": "Upgrade",
+                "value": "websocket"
+              },
+              {
+                "key": "Sec-WebSocket-Version",
+                "value": "13"
+              },
+              {
+                "key": "Sec-WebSocket-Key",
+                "value": "dGhlIHNhbXBsZSBub25jZQ=="
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/ws",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "ws"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 401, the connection is not upgraded\", function () {",
+                  "    pm.response.to.have.status(401);",
+                  "    pm.expect(pm.response.headers.get('Upgrade')).to.be.undefined;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "MAIR-657 WebSocket handshake with a forged JWT is rejected",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_forged}}"
+              },
+              {
+                "key": "Connection",
+                "value": "Upgrade"
+              },
+              {
+                "key": "Upgrade",
+                "value": "websocket"
+              },
+              {
+                "key": "Sec-WebSocket-Version",
+                "value": "13"
+              },
+              {
+                "key": "Sec-WebSocket-Key",
+                "value": "dGhlIHNhbXBsZSBub25jZQ=="
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/ws",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "ws"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 401, the connection is not upgraded\", function () {",
+                  "    pm.response.to.have.status(401);",
+                  "    pm.expect(pm.response.headers.get('Upgrade')).to.be.undefined;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "MAIR-657 WebSocket route without Upgrade is not upgraded",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_agent}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/ws",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "ws"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400: a plain GET is not a WebSocket handshake\", function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
         }
       ]
     },
@@ -6468,7 +6609,7 @@
     },
     {
       "key": "openapi_coverage_exceptions",
-      "value": "{\n  \"GET /api/v1/stream 2xx\": \"newman cannot consume an SSE stream that never ends: the 200 and its first frame are tested in tests/endpoints/flows.rs (stream_opens_an_event_stream, MAIR-561), and by the k6 stream scenario\"\n}",
+      "value": "{\n  \"GET /api/v1/stream 2xx\": \"newman cannot consume an SSE stream that never ends: the 200 and its first frame are tested in tests/endpoints/flows.rs (stream_opens_an_event_stream, MAIR-561), and by the k6 stream scenario\",\n  \"GET /api/v1/ws 2xx\": \"newman cannot open a WebSocket: the 101 upgrade and the frames are tested in tests/endpoints/mair_657_websocket.rs (MAIR-657) and by the k6 stream scenario\",\n  \"GET /api/v1/ws 404\": \"the stack has no token of an unknown or archived account: the 404 of every secured operation, this one included, is tested by tests/endpoints/token_refusals.rs (every_secured_operation_refuses_an_unknown_or_archived_account)\"\n}",
       "type": "string"
     }
   ]

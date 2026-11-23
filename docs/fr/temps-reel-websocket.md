@@ -25,7 +25,8 @@ anglaise ([`../en/realtime-websocket.md`](../en/realtime-websocket.md)) fait foi
 |---|---|---|---|
 | `101` | connexion promue | promue, une fois la poignée de main de l'API acceptée | promue, une fois celle du BFF acceptée |
 | `400` | pas une poignée de main WebSocket | pas une poignée de main WebSocket | pas une poignée de main WebSocket |
-| `401` | JWT absent, invalide ou expiré, session révoquée, compte inconnu | session absente ou invalide (avant tout appel amont) ; l'API a répondu `401` | cookie absent ou expiré |
+| `401` | JWT absent, invalide ou expiré, session révoquée | session absente ou invalide (avant tout appel amont) ; l'API a répondu `401` ou `404` | cookie absent ou expiré |
+| `404` | jeton valide mais compte inconnu ou archivé (comme sur toutes les routes de l'API) | — | — |
 | `403` | — | — | `Origin` absent ou différent de celui du front |
 | `429` | limite de débit de `/api` | limite de débit de l'appelant | — |
 | `502` | — | l'API a refusé autrement ou n'a pas répondu à la poignée de main en 10 s | le BFF n'a pas répondu en 10 s |
