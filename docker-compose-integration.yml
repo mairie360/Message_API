@@ -168,3 +168,22 @@ services:
       --env-var jwt_forged=${JWT_FORGED:?JWT_FORGED must be set, run ./integration_test.sh}
       --env-var jwt_expired=${JWT_EXPIRED:?JWT_EXPIRED must be set, run ./integration_test.sh}
       --bail
+
+  # The WebSocket journey (tests/websocket/journey.mjs), which newman cannot run. Not
+  # started by `up`: integration_test.sh runs it once the collection passed, on the same stack.
+  ws-journey:
+    image: node:24-bookworm-slim@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c
+    profiles: ["journey"]
+    networks:
+      - backend
+    volumes:
+      - ./tests/websocket:/journey:ro
+    environment:
+      BASE_URL: http://message:3003
+      JWT_ADMIN: ${JWT_ADMIN:?JWT_ADMIN must be set, run ./integration_test.sh}
+      JWT_AGENT: ${JWT_AGENT:?JWT_AGENT must be set, run ./integration_test.sh}
+      JWT_THIRD: ${JWT_THIRD:?JWT_THIRD must be set, run ./integration_test.sh}
+    depends_on:
+      message-ready:
+        condition: service_completed_successfully
+    command: ["node", "/journey/journey.mjs"]

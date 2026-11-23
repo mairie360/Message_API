@@ -124,7 +124,10 @@ spec's `servers` are unreachable from the ZAP container. `rules.tsv` is the one 
 `IGNORE` since `<` / `>` are accepted in free text (MAIR-426: the API serves JSON with `nosniff`, escaping is the
 fronts' job), and that the
 `100001` (unexpected content type) scope also covers `/api/v1/stream` (`text/event-stream`): ZAP keeps a single
-`OUTOFSCOPE` regex per rule id, so both paths live in one alternation.
+`OUTOFSCOPE` regex per rule id, so both paths live in one alternation. That exclusion stays while the SSE exists (its
+response never ends, so ZAP would hold it until its own timeout) and goes with the SSE's removal. `/api/v1/ws` is not
+excluded (MAIR-661): ZAP cannot upgrade, so it scans the plain `GET`, which answers `401` without a token and `400`
+without `Upgrade`, both plain-text, raising no alert.
 
 Both the ZAP and k6 stacks carry the OpenAPI coverage gate (MAIR-194) from mairie360/CICD `tests/`, available as
 `cicd-repo/` (checked out by CI, cloned by the scripts at the pinned `cicd_version` otherwise, override with
@@ -143,9 +146,15 @@ scenario (MAIR-524) sends the incremental reads that replaced the 2 s reloads at
 full page; `op:chats_since` `GET /api/v1/?since=`), each with a 200 ms `p(95)`. `GET /api/v1/stream` has its own 1-VU `stream`
 scenario: the SSE response never ends, so k6 cuts it after 1 s (error 1050), a timeout marked expected with
 `responseCallback: http.expectedStatuses(0, 200)` so it stays out of `http_req_failed`. One `p(95)` threshold per
-`op` tag (200 ms reads, 500 ms writes, 1.5 s stream). The same scenario covers `GET /api/v1/ws` (MAIR-657): k6/http
-cannot upgrade, so the counted request is a plain `GET` answering the expected `400`, then `k6/ws` opens the real
-socket, checks the `101` and that it stays open for 1 s (the WebSocket load scenario is MAIR-661), `checks == 100%` (status and seeded rows), `dropped_iterations == 0` and
+`op` tag (200 ms reads, 500 ms writes, 1.5 s stream). The same scenario counts `GET /api/v1/ws` (MAIR-657): k6/http
+cannot upgrade, so the counted request is a plain `GET` answering the expected `400`. The real sockets are the
+`websocket` scenario (MAIR-661, `wsVus` of the profile: 20 in `ci`, 200 in `stress`, for 2 min from 30 s): each VU is
+agent `401001 + n`, the only member besides the Admin of its own chat created in `setup()` (deleted in `teardown()`),
+holds one socket for 20 s while the Admin posts in that chat every 2 s (`op:ws_post`, 500 ms `p(95)`), and checks the
+`101`, that the server did not close the socket, that every post came back as a `NEW_MSG` frame of that chat within
+2 s of the last post, and that no other frame came. `ws_frame_delivery` (Trend, from the start of the `POST` to the
+frame) has a 1 s `p(95)`, `ws_frames_lost == 0`, `ws_connecting{scenario:websocket}` a 500 ms `p(95)`.
+`checks == 100%` (status and seeded rows), `dropped_iterations == 0` and
 `http_req_failed == 0`. Two load profiles (`K6_PROFILE`, passed by the compose file): `ci` (default) is what the 4 vCPU CI runner holds with the strict thresholds (30 readers, 4 writers, rush at 30 req/s); `stress` is the high load (100 readers, 10 writers, 100 req/s), run by hand with `K6_PROFILE=stress ./performance_test.sh` to find the breaking point, not on every push. Keep `init-perf.sql` and the id ranges at the top of `load-test.js` in step. The spec k6 reads is the one served
 by the image under test, saved into the `openapi-spec` volume by `message-ready`. **Adding an endpoint = adding its
 handler in `load-test.js`** (k6 aborts at init otherwise), nothing to do for ZAP. `init-test.sql` also seeds the
@@ -279,8 +288,13 @@ yourself. The scenario creates
 its own chat and deletes it at the end, so it is replayable against a persistent database. `GET /api/v1/stream`
 is only checked unauthenticated (401): newman cannot consume an open SSE stream. Nor can it open a WebSocket:
 `GET /api/v1/ws` is checked for its refused handshakes (`401` without or with a forged JWT, `400` without
-`Upgrade`); the journeys over a real socket are the Rust tests of `tests/endpoints/mair_657_websocket.rs` (MAIR-661
-adds them to the stacks).
+`Upgrade`; the two `401` also check the plain-text error body). The journey over real sockets runs next to it
+(MAIR-661): `tests/websocket/journey.mjs`, plain Node (global `WebSocket` with an `Authorization` header, `fetch`),
+is the `ws-journey` service of `docker-compose-integration.yml` (profile `journey`, not started by `up`), run by
+`integration_test.sh` with `docker compose run` once newman passed, its exit code becoming the script's. Admin (A),
+users 2 (B) and 3 (C) connect; A posts in a new chat with B: only B gets `NEW_MSG` with `chat_id` / `message_id`,
+once; B opens 5 more sockets: the oldest closes with `4008` and the 5 others get the next `NEW_MSG`. The same
+journeys are also the Rust tests of `tests/endpoints/mair_657_websocket.rs`.
 
 Split of the tests (MAIR-262): `cargo test` (unit and handler tests) validates the code, newman validates that the
 running image works. The collection holds, for **every operation of the spec**, its success case and one case per

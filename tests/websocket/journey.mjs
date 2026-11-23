@@ -1,0 +1,148 @@
+// WebSocket journey of the integration stack, run by integration_test.sh once the
+// newman collection passed: newman cannot open a WebSocket, so the frames of GET /api/v1/ws are
+// checked here, on the same stack, with Node's own WebSocket and fetch (no dependency).
+//
+// Users (init-test.sql, tokens signed by integration_test.sh): A = Admin (1), B = user 2, C = user 3.
+// 1. A, B and C connect: each handshake is upgraded.
+// 2. A creates a chat with B, C stays outside. A posts: B receives NEW_MSG with the chat and message
+//    ids, A (the author) and C (not a member) receive nothing.
+// 3. B opens 5 more connections: the 6th evicts the oldest one with 4008. A posts again: the 5 live
+//    connections of B all receive NEW_MSG.
+// 4. The chat is deleted and every socket closed.
+//
+// Exit code 0 when every check passed, 1 otherwise.
+
+const BASE_URL = process.env.BASE_URL ?? 'http://message:3003';
+const WS_URL = `${BASE_URL.replace(/^http/, 'ws')}/api/v1/ws`;
+const USERS = {
+  A: { id: 1, token: process.env.JWT_ADMIN },
+  B: { id: 2, token: process.env.JWT_AGENT },
+  C: { id: 3, token: process.env.JWT_THIRD },
+};
+// Delivery budget of a signal: the epic asks for less than a second, CI runners get some slack.
+const DELIVERY_MS = Number(process.env.WS_DELIVERY_MS ?? 3000);
+// How long a connection that must stay silent is watched.
+const SILENCE_MS = Number(process.env.WS_SILENCE_MS ?? 1500);
+const MAX_CONNECTIONS = 5;
+const EVICTED = 4008;
+
+let failures = 0;
+const sockets = [];
+
+function check(name, ok, detail = '') {
+  console.log(`${ok ? '  ✔' : '  ✘'} ${name}${ok || !detail ? '' : ` (${detail})`}`);
+  if (!ok) failures += 1;
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Opens GET /api/v1/ws as `user`; resolves once upgraded, rejects if the handshake fails. */
+function connect(user, label) {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(WS_URL, { headers: { Authorization: `Bearer ${user.token}` } });
+    const conn = { label, ws, frames: [], closeCode: null, waiters: [] };
+    ws.addEventListener('open', () => resolve(conn), { once: true });
+    ws.addEventListener('message', (event) => {
+      let frame;
+      try {
+        frame = JSON.parse(String(event.data));
+      } catch {
+        frame = { unparsable: String(event.data) };
+      }
+      conn.frames.push(frame);
+      conn.waiters.splice(0).forEach((wake) => wake());
+    });
+    ws.addEventListener('close', (event) => {
+      conn.closeCode = event.code;
+      conn.waiters.splice(0).forEach((wake) => wake());
+      reject(new Error(`${label}: closed before the upgrade (${event.code})`));
+    });
+    sockets.push(conn);
+  });
+}
+
+/** Waits until `predicate(conn)` holds or `ms` elapsed; returns whether it holds. */
+async function waitFor(conn, predicate, ms) {
+  const deadline = Date.now() + ms;
+  while (!predicate(conn)) {
+    const left = deadline - Date.now();
+    if (left <= 0) return false;
+    await new Promise((wake) => {
+      conn.waiters.push(wake);
+      setTimeout(wake, left);
+    });
+  }
+  return true;
+}
+
+async function api(user, method, path, body) {
+  const res = await fetch(`${BASE_URL}${path}`, {
+    method,
+    headers: { Authorization: `Bearer ${user.token}`, 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`${method} ${path} answered ${res.status}: ${text}`);
+  return text ? JSON.parse(text) : null;
+}
+
+const newMsg = (chatId, messageId) => (frame) =>
+  frame.type === 'NEW_MSG' && frame.chat_id === chatId && frame.message_id === messageId;
+
+async function main() {
+  for (const [name, user] of Object.entries(USERS)) {
+    if (!user.token) throw new Error(`the token of ${name} is missing (JWT_ADMIN, JWT_AGENT, JWT_THIRD)`);
+  }
+
+  console.log('MAIR-661 WebSocket handshake is upgraded for a valid session');
+  const a = await connect(USERS.A, 'A');
+  const b = await connect(USERS.B, 'B#1');
+  const c = await connect(USERS.C, 'C');
+  check('A, B and C are connected', [a, b, c].every((conn) => conn.ws.readyState === WebSocket.OPEN));
+
+  console.log('MAIR-661 Only the other members receive the message signal');
+  const chat = await api(USERS.A, 'POST', '/api/v1/', { name: 'Temps réel (MAIR-661)', members: [USERS.B.id] });
+  // Whatever the creation itself signals is not part of this check.
+  await sleep(300);
+  [a, b, c].forEach((conn) => conn.frames.splice(0));
+
+  const started = Date.now();
+  const message = await api(USERS.A, 'POST', `/api/v1/${chat.id}/messages/`, { content: 'Bonjour B', citation: null });
+  const delivered = await waitFor(b, (conn) => conn.frames.some(newMsg(chat.id, message.id)), DELIVERY_MS);
+  check(`B receives NEW_MSG {chat_id, message_id} within ${DELIVERY_MS} ms`, delivered, JSON.stringify(b.frames));
+  if (delivered) console.log(`    delivered in ${Date.now() - started} ms`);
+  await sleep(SILENCE_MS);
+  check('A, the author, receives nothing', a.frames.length === 0, JSON.stringify(a.frames));
+  check('C, not a member, receives nothing', c.frames.length === 0, JSON.stringify(c.frames));
+  check('B receives the signal once', b.frames.filter(newMsg(chat.id, message.id)).length === 1, JSON.stringify(b.frames));
+
+  console.log(`MAIR-661 A ${MAX_CONNECTIONS + 1}th connection evicts the oldest with ${EVICTED}`);
+  const others = [];
+  for (let i = 2; i <= MAX_CONNECTIONS + 1; i += 1) {
+    others.push(await connect(USERS.B, `B#${i}`));
+  }
+  const evicted = await waitFor(b, (conn) => conn.closeCode !== null, DELIVERY_MS);
+  check(`the oldest connection of B is closed with ${EVICTED}`, evicted && b.closeCode === EVICTED, `close code ${b.closeCode}`);
+  check(`the ${MAX_CONNECTIONS} newer connections stay open`, others.every((conn) => conn.ws.readyState === WebSocket.OPEN));
+
+  const second = await api(USERS.A, 'POST', `/api/v1/${chat.id}/messages/`, { content: 'Encore là ?', citation: null });
+  const all = await Promise.all(
+    others.map((conn) => waitFor(conn, (x) => x.frames.some(newMsg(chat.id, second.id)), DELIVERY_MS)),
+  );
+  check(`the ${MAX_CONNECTIONS} live connections of B receive NEW_MSG`, all.every(Boolean), all.join(','));
+  check('C still receives nothing', c.frames.length === 0, JSON.stringify(c.frames));
+
+  await api(USERS.A, 'DELETE', `/api/v1/${chat.id}/`);
+}
+
+try {
+  await main();
+} catch (error) {
+  check('the journey ran to its end', false, error.message);
+} finally {
+  sockets.forEach((conn) => {
+    if (conn.ws.readyState === WebSocket.OPEN) conn.ws.close(1000);
+  });
+}
+console.log(failures === 0 ? 'WebSocket journey passed' : `WebSocket journey failed: ${failures} check(s)`);
+process.exit(failures === 0 ? 0 : 1);

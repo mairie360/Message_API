@@ -44,11 +44,19 @@ echo "==> [2/4] Waiting for the newman collection to finish..."
 docker compose -f "$COMPOSE_FILE" wait "$SERVICE_NAME"
 EXIT_CODE=$?
 
+# newman cannot open a WebSocket, so the journey over GET /api/v1/ws (frames, ACL,
+# eviction) runs next, on the same stack, once the collection passed.
+if [ "$EXIT_CODE" -eq 0 ]; then
+    echo "==> [2/4] Running the WebSocket journey..."
+    docker compose -f "$COMPOSE_FILE" --profile journey run --rm ws-journey
+    EXIT_CODE=$?
+fi
+
 echo "==> [3/4] Report (logs)..."
 docker compose -f "$COMPOSE_FILE" logs "$SERVICE_NAME"
 
 echo "==> [4/4] Cleaning up the containers..."
-docker compose -f "$COMPOSE_FILE" down -v
+docker compose -f "$COMPOSE_FILE" --profile journey down -v --remove-orphans
 
 echo "----------------------------------------"
 echo "Final exit code: $EXIT_CODE"
