@@ -2,8 +2,10 @@ pub mod access;
 pub mod delete;
 pub mod doc;
 pub mod get;
+pub mod mention_groups;
 pub mod messages;
 pub mod read;
+pub mod search;
 pub mod users;
 
 /// Path parameters of the routes of a conversation.
@@ -31,8 +33,10 @@ pub fn config(cfg: &mut actix_web::web::ServiceConfig) {
         actix_web::web::scope("/{chat_id}")
             .service(delete::endpoint::delete_chat)
             .service(get::endpoint::get_chat)
+            .configure(mention_groups::config)
             .configure(messages::config)
             .configure(read::config)
+            .configure(search::config)
             .configure(users::config),
     );
 }

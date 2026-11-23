@@ -88,6 +88,8 @@ fn test_mair_524_signal_types() {
         (ChatEvent::message_edited(5, 1, 117), "MSG_EDITED"),
         (ChatEvent::message_deleted(5, 1, 117), "MSG_DELETED"),
         (ChatEvent::chat_read(5, 1, 117, 0), "CHAT_READ"),
+        (ChatEvent::message_reacted(5, 1, 117), "MSG_REACTED"),
+        (ChatEvent::mentioned(5, 1, 117, vec![2]), "MENTIONED"),
     ];
     for (event, kind) in cases {
         let signal = serde_json::to_value(ChatSignal::from_event(&event)).unwrap();
@@ -95,4 +97,30 @@ fn test_mair_524_signal_types() {
         assert_eq!(signal["message_id"], 117);
         assert_eq!(signal.get("unread_count").is_some(), kind == "CHAT_READ");
     }
+}
+
+#[test]
+fn test_mair_1155_recipients_cross_the_relay_and_default_to_none() {
+    let changed = serde_json::to_value(ChatSignal::from_event(&ChatEvent::members_changed(
+        5,
+        1,
+        vec![9],
+    )))
+    .unwrap();
+    assert_eq!(
+        changed,
+        serde_json::json!({ "type": "MEMBERS_CHANGED", "chat_id": 5 }),
+        "no message id, the recipients stay server-side"
+    );
+    let event = ChatEvent::mentioned(5, 1, 117, vec![2, 3]);
+    let json = serde_json::to_string(&event).unwrap();
+    assert_eq!(serde_json::from_str::<ChatEvent>(&json).unwrap(), event);
+    let older: ChatEvent =
+        serde_json::from_str(r#"{"chat_id":5,"sender_id":42,"kind":"MessageEdited"}"#).unwrap();
+    assert!(older.recipients.is_empty());
+    let plain = serde_json::to_value(ChatEvent::message_created(5, 1, 117)).unwrap();
+    assert!(
+        plain.get("recipients").is_none(),
+        "no empty list on the wire"
+    );
 }

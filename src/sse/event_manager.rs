@@ -50,6 +50,13 @@ pub async fn listen(
                 push(&state_clone, event.sender_id, &payload);
                 return;
             }
+            // A mention only concerns the members it names, resolved by the writer.
+            if event.kind == ChatEventKind::Mentioned {
+                for user_id in &event.recipients {
+                    push(&state_clone, *user_id, &payload);
+                }
+                return;
+            }
 
             let view = GetChatMembersQueryView::new(event.chat_id);
             let members: Vec<i32> = match smart_db.fetch_all::<i32, _>(&view).await {
@@ -60,9 +67,19 @@ pub async fn listen(
                 }
             };
 
-            for user_id in members {
-                let user_id = id_from_sql(user_id);
-                if user_id == event.sender_id {
+            // A member change is signalled to everyone concerned, its actor (other tabs) and the
+            // removed member included; any other change to the members but its author.
+            let members_changed = event.kind == ChatEventKind::MembersChanged;
+            let mut recipients: Vec<u64> = members.into_iter().map(id_from_sql).collect();
+            if members_changed {
+                for user_id in &event.recipients {
+                    if !recipients.contains(user_id) {
+                        recipients.push(*user_id);
+                    }
+                }
+            }
+            for user_id in recipients {
+                if user_id == event.sender_id && !members_changed {
                     continue; // The author of a change is never notified of it.
                 }
                 push(&state_clone, user_id, &payload);

@@ -128,13 +128,29 @@ pub fn check_user_ids(
     max: usize,
     allow_empty: bool,
 ) -> Result<(), ValidationError> {
+    check_ids(field, ids, max, allow_empty, "users")
+}
+
+/// A list of `INTEGER` ids of `noun` (users, groups…): at most `max` entries, each between 1 and
+/// [`MAX_USER_ID`], no duplicate. `allow_empty` tells whether an empty list is accepted.
+///
+/// # Errors
+///
+/// Returns a [`ValidationError`] naming `field` when one of the rules is broken.
+pub fn check_ids(
+    field: &str,
+    ids: &[u64],
+    max: usize,
+    allow_empty: bool,
+    noun: &str,
+) -> Result<(), ValidationError> {
     if !allow_empty && ids.is_empty() {
         return Err(ValidationError::new(field, "must not be empty"));
     }
     if ids.len() > max {
         return Err(ValidationError::new(
             field,
-            &format!("must hold at most {max} users"),
+            &format!("must hold at most {max} {noun}"),
         ));
     }
     if ids.iter().any(|id| *id == 0 || *id > MAX_USER_ID) {
@@ -147,6 +163,29 @@ pub fn check_user_ids(
     sorted.sort_unstable();
     if sorted.windows(2).any(|pair| pair[0] == pair[1]) {
         return Err(ValidationError::new(field, "must not contain duplicates"));
+    }
+    Ok(())
+}
+
+/// Longest emoji of a reaction (`message_reactions.emoji` is `VARCHAR(32)`).
+pub const MAX_EMOJI_LENGTH: usize = 32;
+
+/// The emoji of a reaction (MAIR-1155): 1 to [`MAX_EMOJI_LENGTH`] characters, no whitespace and no
+/// control character (Database `chk_message_reactions_emoji`).
+///
+/// # Errors
+///
+/// Returns a [`ValidationError`] naming `field` when one of the rules is broken.
+pub fn check_emoji(field: &str, value: &str) -> Result<(), ValidationError> {
+    if value.is_empty() {
+        return Err(ValidationError::new(field, "must not be empty"));
+    }
+    check_length(field, value, MAX_EMOJI_LENGTH)?;
+    if value.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return Err(ValidationError::new(
+            field,
+            "must not contain whitespace nor control characters",
+        ));
     }
     Ok(())
 }
@@ -256,6 +295,23 @@ mod tests {
         assert!(check_user_ids("users_id", &[42, 42], 50, false).is_err());
         let too_many: Vec<u64> = (1..=51).collect();
         assert!(check_user_ids("users_id", &too_many, 50, false).is_err());
+    }
+
+    #[test]
+    fn emoji_is_short_and_without_whitespace() {
+        assert!(check_emoji("emoji", "👍").is_ok());
+        assert!(check_emoji("emoji", "👨‍👩‍👧").is_ok());
+        assert!(check_emoji("emoji", "").is_err());
+        assert!(check_emoji("emoji", "a b").is_err());
+        assert!(check_emoji("emoji", "\u{0}").is_err());
+        assert!(check_emoji("emoji", &"x".repeat(33)).is_err());
+        assert!(check_ids("group_mentions", &[3, 3], 50, true, "groups").is_err());
+        assert_eq!(
+            check_ids("group_mentions", &[1, 2, 3], 2, true, "groups")
+                .unwrap_err()
+                .to_string(),
+            "Invalid `group_mentions`: must hold at most 2 groups"
+        );
     }
 
     #[test]

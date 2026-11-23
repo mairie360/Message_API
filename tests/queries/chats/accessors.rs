@@ -23,7 +23,9 @@ fn test_post_message_in_chat_view_accessors() {
     assert_eq!(view.reply_to(), None);
     assert!(format!("{view}").contains("chat_id=12"));
     assert!(view.query_sql().contains("INSERT INTO messages"));
-    assert_eq!(view.query_params().len(), 4);
+    assert_eq!(view.query_params().len(), 5);
+    assert!(!view.mentions_everyone());
+    assert!(view.clone().mentioning_everyone(true).mentions_everyone());
 
     let reply = PostMessageInChatQueryView::replying_to(12, 34, "hello", Some(118));
     assert_eq!(reply.reply_to(), Some(118));
@@ -143,7 +145,18 @@ fn test_patch_message_view_accessors() {
     assert_eq!(view.content(), "new content");
     assert!(format!("{view}").contains("message_id=42"));
     assert!(view.query_sql().contains("UPDATE messages"));
-    assert_eq!(view.query_params().len(), 3);
+    assert_eq!(view.query_params().len(), 4);
+    assert_eq!(view.mentions_everyone(), None);
+    assert_eq!(
+        view.clone()
+            .mentioning_everyone(Some(true))
+            .mentions_everyone(),
+        Some(true)
+    );
+    assert!(
+        !format!("{view}").contains("new content"),
+        "no content in logs"
+    );
 }
 
 #[test]

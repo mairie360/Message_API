@@ -4,6 +4,7 @@ pub mod get;
 pub mod id;
 pub mod post;
 pub mod stream;
+pub mod unread;
 
 pub fn config(cfg: &mut actix_web::web::ServiceConfig) {
     cfg.service(
@@ -13,6 +14,7 @@ pub fn config(cfg: &mut actix_web::web::ServiceConfig) {
             .service(stream::endpoint::sse_stream_route)
             // Before `id`: `/{chat_id}` would take `/direct` and refuse it as a non-integer id.
             .configure(direct::config)
+            .configure(unread::config)
             .configure(id::config),
     );
 }

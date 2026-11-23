@@ -42,6 +42,11 @@ INSERT INTO messages (id, conversation_id, owner_id, content)
 VALUES (118, 5, 1, 'La réunion est décalée à 15h.')
 ON CONFLICT (id) DO NOTHING;
 
+-- The Admin's reaction on message 118 (MAIR-1155, Database v4.0.0): the example of
+-- `DELETE /api/v1/5/messages/118/reactions/?emoji=👍` removes a real reaction.
+INSERT INTO message_reactions (message_id, user_id, emoji) VALUES (118, 1, '👍')
+ON CONFLICT DO NOTHING;
+
 -- Explicit ids do not advance the SERIAL sequence: move it past the fixtures so users created
 -- later (Core_API, other fixtures) do not collide with them.
 SELECT setval(pg_get_serial_sequence('users', 'id'), GREATEST((SELECT MAX(id) FROM users), 1));

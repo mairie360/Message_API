@@ -89,9 +89,11 @@ impl Display for GetChatUsersQueryView {
 impl ApiRequestDto for GetChatUsersQueryView {
     fn query_sql(&self) -> &'static str {
         "SELECT to_jsonb(t) FROM ( \
-            SELECT cm.user_id AS id, u.first_name, u.last_name \
+            SELECT cm.user_id AS id, u.first_name, u.last_name, \
+                   (c.kind <> 'direct' AND c.created_by IS NOT DISTINCT FROM cm.user_id) AS is_admin \
             FROM conversation_members cm \
             INNER JOIN users u ON u.id = cm.user_id \
+            INNER JOIN conversations c ON c.id = cm.conversation_id \
             WHERE cm.conversation_id = $1 AND cm.is_excluded = FALSE \
             ORDER BY cm.user_id LIMIT $2 OFFSET $3 \
          ) t"
@@ -107,4 +109,7 @@ pub struct ChatUserRow {
     pub id: i32,
     pub first_name: String,
     pub last_name: String,
+    /// The member created the group chat (MAIR-1155): its administrator while still a member.
+    #[serde(default)]
+    pub is_admin: bool,
 }

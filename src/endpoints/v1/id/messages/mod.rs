@@ -1,6 +1,7 @@
 pub mod doc;
 pub mod id;
 pub mod post;
+pub mod tags;
 
 pub fn config(cfg: &mut actix_web::web::ServiceConfig) {
     cfg.service(
