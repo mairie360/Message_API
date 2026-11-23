@@ -249,7 +249,9 @@ and `SELECT (id, name)` on `groups`). Every change is additive, no field was rem
 
 - `MessageView` (history, `since` reads, `PATCH` answer, system notes) adds `kind` (`user` / `system`), `system_event`
   (`{action: members_added | member_removed | member_left, actor_id, user_ids}`, `null` for a user message),
-  `mentions`, `mentions_everyone`, `group_mentions`, `links` (`[{kind: project | task | event, id}]`) and `reactions`
+  `mentions`, `mentions_everyone`, `group_mentions`, `links` (`[{kind: project | task | event, id}]`, plus `project_id` for a
+  task and `start` for an event, MAIR-1166: the Projects front opens a task at `?project=&task=`, the Calendar front an
+  event at `?date=&event=`; needs Database's `SELECT (id, project_id) ON tasks` and `(id, start_date) ON events`) and `reactions`
   (`[{emoji, count, user_ids}]` by first reaction). The columns live in one `message_v2_columns!()` macro of
   `database/chats/get_chat/view.rs` (correlated subqueries on the primary keys), shared by `GetChatQueryView`,
   `GetChatChangesQueryView` and `GetMessageQueryView`; `tests/queries/chats/changes.rs` only forbids a `Sort` outside

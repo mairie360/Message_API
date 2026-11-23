@@ -61,6 +61,26 @@ async fn event_of(db: &SmartDatabase, owner: u64) -> u64 {
     .unwrap() as u64
 }
 
+/// A project owned by `owner` and one of its tasks (MAIR-1166). The project gets its template's statuses,
+/// and the task the first status of `todo`.
+async fn task_of(db: &SmartDatabase, owner: u64) -> (u64, u64) {
+    let project = db
+        .fetch_scalar::<i32, _>(&RawQuery::new(
+            "INSERT INTO projects (title, owner_id) VALUES ('Voirie', $1) RETURNING id",
+            vec![QueryParam::I32(owner as i32)],
+        ))
+        .await
+        .unwrap();
+    let task = db
+        .fetch_scalar::<i32, _>(&RawQuery::new(
+            "INSERT INTO tasks (project_id, title) VALUES ($1, 'Rapport') RETURNING id",
+            vec![QueryParam::I32(project)],
+        ))
+        .await
+        .unwrap();
+    (project as u64, task as u64)
+}
+
 macro_rules! chat_of {
     ($app:expr, $creator:expr, $members:expr) => {{
         let (status, body) = send_json!(
@@ -143,7 +163,15 @@ async fn mair_1155_mentions_and_links_are_written_read_back_and_signalled() {
     assert_eq!(read["mentions"], json!([member]));
     assert_eq!(read["mentions_everyone"], false);
     assert_eq!(read["group_mentions"], json!([group]));
-    assert_eq!(read["links"], json!([{ "kind": "event", "id": event }]));
+    // MAIR-1166: an event link carries its start, the Calendar front opens it at `?date=<day>&event=<id>`.
+    let links = read["links"].as_array().unwrap();
+    assert_eq!(links.len(), 1, "{read}");
+    assert_eq!(
+        (&links[0]["kind"], &links[0]["id"]),
+        (&json!("event"), &json!(event))
+    );
+    assert!(links[0]["start"].as_str().is_some(), "{read}");
+    assert!(links[0].get("project_id").is_none(), "{read}");
     assert_eq!(read["reactions"], json!([]));
 
     let published = drain(&mut events).await;
@@ -791,4 +819,52 @@ async fn mair_1155_mention_groups_are_the_groups_of_the_members() {
     assert_eq!(status, StatusCode::BAD_REQUEST);
     let (status, _) = send!(app, request(Method::GET, &uri, Some(outsider)));
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+/// MAIR-1166: the links of a message carry what the fronts need to open them, the project of a task and
+/// the start of an event, and nothing for a project.
+#[actix_web::test]
+async fn mair_1166_links_carry_the_project_of_a_task_and_the_start_of_an_event() {
+    let (state, sse) = states().await;
+    let app = test_app!(state, sse);
+    let db = get_fixture_db().await;
+    let admin = admin_id().await;
+    let member = plain_user(&db).await;
+    let chat = chat_of!(app, admin, [member]);
+    let (project, task) = task_of(&db, admin).await;
+    let event = event_of(&db, admin).await;
+
+    let (status, body) = post!(
+        app,
+        chat,
+        admin,
+        json!({
+            "content": "voir #Voirie",
+            "links": [
+                { "kind": "project", "id": project },
+                { "kind": "task", "id": task },
+                { "kind": "event", "id": event }
+            ]
+        })
+    );
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let message = body["id"].as_u64().unwrap();
+
+    let read = message_by_id(&history!(app, chat, member), message);
+    let links = read["links"].as_array().unwrap();
+    assert_eq!(links.len(), 3, "{read}");
+    assert_eq!(links[0], json!({ "kind": "project", "id": project }));
+    assert_eq!(
+        links[1],
+        json!({ "kind": "task", "id": task, "project_id": project })
+    );
+    assert_eq!(
+        (&links[2]["kind"], &links[2]["id"]),
+        (&json!("event"), &json!(event))
+    );
+    let start = links[2]["start"].as_str().expect("the start of the event");
+    assert!(
+        chrono::DateTime::parse_from_rfc3339(start).is_ok(),
+        "{start}"
+    );
 }
