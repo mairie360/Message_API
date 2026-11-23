@@ -23,7 +23,7 @@ pub const PONG_TIMEOUT: Duration = Duration::from_secs(45);
 pub const SESSION_ENDED: u16 = 4001;
 /// Close code: the same user opened one connection too many, this oldest one is evicted.
 pub const EVICTED: u16 = 4008;
-/// Signals buffered per connection, as for the SSE: beyond, a signal is dropped for it only.
+/// Signals buffered per connection, as for the SSE: beyond, the socket is closed with `1013`.
 const SIGNAL_BUFFER: usize = 10;
 
 /// Intervals of the supervision loop. The route uses [`Timings::default`]; tests shorten them.
@@ -70,6 +70,8 @@ pub enum CloseCause {
     TooBig,
     /// The client broke the WebSocket protocol: `1002`.
     ProtocolError,
+    /// The send buffer was full when a signal came: `1013`, the client reconnects and catches up.
+    Overloaded,
 }
 
 impl CloseCause {
@@ -83,6 +85,7 @@ impl CloseCause {
             CloseCause::DataFrame => (CloseCode::Unsupported, "no data accepted"),
             CloseCause::TooBig => (CloseCode::Size, "frame too large"),
             CloseCause::ProtocolError => (CloseCode::Protocol, "protocol error"),
+            CloseCause::Overloaded => (CloseCode::Again, "send buffer full"),
         };
         CloseReason {
             code,
@@ -120,7 +123,8 @@ impl CloseCause {
                    **Server-side closure**: `4001` when the JWT expires, its session is revoked or its account \
                    removed (checked every 30 seconds and at `exp`): renew the session before reconnecting; `4008` \
                    when the same user opens more than 5 connections on this replica, SSE streams included (the \
-                   oldest is closed): do not reconnect automatically.",
+                   oldest is closed): do not reconnect automatically; `1013` when the server could not keep up \
+                   (the 10 signals buffered for this connection were full): reconnect and read since the cursors.",
     responses(
         (
             status = 101,
@@ -217,7 +221,13 @@ pub async fn serve(
 
     let cause = loop {
         tokio::select! {
-            () = connection.close.notified() => break CloseCause::Evicted,
+            () = connection.close.notified() => {
+                break if connection.overflowed.load(std::sync::atomic::Ordering::Acquire) {
+                    CloseCause::Overloaded
+                } else {
+                    CloseCause::Evicted
+                };
+            }
             () = &mut expired => break CloseCause::SessionEnded,
             signal = signals.recv() => {
                 // The registry keeps a sender as long as the connection is registered, and this

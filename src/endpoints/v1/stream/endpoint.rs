@@ -24,13 +24,16 @@ const CONNECTED_COMMENT: &[u8] = b": connected\n\n";
                    | `NEW_MSG` | a message was posted | `chat_id`, `message_id` | the (not excluded) members but the author |\n\
                    | `MSG_EDITED` | a message was edited | `chat_id`, `message_id` | the members but the editor |\n\
                    | `MSG_DELETED` | a message was deleted (tombstone) | `chat_id`, `message_id` | the members but the deleting user |\n\
-                   | `CHAT_READ` | the user acknowledged the chat (`POST /api/v1/{chat_id}/read/`) | `chat_id`, `message_id` (`readUntilMessageId`), `unread_count` | every stream of that user only (other tabs and devices, the calling one included) |\n\n\
-                   On `NEW_MSG`, `MSG_EDITED` or `MSG_DELETED`, read the changes with \
+                   | `CHAT_READ` | the user acknowledged the chat (`POST /api/v1/{chat_id}/read/`) | `chat_id`, `message_id` (`readUntilMessageId`), `unread_count` | every stream of that user only (other tabs and devices, the calling one included) |\n\
+                   | `MSG_REACTED` | a reaction was added to or removed from a message (MAIR-1155) | `chat_id`, `message_id` | the members but the reacting user |\n\
+                   | `MEMBERS_CHANGED` | members were added, removed, or left the chat (MAIR-1155; a system note comes with it as `NEW_MSG`) | `chat_id` | every member, the actor included, and the removed member |\n\
+                   | `MENTIONED` | a message posted or edited mentions the user, by id, through `@everyone` or through a group (MAIR-1155; sent besides `NEW_MSG` / `MSG_EDITED`) | `chat_id`, `message_id` | each member mentioned but the author (an edit only signals the members it newly mentions) |\n\n\
+                   On `NEW_MSG`, `MSG_EDITED`, `MSG_DELETED` or `MSG_REACTED` (a reaction moves the message's `updated_at`), read the changes with \
                    `GET /api/v1/{chat_id}/?since=<next_since>&since_id=<next_since_id>` (and refresh the list line \
-                   with `GET /api/v1/?since=`); on `CHAT_READ`, set the chat's unread badge to `unread_count`. \
+                   with `GET /api/v1/?since=`); on `CHAT_READ`, set the chat's unread badge to `unread_count`; on `MEMBERS_CHANGED`, read `GET /api/v1/{chat_id}/users/` again (a removed member gets `404`). \
                    A signal may exceptionally arrive twice (relay reconnection) or be lost (stream reconnection, \
                    full buffer): reads since a cursor are idempotent, so read since the last cursor after a \
-                   reconnection. `message_id` is only absent from a signal relayed by a replica older than \
+                   reconnection. `message_id` is absent from `MEMBERS_CHANGED` and from a signal relayed by a replica older than \
                    MAIR-524 (then always `NEW_MSG`). Ignore an unknown `type`: new ones may be added.\n\n\
                    A `: connected` comment opens the stream as soon as it is established, then a `: ping` comment is sent every 15 seconds to keep the connection open through proxies; SSE \
                    clients ignore it.\n\n\
@@ -44,7 +47,7 @@ const CONNECTED_COMMENT: &[u8] = b": connected\n\n";
     responses(
         (
             status = 200,
-            description = "SSE stream established. The connection stays open; each `data:` line carries a `ChatSignal` (`NEW_MSG`, `MSG_EDITED`, `MSG_DELETED` or `CHAT_READ`, see the table above). Example of a `CHAT_READ`: `{\"type\":\"CHAT_READ\",\"chat_id\":5,\"message_id\":118,\"unread_count\":0}`.",
+            description = "SSE stream established. The connection stays open; each `data:` line carries a `ChatSignal` (`NEW_MSG`, `MSG_EDITED`, `MSG_DELETED`, `CHAT_READ`, `MSG_REACTED`, `MEMBERS_CHANGED` or `MENTIONED`, see the table above). Example of a `CHAT_READ`: `{\"type\":\"CHAT_READ\",\"chat_id\":5,\"message_id\":118,\"unread_count\":0}`.",
             content_type = "text/event-stream",
             body = ChatSignal,
             example = json!({ "type": "NEW_MSG", "chat_id": 5, "message_id": 118 })

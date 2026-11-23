@@ -183,15 +183,29 @@ async fn test_mair_524_since_query_uses_the_change_index() {
         .unwrap();
     tx.rollback().await.unwrap();
 
+    let sorts = main_sorts(&plan[0]["Plan"]);
     let plan = plan.to_string();
     assert!(
         plan.contains("idx_messages_conversation_updated"),
         "the since read must use idx_messages_conversation_updated: {plan}"
     );
-    assert!(
-        !plan.contains("\"Node Type\":\"Sort\""),
+    // The per-message subqueries of MAIR-1155 (mentions, links, reactions) sort their own few
+    // rows; the page itself must not be sorted.
+    assert_eq!(
+        sorts, 0,
         "the index gives the change order, no sort expected: {plan}"
     );
+}
+
+/// Sort nodes of `plan` outside its subplans (the correlated subqueries of each row).
+fn main_sorts(plan: &serde_json::Value) -> usize {
+    if plan["Parent Relationship"] == "SubPlan" {
+        return 0;
+    }
+    let own = usize::from(plan["Node Type"] == "Sort");
+    own + plan["Plans"]
+        .as_array()
+        .map_or(0, |plans| plans.iter().map(main_sorts).sum())
 }
 
 #[tokio::test]

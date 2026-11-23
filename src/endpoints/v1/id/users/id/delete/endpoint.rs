@@ -12,8 +12,11 @@ use crate::endpoints::v1::id::access::{
 use crate::database::chats::delete_empty_chat::view::DeleteEmptyChatQueryView;
 use crate::database::chats::hide_direct_chat::view::HideDirectChatQueryView;
 use crate::database::chats::remove_user_from_chat::view::RemoveMemberFromChatQueryView;
+use crate::database::chats::system_notes::view::SystemAction;
 use crate::endpoints::error::{classify, unexpected, DbFailure};
 use crate::endpoints::v1::id::users::id::UsersPathParams;
+use crate::endpoints::v1::id::users::{post_system_note, SystemNoteFailed};
+use crate::sse::state::ChatEvent;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RemoveUserFromChatError {
@@ -57,12 +60,15 @@ impl ResponseError for RemoveUserFromChatError {
     }
 }
 
+/// Removes `user_id` from chat `chat_id` on behalf of `actor_id`; returns the id of the system
+/// note recording it, when one was written.
 async fn trigger_remove_user_from_chat(
     tx: &mut SmartTransaction,
     chat_id: u64,
     user_id: u64,
+    actor_id: u64,
     is_direct: bool,
-) -> Result<(), RemoveUserFromChatError> {
+) -> Result<Option<u64>, RemoveUserFromChatError> {
     // A participant of a direct chat only hides it: they stay its participant, and the next
     // message shows it to them again (MAIR-478).
     let removed = if is_direct {
@@ -77,6 +83,21 @@ async fn trigger_remove_user_from_chat(
         _ => RemoveUserFromChatError::DatabaseError,
     })?;
 
+    // The history of a group chat records the departure (MAIR-1155); a hidden direct chat does
+    // not. No note when nobody is left: the chat is deleted next.
+    let note = if is_direct {
+        None
+    } else {
+        let action = if user_id == actor_id {
+            SystemAction::MemberLeft
+        } else {
+            SystemAction::MemberRemoved
+        };
+        post_system_note(tx, chat_id, actor_id, action, &[user_id])
+            .await?
+            .map(|note| note.id())
+    };
+
     // A chat lives as long as someone sees it: the last member leaving (or the second participant
     // hiding a direct chat) deletes it, in the same transaction, so a failure never leaves a chat
     // nobody sees.
@@ -86,7 +107,7 @@ async fn trigger_remove_user_from_chat(
             unexpected("delete empty chat", e);
             RemoveUserFromChatError::DatabaseError
         })?;
-    Ok(())
+    Ok(note)
 }
 
 #[utoipa::path(
@@ -103,7 +124,12 @@ async fn trigger_remove_user_from_chat(
                    message posted in it, by either participant, shows it to them again. Removing the other \
                    participant answers `403`, administrators included. The chat is deleted once both have hidden it.\n\n \
                    Removing a user who is not a member answers `400`.\n\n \
-                   A caller who is neither a member nor an administrator gets the same `404` as for an unknown chat.",
+                   A caller who is neither a member nor an administrator gets the same `404` as for an unknown chat.\n\n \
+                   **System note** (MAIR-1155): in a group chat that still has members, the removal is recorded in \
+                   the history as a message of `kind` `system` (action `member_left` when the caller removes \
+                   themselves, `member_removed` otherwise; `actor_id` the caller, `user_ids` the member removed), \
+                   signalled as `NEW_MSG`; `MEMBERS_CHANGED` goes to every member and to the member removed. \
+                   Hiding a direct chat writes no note and signals nothing.",
     responses(
         (
             status = 204,
@@ -156,6 +182,7 @@ async fn trigger_remove_user_from_chat(
 #[delete("/")]
 pub async fn remove_user_from_chat(
     state: web::Data<AppState>,
+    sse_state: web::Data<crate::sse::state::AppState>,
     auth_user: AuthenticatedUser,
     params: web::Path<UsersPathParams>,
 ) -> Result<impl Responder, RemoveUserFromChatError> {
@@ -171,9 +198,32 @@ pub async fn remove_user_from_chat(
             return Err(RemoveUserFromChatError::Forbidden);
         }
     }
-    trigger_remove_user_from_chat(&mut tx, chat_id, user_id, role.is_direct).await?;
+    let note =
+        trigger_remove_user_from_chat(&mut tx, chat_id, user_id, auth_user.id, role.is_direct)
+            .await?;
     commit(tx).await?;
+    if !role.is_direct {
+        // Only once committed. The removed member is signalled too: the chat leaves their list.
+        if let Some(note_id) = note {
+            sse_state
+                .publish(ChatEvent::message_created(chat_id, auth_user.id, note_id))
+                .await;
+        }
+        sse_state
+            .publish(ChatEvent::members_changed(
+                chat_id,
+                auth_user.id,
+                vec![user_id],
+            ))
+            .await;
+    }
     Ok(HttpResponse::NoContent().finish())
+}
+
+impl From<SystemNoteFailed> for RemoveUserFromChatError {
+    fn from(_: SystemNoteFailed) -> Self {
+        RemoveUserFromChatError::DatabaseError
+    }
 }
 
 impl From<AccessDenied> for RemoveUserFromChatError {

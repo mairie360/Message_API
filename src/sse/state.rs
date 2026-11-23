@@ -1,7 +1,8 @@
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::{broadcast, Notify};
 use utoipa::ToSchema;
 
@@ -52,6 +53,13 @@ pub enum ChatEventKind {
     /// The actor acknowledged the chat up to `message_id` (`CHAT_READ`), only signalled to the
     /// actor's own streams.
     ChatRead,
+    /// The reactions of `message_id` changed (`MSG_REACTED`, MAIR-1155): members but the actor.
+    MessageReacted,
+    /// Members were added, removed or left (`MEMBERS_CHANGED`, MAIR-1155): every member, the actor
+    /// included, plus the `recipients` (the removed member).
+    MembersChanged,
+    /// `message_id` mentions the `recipients` (`MENTIONED`, MAIR-1155): only them.
+    Mentioned,
 }
 
 impl ChatEventKind {
@@ -62,6 +70,9 @@ impl ChatEventKind {
             ChatEventKind::MessageEdited => "MSG_EDITED",
             ChatEventKind::MessageDeleted => "MSG_DELETED",
             ChatEventKind::ChatRead => "CHAT_READ",
+            ChatEventKind::MessageReacted => "MSG_REACTED",
+            ChatEventKind::MembersChanged => "MEMBERS_CHANGED",
+            ChatEventKind::Mentioned => "MENTIONED",
         }
     }
 }
@@ -85,6 +96,10 @@ pub struct ChatEvent {
     /// `ChatRead` only: messages still unread by the reader after the acknowledgement.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unread_count: Option<i32>,
+    /// Users signalled besides the members (`MembersChanged`: the removed member), or instead of
+    /// them (`Mentioned`: the members mentioned) (MAIR-1155).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recipients: Vec<u64>,
 }
 
 impl ChatEvent {
@@ -95,6 +110,38 @@ impl ChatEvent {
             kind,
             message_id,
             unread_count: None,
+            recipients: Vec::new(),
+        }
+    }
+
+    /// `actor_id` added or removed a reaction of `message_id` of `chat_id`.
+    pub fn message_reacted(chat_id: u64, actor_id: u64, message_id: u64) -> Self {
+        Self::of(
+            ChatEventKind::MessageReacted,
+            chat_id,
+            actor_id,
+            Some(message_id),
+        )
+    }
+
+    /// `actor_id` changed the members of `chat_id`; `removed` are signalled too.
+    pub fn members_changed(chat_id: u64, actor_id: u64, removed: Vec<u64>) -> Self {
+        Self {
+            recipients: removed,
+            ..Self::of(ChatEventKind::MembersChanged, chat_id, actor_id, None)
+        }
+    }
+
+    /// `message_id` of `author_id` mentions `recipients` in `chat_id`.
+    pub fn mentioned(chat_id: u64, author_id: u64, message_id: u64, recipients: Vec<u64>) -> Self {
+        Self {
+            recipients,
+            ..Self::of(
+                ChatEventKind::Mentioned,
+                chat_id,
+                author_id,
+                Some(message_id),
+            )
         }
     }
 
@@ -143,14 +190,30 @@ impl ChatEvent {
 }
 
 /// One open real-time connection. `close` ends it when it is notified: the SSE response ends,
-/// the WebSocket is closed with `4008` (eviction). Expired or revoked tokens are handled by each
-/// transport's own supervisor.
+/// the WebSocket is closed with `4008` (eviction), or with `1013` when `overflowed` is set (its
+/// send buffer was full). Expired or revoked tokens are handled by each transport's own supervisor.
 #[derive(Clone)]
 pub struct Connection {
     pub id: ConnectionId,
     pub sender: SseSender,
     pub close: Arc<Notify>,
     pub transport: Transport,
+    /// Set before `close` is notified when a signal did not fit in the send buffer of a WebSocket.
+    pub overflowed: Arc<AtomicBool>,
+}
+
+/// What [`AppState::deliver`] did with a signal for one connection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Delivery {
+    /// The frame is queued on the connection's channel.
+    Queued,
+    /// The SSE buffer was full: the frame is dropped for this connection only.
+    Dropped,
+    /// The WebSocket buffer was full: the connection is told to close with `1013` so that its
+    /// client reconnects and reads since its cursors instead of missing the signal silently.
+    Overflowed,
+    /// The channel was closed: the dead connection is removed.
+    Removed,
 }
 
 pub struct AppState {
@@ -207,6 +270,7 @@ impl AppState {
             sender,
             close: Arc::new(Notify::new()),
             transport,
+            overflowed: Arc::new(AtomicBool::new(false)),
         };
         let evicted: Vec<Connection> = {
             let mut connections = self.online_agents.entry(user_id).or_default();
@@ -235,6 +299,38 @@ impl AppState {
         self.transports_of(user_id)
             .into_iter()
             .map(|(id, sender, _)| (id, sender))
+            .collect()
+    }
+
+    /// Pushes the serialized `ChatSignal` `payload` to every connection of `user_id` on this
+    /// replica, framed for its transport, and reports what happened to each one.
+    pub fn deliver(&self, user_id: u64, payload: &str) -> Vec<(ConnectionId, Delivery)> {
+        let connections: Vec<Connection> = self
+            .online_agents
+            .get(&user_id)
+            .map(|connections| connections.clone())
+            .unwrap_or_default();
+        connections
+            .into_iter()
+            .map(|connection| {
+                let outcome = match connection
+                    .sender
+                    .try_send(Ok(connection.transport.frame(payload)))
+                {
+                    Ok(()) => Delivery::Queued,
+                    Err(TrySendError::Closed(_)) => {
+                        self.remove_connection(user_id, connection.id);
+                        Delivery::Removed
+                    }
+                    Err(TrySendError::Full(_)) if connection.transport == Transport::WebSocket => {
+                        connection.overflowed.store(true, Ordering::Release);
+                        connection.close.notify_one();
+                        Delivery::Overflowed
+                    }
+                    Err(TrySendError::Full(_)) => Delivery::Dropped,
+                };
+                (connection.id, outcome)
+            })
             .collect()
     }
 
@@ -267,7 +363,11 @@ pub struct ChatSignal {
     /// - `MSG_EDITED`: a message was edited (members but the editor);
     /// - `MSG_DELETED`: a message was deleted (members but the deleting user);
     /// - `CHAT_READ`: the caller acknowledged the chat on another tab or device (only the caller's
-    ///   own streams): update the unread badge with `unread_count`.
+    ///   own streams): update the unread badge with `unread_count`;
+    /// - `MSG_REACTED`: the reactions of a message changed (members but the actor);
+    /// - `MEMBERS_CHANGED`: members were added, removed or left (every member, the actor
+    ///   included, and the removed member): read `GET /api/v1/{chat_id}/users/` again;
+    /// - `MENTIONED`: the message mentions the caller (sent with `NEW_MSG` or `MSG_EDITED`).
     ///
     /// For the three message signals, read the change with
     /// `GET /api/v1/{chat_id}/?since=<cursor>`. Ignore an unknown value: new types may be added.
@@ -278,8 +378,9 @@ pub struct ChatSignal {
     #[schema(example = 5)]
     pub chat_id: u64,
 
-    /// The message posted, edited or deleted, or the last message acknowledged by `CHAT_READ`.
-    /// Absent only from a signal relayed by a replica older than MAIR-524.
+    /// The message posted, edited, deleted, reacted to or mentioning the caller, or the last
+    /// message acknowledged by `CHAT_READ`. Absent from `MEMBERS_CHANGED`, and from a signal
+    /// relayed by a replica older than MAIR-524.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(example = 118, nullable = false)]
     pub message_id: Option<u64>,

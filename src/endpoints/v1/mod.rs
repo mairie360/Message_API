@@ -4,6 +4,7 @@ pub mod get;
 pub mod id;
 pub mod post;
 pub mod stream;
+pub mod unread;
 pub mod ws;
 
 pub fn config(cfg: &mut actix_web::web::ServiceConfig) {
@@ -15,6 +16,7 @@ pub fn config(cfg: &mut actix_web::web::ServiceConfig) {
             .service(ws::endpoint::websocket_route)
             // Before `id`: `/{chat_id}` would take `/direct` and refuse it as a non-integer id.
             .configure(direct::config)
+            .configure(unread::config)
             .configure(id::config),
     );
 }

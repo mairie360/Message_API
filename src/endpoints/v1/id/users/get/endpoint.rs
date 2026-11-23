@@ -63,7 +63,10 @@ async fn trigger_get_chat_users(
     Ok(GetUsersView::new(
         result
             .into_iter()
-            .map(|user| User::new(id_from_sql(user.id), &user.first_name, &user.last_name))
+            .map(|user| {
+                User::new(id_from_sql(user.id), &user.first_name, &user.last_name)
+                    .administering(user.is_admin)
+            })
             .collect(),
         has_more,
     ))
@@ -78,7 +81,8 @@ async fn trigger_get_chat_users(
     path = "",
     summary = "List the members of a chat",
     description = "Returns one page of the members of a chat, by increasing id: their Core API id, first name and \
-                   last name, read in the same query. This is what to call when a chat is opened; the chat list \
+                   last name, read in the same query, and `is_admin` (MAIR-1155: the creator of a group chat, who manages its \
+                   members while still a member). This is what to call when a chat is opened; the chat list \
                    (`GET /api/v1/`) only carries a member count. The rest of a profile comes from \
                    `GET /api/v1/user/?ids=1,2,3` of Core API.\n\n\
                    **Paginated** (`limit` 1 to 100, default 50, and `offset`): `has_more` tells whether another \
@@ -92,8 +96,8 @@ async fn trigger_get_chat_users(
             body = GetUsersView,
             example = json!({
                 "users": [
-                    { "id": 42, "first_name": "Xavier", "last_name": "Bertrand" },
-                    { "id": 51, "first_name": "Camille", "last_name": "Durand" }
+                    { "id": 42, "first_name": "Xavier", "last_name": "Bertrand", "is_admin": true },
+                    { "id": 51, "first_name": "Camille", "last_name": "Durand", "is_admin": false }
                 ],
                 "has_more": false
             })

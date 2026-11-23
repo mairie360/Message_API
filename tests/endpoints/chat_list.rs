@@ -255,8 +255,8 @@ async fn members_come_with_their_names() {
     assert_eq!(
         body["users"],
         json!([
-            { "id": alice, "first_name": "Alice", "last_name": last_a },
-            { "id": xavier, "first_name": "Xavier", "last_name": last_b }
+            { "id": alice, "first_name": "Alice", "last_name": last_a, "is_admin": true },
+            { "id": xavier, "first_name": "Xavier", "last_name": last_b, "is_admin": false }
         ])
     );
 }
