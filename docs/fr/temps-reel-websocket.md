@@ -128,7 +128,8 @@ navigateur. Taille maximale de trame acceptée à chaque saut : **4 Kio** (`1009
 
 ## Comportement du client (Messages_Web_Service)
 
-1. Ouvrir `wss://<origine du front>/ws` une fois la session connue (bootstrap terminé) et la page visible.
+1. Ouvrir `/ws` sur l'origine du front (`wss://` pour une page HTTPS, `ws://` pour une page HTTP simple, par exemple en
+   local) une fois la session connue (bootstrap terminé) et la page visible.
 2. À l'`open` : relire la liste des conversations et la conversation ouverte **depuis leurs curseurs** (rattrapage de
    ce qui a été manqué hors connexion), puis arrêter le polling de 2 s.
 3. Au `close` (ou `error` puis `close`) :
@@ -149,7 +150,8 @@ navigateur. Taille maximale de trame acceptée à chaque saut : **4 Kio** (`1009
 5. Ne pas dédupliquer les signaux : deux `MSG_EDITED` du même message sont deux modifications. Chaque signal
    déclenche une lecture depuis le curseur, idempotente, donc un doublon ne coûte qu'une lecture ; les lectures d'une
    même conversation peuvent être regroupées pendant qu'une est en cours, tant qu'une lecture suit le dernier signal.
-6. Jusqu'à MAIR-662, le client SSE reste le repli quand `WebSocket` n'est pas disponible.
+6. Jusqu'à MAIR-662, le client SSE ne sert qu'à un navigateur sans l'API `WebSocket` ; un WebSocket en échec revient
+   au polling de 2 s (étape 3), jamais au flux SSE.
 
 ## Coexistence et retrait
 
