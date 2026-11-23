@@ -264,11 +264,49 @@ pub struct MessageLinkView {
     /// Id of the object in its API.
     #[schema(example = 12, minimum = 1, maximum = 2147483647)]
     id: u64,
+    /// Answered only, for a task link: the project of the task (the Projects front opens a task at
+    /// `?project=<project_id>&task=<id>`). Ignored in a request (MAIR-1166).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(example = 3, minimum = 1, maximum = 2147483647)]
+    project_id: Option<u64>,
+    /// Answered only, for an event link: the start of the event (the Calendar front opens an event
+    /// at `?date=<its day>&event=<id>`). Ignored in a request (MAIR-1166).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = DateTime, example = "2026-11-24T09:00:00Z")]
+    start: Option<DateTime<Utc>>,
 }
 
 impl MessageLinkView {
     pub fn new(kind: LinkKind, id: u64) -> Self {
-        Self { kind, id }
+        Self {
+            kind,
+            id,
+            project_id: None,
+            start: None,
+        }
+    }
+
+    /// The link as answered: with the project of a task and the start of an event.
+    pub fn answered(
+        kind: LinkKind,
+        id: u64,
+        project_id: Option<u64>,
+        start: Option<DateTime<Utc>>,
+    ) -> Self {
+        Self {
+            kind,
+            id,
+            project_id,
+            start,
+        }
+    }
+
+    pub fn project_id(&self) -> Option<u64> {
+        self.project_id
+    }
+
+    pub fn start(&self) -> Option<DateTime<Utc>> {
+        self.start
     }
 
     pub fn kind(&self) -> LinkKind {
@@ -528,9 +566,23 @@ impl From<Message> for MessageView {
         view.links = message
             .links
             .into_iter()
-            .filter_map(|LinkRow { kind, id }| {
-                LinkKind::parse(&kind).map(|kind| MessageLinkView::new(kind, id_from_sql(id)))
-            })
+            .filter_map(
+                |LinkRow {
+                     kind,
+                     id,
+                     project_id,
+                     start,
+                 }| {
+                    LinkKind::parse(&kind).map(|kind| {
+                        MessageLinkView::answered(
+                            kind,
+                            id_from_sql(id),
+                            project_id.map(id_from_sql),
+                            start,
+                        )
+                    })
+                },
+            )
             .collect();
         view.reactions = message
             .reactions
@@ -761,10 +813,14 @@ mod tests {
             LinkRow {
                 kind: "task".to_string(),
                 id: 7,
+                project_id: Some(3),
+                start: None,
             },
             LinkRow {
                 kind: "unknown".to_string(),
                 id: 8,
+                project_id: None,
+                start: None,
             },
         ];
         tagged.reactions = vec![ReactionRow {
@@ -778,7 +834,10 @@ mod tests {
         assert_eq!(view.mentions(), &[51]);
         assert!(view.mentions_everyone());
         assert_eq!(view.group_mentions(), &[3]);
-        assert_eq!(view.links(), &[MessageLinkView::new(LinkKind::Task, 7)]);
+        assert_eq!(
+            view.links(),
+            &[MessageLinkView::answered(LinkKind::Task, 7, Some(3), None)]
+        );
         let reaction = &view.reactions()[0];
         assert_eq!(
             (reaction.emoji(), reaction.count(), reaction.user_ids()),
@@ -788,7 +847,7 @@ mod tests {
         assert_eq!(json["kind"], "user");
         assert_eq!(
             json["links"][0],
-            serde_json::json!({ "kind": "task", "id": 7 })
+            serde_json::json!({ "kind": "task", "id": 7, "project_id": 3 })
         );
         assert_eq!(json["system_event"], serde_json::Value::Null);
     }

@@ -17,8 +17,11 @@ macro_rules! message_v2_columns {
          COALESCE((SELECT jsonb_agg(jsonb_build_object( \
                        'kind', CASE WHEN l.project_id IS NOT NULL THEN 'project' \
                                     WHEN l.task_id IS NOT NULL THEN 'task' ELSE 'event' END, \
-                       'id', COALESCE(l.project_id, l.task_id, l.event_id)) ORDER BY l.id) \
-                   FROM message_business_links l WHERE l.message_id = m.id), '[]'::jsonb) AS links, \
+                       'id', COALESCE(l.project_id, l.task_id, l.event_id), \
+                       'project_id', t.project_id, 'start', e.start_date) ORDER BY l.id) \
+                   FROM message_business_links l \
+                   LEFT JOIN tasks t ON t.id = l.task_id LEFT JOIN events e ON e.id = l.event_id \
+                   WHERE l.message_id = m.id), '[]'::jsonb) AS links, \
          COALESCE((SELECT jsonb_agg(jsonb_build_object('emoji', r.emoji, 'count', r.count, \
                        'user_ids', r.user_ids) ORDER BY r.first_at, r.emoji) \
                    FROM (SELECT mr.emoji, COUNT(*)::int AS count, \
@@ -164,11 +167,16 @@ pub struct SystemEventRow {
     pub user_ids: Vec<i32>,
 }
 
-/// A row of `message_business_links`: `kind` is `project`, `task` or `event`.
+/// A row of `message_business_links`: `kind` is `project`, `task` or `event`. A task link also
+/// carries its project and an event link its start (MAIR-1166): the fronts address them by both.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LinkRow {
     pub kind: String,
     pub id: i32,
+    #[serde(default)]
+    pub project_id: Option<i32>,
+    #[serde(default)]
+    pub start: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 /// The reactions of a message with one emoji: who reacted, in reaction order.

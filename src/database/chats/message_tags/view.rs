@@ -12,8 +12,10 @@ use mairie360_api_lib::database::db_interface::{ApiRequestDto, QueryParam};
 
 /// The first field of the tags document that names something the author may not tag, or `''`:
 /// `mentions` (not a non-excluded member of the chat), `group_mentions` (a group none of the
-/// non-excluded members belongs to) or `links` (`check_access(author, 'projects' | 'tasks' |
-/// 'events', 'read', id)` is not 1: unknown object or no read access).
+/// non-excluded members belongs to) or `links` (an unknown object, or one the author may not read:
+/// a project, or the project of a task, that Database's `project_visible_to_user` (the visibility
+/// rule of Project_API) hides from the author, an event `check_access(author, 'events', 'read', id)`
+/// does not grant; MAIR-1166, `check_access` knows no `projects` nor `tasks` resource).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CheckMessageTagsQueryView {
     params: Vec<QueryParam>,
@@ -71,9 +73,11 @@ impl ApiRequestDto for CheckMessageTagsQueryView {
              WHEN EXISTS ( \
                  SELECT 1 FROM doc, \
                      jsonb_to_recordset(COALESCE(doc.j -> 'links', '[]'::jsonb)) AS l(kind text, id int) \
-                 WHERE check_access($2, CASE l.kind WHEN 'project' THEN 'projects' \
-                                              WHEN 'task' THEN 'tasks' ELSE 'events' END, \
-                                    'read', l.id) <> 1) THEN 'links' \
+                 WHERE CASE l.kind \
+                     WHEN 'project' THEN NOT project_visible_to_user($2, l.id) \
+                     WHEN 'task' THEN NOT COALESCE((SELECT project_visible_to_user($2, t.project_id) \
+                                                    FROM tasks t WHERE t.id = l.id), FALSE) \
+                     ELSE check_access($2, 'events', 'read', l.id) <> 1 END) THEN 'links' \
              ELSE '' END"
     }
 
