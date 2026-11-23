@@ -33,5 +33,12 @@ ignore = [
     # --target all --all-features` prints nothing, it is never compiled into the binary. sqlx 0.9
     # pins 0.37. Drop it once sqlx moves to libsqlite3-sys >= 0.39.
     # Triaged 2026-11-20. Review by 2027-02-20.
-    "RUSTSEC-2026-0459"
+    "RUSTSEC-2026-0459",
+    # cookie 0.16 (RUSTSEC-2026-0594: private-cookie nonces can repeat after a fork), fixed in
+    # cookie >= 0.18.3, which actix-web 4 cannot use (it pins 0.16). Only the `private` / `secure`
+    # features hold the affected code; actix-web pulls cookie with its default features and no API
+    # uses a PrivateJar or forks after start-up, so the code is never compiled. Drop it once
+    # actix-web moves to cookie >= 0.18.3.
+    # Triaged 2026-11-23. Review by 2027-02-23.
+    "RUSTSEC-2026-0594"
 ]
