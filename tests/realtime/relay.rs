@@ -3,8 +3,8 @@
 use std::time::Duration;
 
 use mairie360_api_lib::test_setup::redis_setup::start_redis_container;
-use message_api::sse::relay::RedisRelay;
-use message_api::sse::state::{AppState, ChatEvent};
+use message_api::realtime::relay::RedisRelay;
+use message_api::realtime::state::{AppState, ChatEvent};
 use testcontainers::core::{ContainerPort, WaitFor};
 use testcontainers::runners::AsyncRunner;
 use testcontainers::GenericImage;
@@ -137,8 +137,7 @@ async fn test_the_relay_works_under_the_platform_acl() {
 /// event published on the first one, through Redis, framed as bare JSON.
 #[tokio::test]
 async fn mair_657_a_websocket_on_another_replica_receives_the_signal() {
-    use message_api::sse::event_manager::start_internal_event_listener;
-    use message_api::sse::state::Transport;
+    use message_api::realtime::event_manager::start_internal_event_listener;
     use std::sync::Arc;
 
     let (_redis, config) = start_redis_container().await;
@@ -152,7 +151,7 @@ async fn mair_657_a_websocket_on_another_replica_receives_the_signal() {
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     let (sender, mut socket) = tokio::sync::mpsc::channel(4);
-    second.register_as(77, sender, Transport::WebSocket);
+    second.register(77, sender);
     // A read acknowledgement only goes to the reader: no chat needs to exist in the database.
     first.publish(ChatEvent::chat_read(5, 77, 118, 0)).await;
 

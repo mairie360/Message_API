@@ -11,7 +11,7 @@ use mairie360_api_lib::jwt_manager::{
 use mairie360_api_lib::state::AppState;
 use mairie360_api_lib::test_setup::http_setup::{test_jwt_private_key, TEST_JWT_PUBLIC_KEY};
 use mairie360_api_lib::test_setup::queries_setup::{get_shared_db, ADMIN_ID};
-use message_api::sse::state::AppState as SseState;
+use message_api::realtime::state::AppState as RealtimeState;
 
 /// Seconds since the epoch, as the `exp` claim counts them.
 pub fn now() -> usize {
@@ -88,13 +88,13 @@ pub async fn admin_id() -> u64 {
 
 /// The two `web::Data` the handlers read: the lib state over the shared test database, and an SSE
 /// state without Redis relay (events stay on the local bus).
-pub async fn states() -> (web::Data<AppState>, web::Data<SseState>) {
+pub async fn states() -> (web::Data<AppState>, web::Data<RealtimeState>) {
     set_jwt_env();
     let state = AppState::new("redis://127.0.0.1:6379".to_string(), message_db_url().await).await;
     let (bus, _) = tokio::sync::broadcast::channel(100);
     (
         web::Data::new(state),
-        web::Data::from(Arc::new(SseState::new(bus, None))),
+        web::Data::from(Arc::new(RealtimeState::new(bus, None))),
     )
 }
 

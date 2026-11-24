@@ -1,7 +1,7 @@
 use crate::database::ids::id_from_sql;
 use crate::{
     database::chats::get_chat_users::view::GetChatMembersQueryView,
-    sse::state::{AppState, ChatEventKind, ChatSignal},
+    realtime::state::{AppState, ChatEventKind, ChatSignal},
 };
 use mairie360_api_lib::smart_db::SmartDatabase;
 use std::sync::Arc;
@@ -15,7 +15,7 @@ pub async fn start_internal_event_listener(state: Arc<AppState>, smart_db: Smart
 /// Consumes the internal bus until it is closed. A lagging receiver only loses the events it
 /// missed: it is logged and the loop resumes with the oldest event still buffered.
 pub async fn listen(
-    mut rx: broadcast::Receiver<crate::sse::state::ChatEvent>,
+    mut rx: broadcast::Receiver<crate::realtime::state::ChatEvent>,
     state: Arc<AppState>,
     smart_db: SmartDatabase,
 ) {
@@ -23,7 +23,9 @@ pub async fn listen(
         let event = match rx.recv().await {
             Ok(event) => event,
             Err(RecvError::Lagged(skipped)) => {
-                tracing::warn!("SSE listener lagged: {skipped} chat event(s) dropped, resuming");
+                tracing::warn!(
+                    "Real-time listener lagged: {skipped} chat event(s) dropped, resuming"
+                );
                 continue;
             }
             Err(RecvError::Closed) => break,
@@ -87,8 +89,7 @@ pub async fn listen(
 }
 
 /// Pushes the signal to every connection of `user_id` on this replica (see [`AppState::deliver`]:
-/// a full SSE buffer drops it, a full WebSocket buffer closes that socket with `1013`, a closed
-/// channel removes the connection).
+/// a full buffer closes that socket with `1013`, a closed channel removes the connection).
 fn push(state: &AppState, user_id: u64, payload: &str) {
     state.deliver(user_id, payload);
 }

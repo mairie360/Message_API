@@ -15,7 +15,7 @@ use crate::endpoints::v1::id::messages::id::reactions::{
 };
 use crate::endpoints::v1::id::messages::id::MessagePathParams;
 use crate::endpoints::validation::ValidatedQuery;
-use crate::sse::state::ChatEvent;
+use crate::realtime::state::ChatEvent;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RemoveReactionError {
@@ -143,7 +143,7 @@ async fn trigger_remove_reaction(
 #[delete("/")]
 pub async fn remove_reaction(
     state: web::Data<AppState>,
-    sse_state: web::Data<crate::sse::state::AppState>,
+    sse_state: web::Data<crate::realtime::state::AppState>,
     auth_user: AuthenticatedUser,
     params: web::Path<MessagePathParams>,
     query: ValidatedQuery<RemoveReactionQuery>,

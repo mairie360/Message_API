@@ -2,7 +2,7 @@
 //! through the real `/api` scope.
 
 use actix_web::http::{Method, StatusCode};
-use message_api::sse::state::{ChatEvent, ChatEventKind};
+use message_api::realtime::state::{ChatEvent, ChatEventKind};
 use serde_json::{json, Value};
 use tokio::sync::broadcast;
 

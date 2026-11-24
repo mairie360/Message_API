@@ -16,7 +16,7 @@ use crate::endpoints::v1::id::messages::id::reactions::{
 };
 use crate::endpoints::v1::id::messages::id::MessagePathParams;
 use crate::endpoints::validation::ValidatedJson;
-use crate::sse::state::ChatEvent;
+use crate::realtime::state::ChatEvent;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AddReactionError {
@@ -148,7 +148,7 @@ async fn trigger_add_reaction(
 #[post("/")]
 pub async fn add_reaction(
     state: web::Data<AppState>,
-    sse_state: web::Data<crate::sse::state::AppState>,
+    sse_state: web::Data<crate::realtime::state::AppState>,
     auth_user: AuthenticatedUser,
     params: web::Path<MessagePathParams>,
     view: ValidatedJson<AddReactionView>,

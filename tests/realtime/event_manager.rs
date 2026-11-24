@@ -1,6 +1,6 @@
-//! Tests d'intégration du listener SSE : il consomme le bus interne, va
-//! chercher les membres du chat en base et pousse une frame `data: {...}` aux
-//! seuls membres en ligne (hors expéditeur).
+//! Integration tests of the real-time listener: it consumes the internal bus, looks the chat's
+//! members up in the database and pushes a bare `{...}` frame to the online members only (the
+//! author excluded).
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -9,8 +9,8 @@ use actix_web::web::Bytes;
 use message_api::database::chats::{
     add_users_to_chat::view::AddMembersToChatQueryView, create_chat::view::CreateChatQueryView,
 };
-use message_api::sse::event_manager::{listen, start_internal_event_listener};
-use message_api::sse::state::{AppState, ChatEvent};
+use message_api::realtime::event_manager::{listen, start_internal_event_listener};
+use message_api::realtime::state::{AppState, ChatEvent};
 use tokio::sync::{broadcast, mpsc};
 
 use crate::common::get_smart_db;
@@ -64,9 +64,8 @@ async fn test_event_manager_notifies_online_members_except_sender() {
         .expect("channel open")
         .expect("frame ok");
     let text = String::from_utf8(frame.to_vec()).unwrap();
-    assert!(text.starts_with("data: "));
-    let payload: serde_json::Value =
-        serde_json::from_str(text.trim_start_matches("data: ").trim()).unwrap();
+    assert!(!text.starts_with("data: "), "a bare WebSocket frame");
+    let payload: serde_json::Value = serde_json::from_str(text.trim()).unwrap();
     assert_eq!(payload["type"], "NEW_MSG");
     // `chat_id` is a JSON number, not a string.
     assert_eq!(payload["chat_id"], serde_json::json!(chat_id));
@@ -212,7 +211,7 @@ async fn next_signal(rx: &mut mpsc::Receiver<Result<Bytes, String>>) -> serde_js
         .expect("channel open")
         .expect("frame ok");
     let text = String::from_utf8(frame.to_vec()).unwrap();
-    serde_json::from_str(text.trim_start_matches("data: ").trim()).unwrap()
+    serde_json::from_str(text.trim()).unwrap()
 }
 
 async fn nothing_received(rx: &mut mpsc::Receiver<Result<Bytes, String>>) -> bool {

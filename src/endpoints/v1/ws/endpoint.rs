@@ -1,4 +1,4 @@
-//! `GET /api/v1/ws` (MAIR-657): the WebSocket twin of `GET /api/v1/stream`, following the contract
+//! `GET /api/v1/ws` (MAIR-657): the messaging WebSocket, following the contract
 //! of `docs/en/realtime-websocket.md` (MAIR-656). Both transports share the connection registry,
 //! the Redis relay and `event_manager`; only the framing and the supervision loop differ.
 
@@ -12,8 +12,10 @@ use mairie360_api_lib::security::AuthenticatedUser;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
-use crate::sse::state::{AppState, ChatSignal, Connection, Transport};
-use crate::sse::supervision::{expiry, still_valid, time_left, PING_INTERVAL, REVALIDATE_INTERVAL};
+use crate::realtime::state::{AppState, ChatSignal, Connection};
+use crate::realtime::supervision::{
+    expiry, still_valid, time_left, PING_INTERVAL, REVALIDATE_INTERVAL,
+};
 
 /// Largest frame accepted from a client, in bytes (`1009` beyond). Clients send no data anyway.
 pub const MAX_FRAME_SIZE: usize = 4 * 1024;
@@ -23,7 +25,7 @@ pub const PONG_TIMEOUT: Duration = Duration::from_secs(45);
 pub const SESSION_ENDED: u16 = 4001;
 /// Close code: the same user opened one connection too many, this oldest one is evicted.
 pub const EVICTED: u16 = 4008;
-/// Signals buffered per connection, as for the SSE: beyond, the socket is closed with `1013`.
+/// Signals buffered per connection: beyond, the socket is closed with `1013`.
 const SIGNAL_BUFFER: usize = 10;
 
 /// Intervals of the supervision loop. The route uses [`Timings::default`]; tests shorten them.
@@ -99,30 +101,36 @@ impl CloseCause {
     path = "",
     summary = "Open the real-time notification WebSocket",
     description = "Upgrades the connection to a **WebSocket** the client keeps open to be told about the activity \
-                   of its chats, without polling the API (MAIR-657). It carries exactly the signals of \
-                   `GET /api/v1/stream`, which stays available until the WebSocket is validated (MAIR-662); the \
+                   of its chats, without polling the API (MAIR-657). The \
                    full contract (frames, close codes, limits, client behaviour) is `docs/en/realtime-websocket.md`.\n\n\
                    Send a regular `GET` with `Upgrade: websocket` and `Authorization: Bearer <JWT>`; nothing goes \
                    in the URL. The token is checked **before** the upgrade: without a valid one the answer is a \
                    `401` and no frame is ever sent.\n\n\
-                   **Server → client**: one UTF-8 text frame per `ChatSignal` (JSON, the same object as a `data:` \
-                   line of the SSE stream):\n\n\
+                   **Server → client**: one UTF-8 text frame per `ChatSignal` (JSON) saying *that something \
+                   happened* in a chat; the content itself is not in it. Signals are pushed once the change is \
+                   committed, to the connections of every replica of the API (Redis pub/sub):\n\n\
                    | `type` | When | Fields | Delivered to |\n\
                    | --- | --- | --- | --- |\n\
                    | `NEW_MSG` | a message was posted | `chat_id`, `message_id` | the (not excluded) members but the author |\n\
                    | `MSG_EDITED` | a message was edited | `chat_id`, `message_id` | the members but the editor |\n\
                    | `MSG_DELETED` | a message was deleted (tombstone) | `chat_id`, `message_id` | the members but the deleting user |\n\
-                   | `CHAT_READ` | the user acknowledged the chat | `chat_id`, `message_id`, `unread_count` | every connection of that user only |\n\n\
-                   Read the change with `GET /api/v1/{chat_id}/?since=<next_since>&since_id=<next_since_id>`; a \
+                   | `CHAT_READ` | the user acknowledged the chat (`POST /api/v1/{chat_id}/read/`) | `chat_id`, `message_id` (`readUntilMessageId`), `unread_count` | every connection of that user only (other tabs and devices, the calling one included) |\n\
+                   | `MSG_REACTED` | a reaction was added to or removed from a message (MAIR-1155) | `chat_id`, `message_id` | the members but the reacting user |\n\
+                   | `MEMBERS_CHANGED` | members were added, removed, or left the chat (MAIR-1155; a system note comes with it as `NEW_MSG`) | `chat_id` | every member, the actor included, and the removed member |\n\
+                   | `MENTIONED` | a message posted or edited mentions the user, by id, through `@everyone` or through a group (MAIR-1155; sent besides `NEW_MSG` / `MSG_EDITED`) | `chat_id`, `message_id` | each member mentioned but the author (an edit only signals the members it newly mentions) |\n\n\
+                   On `NEW_MSG`, `MSG_EDITED`, `MSG_DELETED` or `MSG_REACTED`, read the change with \
+                   `GET /api/v1/{chat_id}/?since=<next_since>&since_id=<next_since_id>` (and refresh the list line \
+                   with `GET /api/v1/?since=`); on `CHAT_READ`, set the chat's unread badge to `unread_count`; on \
+                   `MEMBERS_CHANGED`, read `GET /api/v1/{chat_id}/users/` again (a removed member gets `404`). A \
                    signal may arrive twice or be lost, so read since the last cursor after every (re)connection. \
-                   Ignore an unknown `type`.\n\n\
+                   Ignore an unknown `type`: new ones may be added.\n\n\
                    **Client → server**: no data frame. A text or binary frame closes the connection with `1003`, \
                    a frame larger than 4 KiB with `1009`.\n\n\
                    **Liveness**: the server sends a ping every 15 seconds and closes with `1001` a connection that \
                    answered none for 45 seconds.\n\n\
                    **Server-side closure**: `4001` when the JWT expires, its session is revoked or its account \
                    removed (checked every 30 seconds and at `exp`): renew the session before reconnecting; `4008` \
-                   when the same user opens more than 5 connections on this replica, SSE streams included (the \
+                   when the same user opens more than 5 connections on this replica (the \
                    oldest is closed): do not reconnect automatically; `1013` when the server could not keep up \
                    (the 10 signals buffered for this connection were full): reconnect and read since the cursors.",
     responses(
@@ -178,7 +186,7 @@ async fn websocket_route(
     let (response, session, messages) = actix_ws::handle(&req, body)?;
 
     let (sender, signals) = mpsc::channel(SIGNAL_BUFFER);
-    let connection = state.register_as(auth_user.id, sender, Transport::WebSocket);
+    let connection = state.register(auth_user.id, sender);
     let credentials = Credentials {
         user_id: auth_user.id,
         jwt,

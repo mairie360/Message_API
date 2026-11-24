@@ -58,7 +58,7 @@ migration container, with Postgres published on a random host port. A running Do
 
 `get_shared_db()` hands back the **superuser** URL, used by the fixtures only
 (`tests/common::get_fixture_db()`: users, ACLs, moderation log reads). Everything that runs Message's code connects
-as the `message_api` role, like in staging (MAIR-556): `tests/common::get_smart_db()` (query views, SSE listener) and
+as the `message_api` role, like in staging (MAIR-556): `tests/common::get_smart_db()` (query views, real-time listener) and
 `AppState::new(…, message_db_url().await)` (endpoints, `tests/endpoints/harness.rs`), both through the lib's
 `get_shared_db_as("message_api")`. A query outside the grants of Database's `api_grants.sql` then fails the test with
 `permission denied` (SQLSTATE `42501`): add the grant there, never connect the code under test as the superuser.
@@ -77,7 +77,7 @@ measures, while argon2 and the TLS stack no longer dominate the run.
 
 `tests/common::smart_db_at(db_url)` builds a `SmartDatabase` over any URL. It also
 constructs a `Redis` pointing at `localhost:6379`, but no chat `QueryView` declares a
-`cache_key`, so Redis is never actually contacted by the queries. Only `tests/sse/relay.rs` needs Redis: it starts
+`cache_key`, so Redis is never actually contacted by the queries. Only `tests/realtime/relay.rs` needs Redis: it starts
 its own containers (`redis` image through testcontainers, one of them with the platform ACL of the `message-api` role).
 
 ```bash
@@ -122,10 +122,7 @@ service (`init-test.sql`: plain `User` accounts 2 and 3, user 1 is the Admin cre
 alert not set to `IGNORE` / `OUTOFSCOPE` in `.zap/rules.tsv` (no `-I`). `-O http://message:3003` is required: the
 spec's `servers` are unreachable from the ZAP container. `rules.tsv` is the one shared by every API, except that the XSS rules (`40012`, `40014`, `40016`, `40017`) are
 `IGNORE` since `<` / `>` are accepted in free text (MAIR-426: the API serves JSON with `nosniff`, escaping is the
-fronts' job), and that the
-`100001` (unexpected content type) scope also covers `/api/v1/stream` (`text/event-stream`): ZAP keeps a single
-`OUTOFSCOPE` regex per rule id, so both paths live in one alternation. That exclusion stays while the SSE exists (its
-response never ends, so ZAP would hold it until its own timeout) and goes with the SSE's removal. `/api/v1/ws` is not
+fronts' job). The SSE stream and its `100001` exclusion are gone. `/api/v1/ws` is not
 excluded (MAIR-661): ZAP cannot upgrade, so it scans the plain `GET`, which answers `401` without a token and `400`
 without `Upgrade`, both plain-text, raising no alert.
 
@@ -143,10 +140,8 @@ scenario (10 VUs) as the Admin, each handler creating and deleting its own chat 
 order-independent; a `chats_rush` scenario sends `GET /api/v1/` at a fixed 100 req/s; a `chat_poll`
 scenario (MAIR-524) sends the incremental reads that replaced the 2 s reloads at a fixed rate (`op:chat_since`
 `GET /api/v1/{chat_id}/?since=` on a busy chat, from its cursor read in `setup()` or, one time in four, from 2000 for a
-full page; `op:chats_since` `GET /api/v1/?since=`), each with a 200 ms `p(95)`. `GET /api/v1/stream` has its own 1-VU `stream`
-scenario: the SSE response never ends, so k6 cuts it after 1 s (error 1050), a timeout marked expected with
-`responseCallback: http.expectedStatuses(0, 200)` so it stays out of `http_req_failed`. One `p(95)` threshold per
-`op` tag (200 ms reads, 500 ms writes, 1.5 s stream). The same scenario counts `GET /api/v1/ws` (MAIR-657): k6/http
+full page; `op:chats_since` `GET /api/v1/?since=`), each with a 200 ms `p(95)`. One `p(95)` threshold per
+`op` tag (200 ms reads, 500 ms writes). A 1-VU `stream` scenario counts `GET /api/v1/ws` (MAIR-657): k6/http
 cannot upgrade, so the counted request is a plain `GET` answering the expected `400`. The real sockets are the
 `websocket` scenario (MAIR-661, `wsVus` of the profile: 20 in `ci`, 200 in `stress`, for 2 min from 30 s): each iteration
 creates a chat of the Admin and agent `401001 + exec.vu.idInTest` (unique per VU: a `__VU` modulo made two VUs share a
@@ -204,7 +199,7 @@ Write routes (MAIR-420) open a transaction (`access::begin`), check access with 
 `require_message_author_in` inside it, write through the same `SmartTransaction`, then `access::commit`. The access
 query is `ChatAccessQueryView::locking`: it takes `FOR KEY SHARE` on the chat row and the caller's membership row,
 so a concurrent member removal or chat deletion waits for the write instead of slipping between check and write
-(TOCTOU). Removing a member and `DeleteEmptyChatQueryView` share that transaction. SSE events are published after
+(TOCTOU). Removing a member and `DeleteEmptyChatQueryView` share that transaction. Real-time events are published after
 the commit. Read-only routes keep the plain `require_chat_access`.
 
 `POST /api/v1/` creates the chat and its members in one statement (`CreateChatQueryView::with_members`, a CTE): an
@@ -250,7 +245,7 @@ MAIR-507, what a client needs to display the list and to open a chat, in one que
   `search_pattern`. It is case-insensitive but not accent-insensitive (the schema has no `unaccent`), and the pagination
   applies to the filtered list. The user-name branches use the trigram indexes of Database 3.0.0.
 - `GET /api/v1/{chat_id}/users/` returns `id`, `first_name`, `last_name` (`GetChatUsersQueryView`, a join with `users`);
-  the SSE fan-out keeps using the ids-only `GetChatMembersQueryView::new`.
+  the real-time fan-out keeps using the ids-only `GetChatMembersQueryView::new`.
 - `GET /api/v1/{chat_id}/` returns `chat` (the same fields as a list line, `GetChatHeaderQueryView`, read in parallel
   with the page; an administrator who is not a participant of a direct chat gets both names and no `contact_id`) and,
   for each message that quotes another, `quoted` (`id`, `sender_id`, first 100 characters), joined in the page query so
@@ -293,7 +288,7 @@ and `SELECT (id, name)` on `groups`). Every change is additive, no field was rem
   people | files&limit=1..50 (20)&offset=` answers `{type, items, has_more, total}` (one statement, `total` counted on
   the same CTE; `files` is always empty: no attachments). `GET /{chat_id}/mention-groups/?q=` answers `{groups: [{id,
   name}]}`, the groups of the non-excluded members, by name, 20 at most. Both are open to members and administrators.
-- SSE: `ChatEventKind::MessageReacted` (`MSG_REACTED`, members but the actor), `MembersChanged` (`MEMBERS_CHANGED`,
+- Real time: `ChatEventKind::MessageReacted` (`MSG_REACTED`, members but the actor), `MembersChanged` (`MEMBERS_CHANGED`,
   every member, the actor included, plus `ChatEvent.recipients`: the removed member) and `Mentioned` (`MENTIONED`, only
   the `recipients` resolved at write time by `MentionRecipientsQueryView`; an edit signals the newly mentioned only).
   `recipients` is `#[serde(default)]`; a replica older than MAIR-1155 cannot read the new kinds and drops them during a
@@ -333,7 +328,7 @@ from `init-test.sql`), `jwt_forged` (Core's `kid`, another key) and `jwt_expired
 forges `jwt_hs256`, an HS256 token that must be refused (MAIR-680). From a host shell, fill those variables
 yourself. The scenario creates
 its own chat and deletes it at the end, so it is replayable against a persistent database. `GET /api/v1/stream`
-is only checked unauthenticated (401): newman cannot consume an open SSE stream. Nor can it open a WebSocket:
+answers `404` (the SSE is gone). newman cannot open a WebSocket:
 `GET /api/v1/ws` is checked for its refused handshakes (`401` without or with a forged JWT, `400` without
 `Upgrade`; the two `401` also check the plain-text error body). The journey over real sockets runs next to it
 (MAIR-661): `tests/websocket/journey.mjs`, plain Node (global `WebSocket` with an `Authorization` header, `fetch`),
@@ -357,8 +352,8 @@ in the handler tests. Three collection-level scripts, identical in every API col
   and expects a documented `401 text/plain`;
 - `OpenAPI coverage`, the last request, fails when an operation has no success case or a documented status above
   was never answered, and when an entry of the collection variable `openapi_coverage_exceptions` (`"METHOD /path
-  STATUS": "reason"`, `2xx` for the success) is no longer needed. The only one is the `200` of `GET /api/v1/stream`
-  (tested by `tests/endpoints/flows.rs` and the k6 `stream` scenario).
+  STATUS": "reason"`, `2xx` for the success) is no longer needed. The only one is the `2xx` of `GET /api/v1/ws`
+  (tested by `tests/endpoints/mair_657_websocket.rs`, `tests/websocket/journey.mjs` and k6).
 
 A new endpoint therefore fails the integration stack until the collection tests it.
 
@@ -402,7 +397,7 @@ inserts an `AuthenticatedUser { id }` into request extensions; handlers get it v
   `Redis` (`get_redis()`). `SmartDatabase` is cache-aside: `Redis` / `Database` connection
   failures are swallowed at startup and degrade to direct Postgres, so handlers get a
   `&SmartDatabase` unconditionally (no `Option`).
-- `message_api::sse::state::AppState` — SSE runtime state (see below), wrapped in an `Arc`
+- `message_api::realtime::state::AppState` — real-time state (see below), wrapped in an `Arc`
   and registered with `web::Data::from`.
 
 Handlers that need both take two `web::Data<...>` arguments (the module paths disambiguate).
@@ -421,7 +416,7 @@ convert with `database::ids` (`id_to_sql` / `id_from_sql` for `INTEGER`, `bigint
 conversions turn an out-of-range id into one no row has, so it ends in the usual `404`. `src/lib.rs` enables the
 clippy cast lints, so `cargo check_code` rejects a new `as` cast.
 
-Endpoints (and `sse::event_manager`) call `state.get_smart_db()` then:
+Endpoints (and `realtime::event_manager`) call `state.get_smart_db()` then:
 
 - `fetch_scalar::<T, _>(&view)` — single scalar (`RETURNING id`, `EXISTS`, …). **Writes that
   need "row was found" semantics use `... RETURNING id` + `fetch_scalar`**: 0 rows →
@@ -436,67 +431,57 @@ Endpoints (and `sse::event_manager`) call `state.get_smart_db()` then:
 There is no compile-time query checking, so schema mistakes surface only at runtime / in
 the container tests.
 
-### Real-time SSE and WebSocket (`src/sse/`, `endpoints/v1/stream`, `endpoints/v1/ws`)
+### Real-time WebSocket (`src/realtime/`, `endpoints/v1/ws`)
 
-The real-time channel is moving to WebSocket (epic MAIR-655), SSE and WebSocket coexisting until MAIR-662 removes
-the SSE. The decision is `docs/en/adr/0001-messaging-websocket.md` and the frozen contract shared with BFF_Message
-and Messages_Web_Service (routes, frames, close codes, limits, client behaviour) is `docs/en/realtime-websocket.md`
-(French copies under `docs/fr/`): implement against it and update it, in both languages, before changing the
-behaviour.
-
-The real-time channel is moving to WebSocket (epic MAIR-655), SSE and WebSocket coexisting until MAIR-662 removes
-the SSE. The decision is `docs/en/adr/0001-messaging-websocket.md` and the frozen contract shared with BFF_Message
-and Messages_Web_Service (routes, frames, close codes, limits, client behaviour) is `docs/en/realtime-websocket.md`
-(French copies under `docs/fr/`): implement against it and update it, in both languages, before changing the
-behaviour.
+The real-time channel is the WebSocket (epic MAIR-655); the SSE stream was removed (`GET /api/v1/stream` answers
+`404`) and renamed the `sse` module `realtime`. The decision is `docs/en/adr/0001-messaging-websocket.md` and the
+frozen contract shared with BFF_Message and Messages_Web_Service (routes, frames, close codes, limits, client
+behaviour) is `docs/en/realtime-websocket.md` (French copies under `docs/fr/`): implement against it and update it,
+in both languages, before changing the behaviour.
 
 - `state.rs`: `AppState { online_agents: DashMap<u64 /*user id*/, Vec<Connection>>, internal_bus:
   broadcast::Sender<ChatEvent>, relay: Option<Arc<RedisRelay>> }`, built with `AppState::new`. A `Connection` holds its
-  sender, a `close: Arc<Notify>` and its `Transport` (`Sse` or `WebSocket`, MAIR-657). `register` (SSE) and
-  `register_as` keep at most `MAX_CONNECTIONS_PER_USER` (5) per user, **both transports counted together**, and notify
-  the evicted oldest ones. `transports_of` lists a user's connections with their transport.
-- `relay.rs`: Redis pub/sub so every replica notifies its own streams. The channel is
-  `<lib key prefix>:sse:chat-events` (`message-api:sse:chat-events` on the platform, whose Redis ACL grants that role
+  sender, a `close: Arc<Notify>` and `overflowed`. `register` keeps at most `MAX_CONNECTIONS_PER_USER` (5) per user and
+  notifies the evicted oldest ones; `connections_of` lists them. `deliver` queues the bare `ChatSignal` JSON (one text
+  frame); a full buffer (10) sets `overflowed` and closes the socket (`1013`), a closed channel removes it.
+- `relay.rs`: Redis pub/sub so every replica notifies its own sockets. The channel is
+  `<lib key prefix>:sse:chat-events` (`message-api:sse:chat-events` on the platform; the name stays from the SSE era so that old and new
+  replicas share it during a rolling update, whose Redis ACL grants that role
   `&message-api:*` + `PUBLISH`/`SUBSCRIBE`, `redis.pubSubRoles` in Deploiment). `RedisRelay::run` subscribes and pushes
   what it receives on `internal_bus`, reconnecting with a backoff; redis-rs drops the error reply of `SUBSCRIBE`, so the
   subscription is only trusted once a `probe` payload published right after it comes back.
 - `main.rs` creates the `broadcast` channel, spawns `RedisRelay::run` and
   `event_manager::start_internal_event_listener` (with a cloned `SmartDatabase`).
-- Write endpoints commit, then `sse_state.publish(ChatEvent::…)` (MAIR-524: `message_created` on a post,
+- Write endpoints commit, then `sse_state.publish(ChatEvent::…)` (the argument keeps its old name) (MAIR-524: `message_created` on a post,
   `message_edited` on a `PATCH`, `message_deleted` on a `DELETE`, `chat_read` on `POST /read/`, each with its
   `message_id`, plus `unread_count` for a read): through Redis when the relay is subscribed, straight on `internal_bus`
   otherwise (a duplicate signal only makes a client read once more). `ChatEvent.kind` / `message_id` /
   `unread_count` are `#[serde(default)]`, so an event of an older replica reads as `MessageCreated`, and an older replica
   ignores them (signals everything as `NEW_MSG`) during a rolling update.
-- The listener pushes a serde-serialized `ChatSignal` (`ChatSignal::from_event`), framed by `Transport::frame`: a whole
-  `data: {...}\n\n` event for an SSE connection, the bare JSON (one text frame) for a WebSocket. `type`
+- The listener pushes a serde-serialized `ChatSignal` (`ChatSignal::from_event`), the bare JSON (one text frame). `type`
   `NEW_MSG` / `MSG_EDITED` / `MSG_DELETED` / `MSG_REACTED` to every connection of each online non-excluded member but
   the actor (one `get_chat_users` query), `MEMBERS_CHANGED` to every member and the `recipients` (actor included),
   `MENTIONED` to the `recipients` only, `CHAT_READ` (with `unread_count`) to every connection of the reader only, no query. The frame
   of a post stays `{"type":"NEW_MSG","chat_id":…}` plus the additive `message_id`. The table of the event contract is
-  the description of `GET /api/v1/stream` (what BFF_Message relays). A `Lagged` bus error is logged and the loop
+  the description of `GET /api/v1/ws` (what BFF_Message relays). A `Lagged` bus error is logged and the loop
   resumes; only closed senders are removed.
-- `GET /api/v1/stream` registers a new connection for the caller, opens the body with a `: connected` comment (MAIR-561:
-  actix sends the head of a streaming response with its first chunk only) and spawns a supervisor (`actix_web::rt::spawn`): 15 s
-  keep-alive ping, `authenticate_token` again every 30 s (revoked session, deleted account), and a timer on the JWT
-  `exp` when it is readable. Any failure notifies `close`, which ends the response (`take_until`); the connection is
-  removed once its receiver is gone. `sse::supervision` holds what the two transports share (15 s ping, 30 s
-  revalidation, `time_left` / `expiry` on the JWT `exp`, `still_valid`).
-- `GET /api/v1/ws` (MAIR-657, `endpoints/v1/ws/endpoint.rs`) is the WebSocket twin, on `actix-ws`: `JwtMiddleware`
+- `realtime::supervision` holds the 15 s ping, the 30 s revalidation, `time_left` / `expiry` on the JWT `exp` and
+  `still_valid`.
+- `GET /api/v1/ws` (MAIR-657, `endpoints/v1/ws/endpoint.rs`) is the WebSocket, on `actix-ws`: `JwtMiddleware`
   refuses the handshake before any upgrade (`401`, `404` for an unknown or archived account), a plain `GET` without
-  `Upgrade` answers `400`. The route registers a `Transport::WebSocket` connection and spawns `serve`, one loop per
+  `Upgrade` answers `400`. The route registers a connection and spawns `serve`, one loop per
   socket: signals → text frames, a ping every 15 s and `1001` after 45 s without pong, `4001` on the JWT expiry or a
   failed revalidation (30 s), `4008` when `close` is notified (eviction), `1003` on any client data frame, `1009` beyond
   4 KiB, then it removes the connection and sends the close frame. `serve` takes its `Timings`, so
   `tests/endpoints/mair_657_websocket.rs` mounts it with short intervals (`/api/test/ws`) to test keep-alive and
-  revalidation on a real server (`actix-test` + `awc` client); `tests/sse/relay.rs` covers a WebSocket on another
+  revalidation on a real server (`actix-test` + `awc` client); `tests/realtime/relay.rs` covers a WebSocket on another
   replica. The contract is `docs/en/realtime-websocket.md`.
 
 ### Lists and rate limiting (MAIR-425)
 
 `GET /api/v1/` and `GET /api/v1/{chat_id}/users/` take `endpoints::pagination::PageQuery` (`limit` 1..=100, default 50,
 `offset`) and answer `has_more`: the query views' `page()` fetch `limit + 1` rows and `split_page` trims the extra one.
-Their `new()` stays unbounded (`LIMIT NULL`) for the SSE fan-out and the query tests. Messages use their own keyset.
+Their `new()` stays unbounded (`LIMIT NULL`) for the real-time fan-out and the query tests. Messages use their own keyset.
 
 `/api` is rate limited per authenticated user by the lib's `rate_limit_middleware` (`mairie360_api_lib::security`): the BFFs
 share a few IPs, so the key is the `AuthenticatedUser` that `JwtMiddleware` stored, hence the middleware is wrapped *before*

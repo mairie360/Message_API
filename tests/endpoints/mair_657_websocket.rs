@@ -1,4 +1,4 @@
-//! MAIR-657: `GET /api/v1/ws`, the WebSocket twin of the SSE stream, on a real HTTP server
+//! MAIR-657: `GET /api/v1/ws`, the messaging WebSocket, on a real HTTP server
 //! (`actix-test`) with a real WebSocket client (`awc`). Writes go through the HTTP routes, so the
 //! signals travel the production path: commit → `AppState::publish` → bus → `event_manager` →
 //! registry → socket. The contract checked is `docs/en/realtime-websocket.md` (MAIR-656).
@@ -16,8 +16,8 @@ use mairie360_api_lib::security::{AuthenticatedUser, JwtMiddleware};
 use message_api::endpoints::v1::ws::endpoint::{
     serve, CloseCause, Credentials, Timings, EVICTED, SESSION_ENDED,
 };
-use message_api::sse::event_manager::start_internal_event_listener;
-use message_api::sse::state::{AppState as SseState, Transport, MAX_CONNECTIONS_PER_USER};
+use message_api::realtime::event_manager::start_internal_event_listener;
+use message_api::realtime::state::{AppState as RealtimeState, MAX_CONNECTIONS_PER_USER};
 use serde_json::{json, Value};
 
 use super::harness::{core_claims, now, sign_like_core, states, token};
@@ -39,14 +39,14 @@ const FAST: Timings = Timings {
 async fn fast_websocket(
     req: HttpRequest,
     body: web::Payload,
-    state: web::Data<SseState>,
+    state: web::Data<RealtimeState>,
     api_state: web::Data<mairie360_api_lib::state::AppState>,
     user: AuthenticatedUser,
 ) -> Result<HttpResponse, actix_web::Error> {
     let jwt = mairie360_api_lib::jwt_manager::get_jwt_from_request(&req).unwrap_or_default();
     let (response, session, messages) = actix_ws::handle(&req, body)?;
     let (sender, signals) = tokio::sync::mpsc::channel(10);
-    let connection = state.register_as(user.id, sender, Transport::WebSocket);
+    let connection = state.register(user.id, sender);
     let credentials = Credentials {
         user_id: user.id,
         jwt,
@@ -67,7 +67,7 @@ async fn fast_websocket(
 
 /// The `/api` scope of `main.rs` (plus `/api/test/ws`) on a real server, with the event listener
 /// running, as in production without the Redis relay.
-async fn server() -> (actix_test::TestServer, web::Data<SseState>) {
+async fn server() -> (actix_test::TestServer, web::Data<RealtimeState>) {
     let (state, sse) = states().await;
     actix_web::rt::spawn(start_internal_event_listener(
         sse.clone().into_inner(),
@@ -242,12 +242,11 @@ async fn mair_657_a_plain_get_is_not_upgraded() {
 }
 
 #[actix_web::test]
-async fn mair_657_an_upgraded_connection_is_registered_as_a_websocket() {
+async fn mair_657_an_upgraded_connection_is_registered() {
     let (srv, sse) = server().await;
     let user = plain_user(&get_fixture_db().await).await;
     let _ws = connect(&srv, user).await;
-    let transports: Vec<Transport> = sse.transports_of(user).into_iter().map(|c| c.2).collect();
-    assert_eq!(transports, vec![Transport::WebSocket]);
+    assert_eq!(sse.connections_of(user).len(), 1);
 }
 
 // ----- Signals and recipients (CA2, CA3, CA4) -----
@@ -346,32 +345,27 @@ async fn mair_657_a_read_acknowledgement_reaches_the_readers_connections_only() 
     );
 }
 
-/// SSE and WebSocket coexist (MAIR-655 CA11): a member with one connection of each transport
-/// receives the same signal on both, each framed its way.
+/// Two open connections of one member (two tabs) receive the same signal, each as the bare JSON
+/// text frame.
 #[actix_web::test]
-async fn mair_657_sse_and_websocket_connections_receive_the_same_signal() {
+async fn mair_662_two_connections_of_a_member_receive_the_same_bare_frame() {
     let (srv, sse) = server().await;
     let db = get_fixture_db().await;
     let (a, b) = (plain_user(&db).await, plain_user(&db).await);
     let chat = chat_of(&srv, a, &[a, b]).await;
     let mut ws_b = connect(&srv, b).await;
-    let (sender, mut stream_b) = tokio::sync::mpsc::channel(4);
+    let (sender, mut other_tab) = tokio::sync::mpsc::channel(4);
     sse.register(b, sender);
 
-    let message = post_message(&srv, chat, a, "Les deux canaux.").await;
+    let message = post_message(&srv, chat, a, "Les deux onglets.").await;
     let signal = json!({ "type": "NEW_MSG", "chat_id": chat, "message_id": message });
     assert_eq!(next_signal(&mut ws_b).await, signal);
-    let event = tokio::time::timeout(Duration::from_secs(5), stream_b.recv())
+    let frame = tokio::time::timeout(Duration::from_secs(5), other_tab.recv())
         .await
-        .expect("SSE event in time")
+        .expect("signal in time")
         .expect("channel open")
         .unwrap();
-    let event = String::from_utf8(event.to_vec()).unwrap();
-    let data = event
-        .strip_prefix("data: ")
-        .and_then(|rest| rest.strip_suffix("\n\n"))
-        .expect("one whole SSE event");
-    assert_eq!(serde_json::from_str::<Value>(data).unwrap(), signal);
+    assert_eq!(serde_json::from_slice::<Value>(&frame).unwrap(), signal);
 }
 
 // ----- Limits and closure (CA6, CA7, contract) -----
@@ -393,7 +387,7 @@ async fn mair_657_a_sixth_connection_evicts_the_oldest_with_4008() {
         close_code(&mut oldest, Duration::from_secs(5)).await,
         Some(EVICTED)
     );
-    assert_eq!(sse.transports_of(b).len(), MAX_CONNECTIONS_PER_USER);
+    assert_eq!(sse.connections_of(b).len(), MAX_CONNECTIONS_PER_USER);
 
     let message = post_message(&srv, chat, a, "Toujours reçu.").await;
     for ws in &mut others {
@@ -481,7 +475,7 @@ async fn mair_657_a_client_answering_pings_stays_open() {
         .unwrap();
     // `next_frame` answers every ping; nothing else may arrive for three pong timeouts.
     assert!(next_frame(&mut ws, FAST.pong_timeout * 3).await.is_none());
-    assert_eq!(sse.transports_of(user).len(), 1);
+    assert_eq!(sse.connections_of(user).len(), 1);
 }
 
 /// A client that answers no ping is closed with `1001` and removed from the registry.
@@ -551,11 +545,7 @@ async fn mair_657_an_overflowing_socket_is_closed_with_1013() {
         Some(1013)
     );
     tokio::time::sleep(Duration::from_millis(100)).await;
-    let left: Vec<u64> = sse
-        .transports_of(user)
-        .iter()
-        .map(|(id, _, _)| *id)
-        .collect();
+    let left: Vec<u64> = sse.connections_of(user).iter().map(|(id, _)| *id).collect();
     assert_eq!(left.len(), 1, "only the overflowing socket left");
     assert!(!left.contains(&first.id));
     assert!(silent(&mut other).await, "the other socket stays open");

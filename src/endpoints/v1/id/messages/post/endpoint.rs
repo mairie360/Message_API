@@ -18,7 +18,7 @@ use crate::endpoints::v1::id::messages::tags::{
 };
 use crate::endpoints::v1::id::ChatPathParams;
 use crate::endpoints::validation::ValidatedJson;
-use crate::sse::state::ChatEvent;
+use crate::realtime::state::ChatEvent;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PosteMessageError {
@@ -123,7 +123,7 @@ async fn trigger_post_message(
     params(ChatPathParams),
     path = "",
     summary = "Post a message",
-    description = "Adds a message to a chat and pushes a `ChatSignal` on the SSE stream of every other connected \
+    description = "Adds a message to a chat and pushes a `ChatSignal` on the WebSocket of every other connected \
                    member. The author is taken from the JWT, never from the body.\n\n \
                    `citation` is optional: the id of the message this one answers. It must be a message of the \
                    same chat and not deleted (`400` otherwise) and is read back as `citation` by \
@@ -137,7 +137,7 @@ async fn trigger_post_message(
                    mentioned (by id, by `@everyone` or through a group) but the author also gets a `MENTIONED` \
                    signal. A tag the author may not make answers `400` and posts nothing.\n\n \
                    In a **direct** chat, a participant who hid it sees it again (in `GET /api/v1/`, with this \
-                   message unread, and on their SSE stream): a direct chat is only hidden until its next message.\n\n \
+                   message unread, and on their WebSocket): a direct chat is only hidden until its next message.\n\n \
                    Only the members of the chat may post. An administrator who is not a member gets `403` \
                    (administrators read and moderate, they do not take part); anyone else gets the same `404` \
                    as for an unknown chat.",
@@ -197,7 +197,7 @@ async fn trigger_post_message(
 #[post("/")]
 pub async fn post_message(
     state: web::Data<AppState>,
-    sse_state: web::Data<crate::sse::state::AppState>,
+    sse_state: web::Data<crate::realtime::state::AppState>,
     auth_user: AuthenticatedUser,
     view: ValidatedJson<PostMessageView>,
     params: web::Path<ChatPathParams>,

@@ -149,7 +149,7 @@ async fn user_with_role(db: &SmartDatabase, role: Option<&str>) -> u64 {
     id
 }
 
-/// The status only: the body of `GET /stream` never ends (server-sent events).
+/// The status only, whatever the body.
 macro_rules! status_only {
     ($app:expr, $request:expr) => {{
         match actix_web::test::try_call_service(&$app, $request.to_request()).await {

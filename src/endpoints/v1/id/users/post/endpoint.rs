@@ -16,7 +16,7 @@ use crate::endpoints::v1::id::users::post::view::{AddUsersToChat, AddUsersToChat
 use crate::endpoints::v1::id::users::{post_system_note, SystemNoteFailed};
 use crate::endpoints::v1::id::ChatPathParams;
 use crate::endpoints::validation::ValidatedJson;
-use crate::sse::state::ChatEvent;
+use crate::realtime::state::ChatEvent;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AddUsersToChatError {
@@ -179,7 +179,7 @@ async fn trigger_add_users_to_chat(
 #[post("/")]
 pub async fn add_users_to_chat(
     state: web::Data<AppState>,
-    sse_state: web::Data<crate::sse::state::AppState>,
+    sse_state: web::Data<crate::realtime::state::AppState>,
     auth_user: AuthenticatedUser,
     view: ValidatedJson<AddUsersToChat>,
     params: web::Path<ChatPathParams>,

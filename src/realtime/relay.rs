@@ -1,11 +1,12 @@
-//! Redis pub/sub relay of the chat events, so that every replica of the API notifies the SSE
+//! Redis pub/sub relay of the chat events, so that every replica of the API notifies the WebSocket
 //! connections it holds, whichever replica handled the write.
 //!
 //! Each replica publishes its events on one channel and subscribes to it; what it receives is
 //! pushed on its local `internal_bus`. The channel is `<role>:sse:chat-events`, `<role>` being the
 //! key prefix of `mairie360_api_lib` (username of `REDIS_URL`, see `resolve_key_prefix`): the
 //! platform's Redis ACL only grants the `message-api` role `PUBLISH` / `SUBSCRIBE` on
-//! `&message-api:*`. A local Redis without ACL uses `sse:chat-events`.
+//! `&message-api:*`. A local Redis without ACL uses `sse:chat-events`. The channel keeps its name
+//! from the SSE era: during a rolling update, old and new replicas must share it.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -17,7 +18,7 @@ use redis::aio::MultiplexedConnection;
 use redis::AsyncCommands;
 use tokio::sync::{broadcast, Mutex};
 
-use crate::sse::state::ChatEvent;
+use crate::realtime::state::ChatEvent;
 
 const CHANNEL: &str = "sse:chat-events";
 const MAX_BACKOFF: Duration = Duration::from_secs(30);
@@ -54,7 +55,7 @@ impl RedisRelay {
                 subscribed: AtomicBool::new(false),
             })),
             Err(e) => {
-                tracing::warn!("SSE relay disabled, invalid Redis URL: {e}");
+                tracing::warn!("Real-time relay disabled, invalid Redis URL: {e}");
                 None
             }
         }
@@ -86,7 +87,7 @@ impl RedisRelay {
             match self.client.get_multiplexed_async_connection().await {
                 Ok(connection) => *guard = Some(connection),
                 Err(e) => {
-                    tracing::warn!("SSE relay: cannot connect to Redis to publish: {e}");
+                    tracing::warn!("Real-time relay: cannot connect to Redis to publish: {e}");
                     return false;
                 }
             }
@@ -100,7 +101,7 @@ impl RedisRelay {
         {
             Ok(_) => true,
             Err(e) => {
-                tracing::warn!("SSE relay: publish failed: {e}");
+                tracing::warn!("Real-time relay: publish failed: {e}");
                 // Reconnect on the next event.
                 *guard = None;
                 false
@@ -123,20 +124,24 @@ impl RedisRelay {
                             while let Some(message) = messages.next().await {
                                 forward(message.get_payload_bytes(), &bus);
                             }
-                            tracing::warn!("SSE relay: Redis subscription lost, reconnecting");
+                            tracing::warn!(
+                                "Real-time relay: Redis subscription lost, reconnecting"
+                            );
                         } else {
                             tracing::warn!(
-                                "SSE relay: no message received on {}, check the Redis ACL \
+                                "Real-time relay: no message received on {}, check the Redis ACL \
                                  (`&<role>:*`, `+publish`, `+subscribe`)",
                                 self.channel
                             );
                         }
                     }
                     Err(e) => {
-                        tracing::warn!("SSE relay: cannot subscribe to {}: {e}", self.channel)
+                        tracing::warn!("Real-time relay: cannot subscribe to {}: {e}", self.channel)
                     }
                 },
-                Err(e) => tracing::warn!("SSE relay: cannot connect to Redis to subscribe: {e}"),
+                Err(e) => {
+                    tracing::warn!("Real-time relay: cannot connect to Redis to subscribe: {e}")
+                }
             }
             self.subscribed.store(false, Ordering::Release);
             tokio::time::sleep(backoff).await;
@@ -182,7 +187,7 @@ fn forward(payload: &[u8], bus: &broadcast::Sender<ChatEvent>) {
         }
         // Without the value serde quotes: a malformed event may carry a message (MAIR-290).
         Err(e) => tracing::warn!(
-            "SSE relay: ignored malformed event: {}",
+            "Real-time relay: ignored malformed event: {}",
             mairie360_api_lib::error::describe_json_error(&e)
         ),
     }

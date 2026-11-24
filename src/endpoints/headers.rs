@@ -7,7 +7,7 @@ use actix_web::middleware::DefaultHeaders;
 ///   sniff it as HTML.
 /// - `Content-Type: text/plain; charset=utf-8`: the error bodies (and the plain-text successes)
 ///   built with `HttpResponse::…().body(…)` carry no content type, while the OpenAPI contract
-///   documents them as `text/plain` (MAIR-262). JSON (`.json(…)`) and SSE answers set their own
+///   documents them as `text/plain` (MAIR-262). JSON (`.json(…)`) answers set their own
 ///   type, which is kept.
 pub fn default_headers() -> DefaultHeaders {
     DefaultHeaders::new()

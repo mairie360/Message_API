@@ -15,7 +15,7 @@ async fn every_api_route_requires_a_valid_jwt() {
         (Method::GET, "/api/v1/"),
         (Method::POST, "/api/v1/"),
         (Method::POST, "/api/v1/direct/"),
-        (Method::GET, "/api/v1/stream"),
+        (Method::GET, "/api/v1/ws"),
         (Method::GET, "/api/v1/1/"),
         (Method::DELETE, "/api/v1/1/"),
         (Method::POST, "/api/v1/1/messages/"),

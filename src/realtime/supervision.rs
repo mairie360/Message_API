@@ -1,12 +1,11 @@
-//! What the SSE stream and the WebSocket share to keep a connection honest (MAIR-657): the
-//! keep-alive interval, the token checks and the timer on the token's expiry.
+//! What keeps a WebSocket connection honest (MAIR-657): the keep-alive interval, the token checks and the timer on the token's expiry.
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use mairie360_api_lib::jwt_manager::authenticate_token;
 use mairie360_api_lib::state::AppState;
 
-/// Interval of the keep-alive: a `: ping` comment (SSE) or a ping frame (WebSocket).
+/// Interval of the keep-alive ping frame.
 pub const PING_INTERVAL: Duration = Duration::from_secs(15);
 /// Interval at which the token of an open connection is checked again (expiry, revoked session,
 /// deleted account).

@@ -84,7 +84,7 @@ async fn trigger_get_chats(
                    combine it with the pagination and `search` as usual, an empty `chats` means nothing changed. \
                    Pass the greatest `last_activity_at` seen minus a few seconds: changes of different chats are \
                    not committed in date order. Acknowledgements and member changes do not move \
-                   `last_activity_at` (the caller's own reads come as `CHAT_READ` on `GET /api/v1/stream`).",
+                   `last_activity_at` (the caller's own reads come as `CHAT_READ` on `GET /api/v1/ws`).",
     responses(
         (
             status = 200,

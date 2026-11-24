@@ -10,4 +10,4 @@
 40014	IGNORE	Cross Site Scripting (Persistent): JSON with nosniff, escaping belongs to the fronts (MAIR-426)
 40016	IGNORE	Cross Site Scripting (Persistent) - Prime: see 40014 (MAIR-426)
 40017	IGNORE	Cross Site Scripting (Persistent) - Spider: see 40014 (MAIR-426)
-100001	OUTOFSCOPE	.*/(swagger-ui/.*|api/v1/stream(\?.*)?)$
+100001	OUTOFSCOPE	.*/swagger-ui/.*$

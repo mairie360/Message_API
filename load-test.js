@@ -15,9 +15,8 @@
 // - `writes`: every other operation with the write VUs of the profile. Each handler is self-contained: it creates what it
 //   needs through `fixture()`, sends its request, then deletes what it created, so the handlers
 //   do not depend on their order and the database ends as it started;
-// - `stream`: GET /api/v1/stream (SSE) alone, 1 VU every few seconds, until the SSE is removed. The response never ends,
-//   so every call ends on a k6 timeout, which k6 logs as a warning: keeping it out of the 20 VUs
-//   keeps the CI log readable. It also counts the plain GET /api/v1/ws (400) for the coverage;
+// - `stream`: the plain GET /api/v1/ws (400, k6/http cannot upgrade) alone, 1 VU every few seconds, so that the
+//   coverage counts it; the real sockets are the `websocket` scenario;
 // - `websocket`: the real-time channel under load. Each iteration creates a chat of the Admin and the
 //   VU's own listener, holds one socket of GET /api/v1/ws (WS_SESSION_MS) as the listener while the
 //   Admin posts in the chat every WS_POST_EVERY_MS, then deletes the chat: every post must reach the
@@ -118,15 +117,11 @@ const OTHER_MEMBER_ID = 3;
 // p(95) latency budget of each family of operations, in ms (reference machine).
 const READ_BUDGET_MS = 200;
 const WRITE_BUDGET_MS = 500;
-// GET /stream never ends by itself (SSE): the request is held this long, then cut by k6.
-const STREAM_HOLD = '1s';
-const STREAM_BUDGET_MS = 1500;
 
 const READ_METHODS = ['get', 'head', 'options'];
-const STREAM_PATH = '/api/v1/stream';
-// The WebSocket twin of the stream; its plain GET is counted in the `stream` scenario.
+// The WebSocket; its plain GET is counted in the `stream` scenario.
 const WS_PATH = '/api/v1/ws';
-const REALTIME_PATHS = [STREAM_PATH, WS_PATH];
+const REALTIME_PATHS = [WS_PATH];
 
 // `websocket` scenario. Sockets held at once: one per VU.
 const WS_VUS = PROFILE.wsVus;
@@ -285,14 +280,6 @@ const readHandlers = {
 };
 
 const streamHandlers = {
-  // SSE: the response never completes, so k6 cuts it after STREAM_HOLD (error 1050, status 0).
-  // That timeout is the expected outcome (the stream stayed open), hence the responseCallback
-  // keeping it out of http_req_failed; a refused stream (401, 500) answers at once and fails.
-  'GET /api/v1/stream': ({ request }) =>
-    check(
-      request({ params: { timeout: STREAM_HOLD, responseCallback: http.expectedStatuses(0, 200) } }),
-      { 'stream stays open': (r) => r.error_code === 1050 || r.status === 200 },
-    ),
   // k6/http cannot upgrade a connection: the plain GET answers 400, and it is what the coverage
   // counts. The real sockets are the `websocket` scenario.
   'GET /api/v1/ws': ({ request }) =>
@@ -478,7 +465,7 @@ export const options = {
   thresholds: {
     ...reads.thresholds, // every operation exercised, no handler error (shared counters)
     ...latencyThresholds(reads, READ_BUDGET_MS),
-    ...latencyThresholds(stream, STREAM_BUDGET_MS),
+    ...latencyThresholds(stream, READ_BUDGET_MS),
     ...latencyThresholds(writes, WRITE_BUDGET_MS),
     'http_req_duration{op:chats_rush}': [`p(95)<${CHATS_RUSH_BUDGET_MS}`],
     'http_req_duration{op:chat_since}': [`p(95)<${POLL_BUDGET_MS}`],

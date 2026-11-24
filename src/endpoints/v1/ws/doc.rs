@@ -1,4 +1,4 @@
-use crate::{endpoints::v1::ws::endpoint::__path_websocket_route, sse::state::ChatSignal};
+use crate::{endpoints::v1::ws::endpoint::__path_websocket_route, realtime::state::ChatSignal};
 use utoipa::OpenApi;
 
 #[derive(OpenApi)]

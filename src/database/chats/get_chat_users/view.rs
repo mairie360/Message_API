@@ -19,7 +19,7 @@ fn page_offset(offset: u32) -> QueryParam {
 }
 
 impl GetChatMembersQueryView {
-    /// Every member: the SSE fan-out notifies all of them.
+    /// Every member: the real-time fan-out notifies all of them.
     pub fn new(chat_id: u64) -> Self {
         Self {
             params: vec![
