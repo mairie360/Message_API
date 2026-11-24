@@ -4,7 +4,7 @@ use mairie360_api_lib::security::AuthenticatedUser;
 use mairie360_api_lib::smart_db::SmartTransaction;
 use mairie360_api_lib::state::AppState;
 
-use crate::sse::state::ChatEvent;
+use crate::realtime::state::ChatEvent;
 
 use crate::endpoints::v1::id::access::{
     begin, commit, require_chat_access_in, require_message_author_in, AccessDenied, MessageDenied,
@@ -149,7 +149,7 @@ async fn trigger_patch_message(
     summary = "Edit a message",
     description = "Replaces the content of a message. `content` is required: this `PATCH` is not a partial update, \
                    it overwrites the text.\n\n \
-                   Once committed, a `MSG_EDITED` `ChatSignal` (with `message_id`) is pushed on the SSE stream of \
+                   Once committed, a `MSG_EDITED` `ChatSignal` (with `message_id`) is pushed on the WebSocket of \
                    every other connected member, who reads the new content with `GET /api/v1/{chat_id}/?since=` \
                    (the message comes again with its `edited_at`).\n\n \
                    A deleted message cannot be edited (`404`), nor a system note (`400`).\n\n \
@@ -238,7 +238,7 @@ async fn trigger_patch_message(
 #[patch("/")]
 pub async fn patch_message(
     state: web::Data<AppState>,
-    sse_state: web::Data<crate::sse::state::AppState>,
+    sse_state: web::Data<crate::realtime::state::AppState>,
     auth_user: AuthenticatedUser,
     params: web::Path<MessagePathParams>,
     view: ValidatedJson<PatchMessageView>,

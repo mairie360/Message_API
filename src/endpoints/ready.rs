@@ -34,7 +34,7 @@ pub struct ReadinessView {
     /// PostgreSQL: every route reads or writes it.
     #[schema(example = "up")]
     pub postgres: DependencyStatus,
-    /// Redis: session revocation checks of the JWTs and the SSE relay between replicas.
+    /// Redis: session revocation checks of the JWTs and the real-time relay between replicas.
     #[schema(example = "up")]
     pub redis: DependencyStatus,
 }

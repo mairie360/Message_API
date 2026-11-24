@@ -135,7 +135,7 @@ async fn trigger_get_chat(
                    row returned, or the cursor received when nothing changed (`messages` empty). When `has_more` \
                    is `true`, call again at once with it. Start from the `next_since` / `next_since_id` of the \
                    history response: changes are ordered by commit within a chat, so a cursor never skips one. \
-                   `since` and `before` are mutually exclusive (`400`). `GET /api/v1/stream` signals when to \
+                   `since` and `before` are mutually exclusive (`400`). `GET /api/v1/ws` signals when to \
                    read (`NEW_MSG`, `MSG_EDITED`, `MSG_DELETED`).\n\n\
                    Only the members of the chat and administrators may call this route. Anyone else gets the same \
                    `404` as for an unknown chat.",

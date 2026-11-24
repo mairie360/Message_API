@@ -16,7 +16,7 @@ use crate::database::chats::system_notes::view::SystemAction;
 use crate::endpoints::error::{classify, unexpected, DbFailure};
 use crate::endpoints::v1::id::users::id::UsersPathParams;
 use crate::endpoints::v1::id::users::{post_system_note, SystemNoteFailed};
-use crate::sse::state::ChatEvent;
+use crate::realtime::state::ChatEvent;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RemoveUserFromChatError {
@@ -182,7 +182,7 @@ async fn trigger_remove_user_from_chat(
 #[delete("/")]
 pub async fn remove_user_from_chat(
     state: web::Data<AppState>,
-    sse_state: web::Data<crate::sse::state::AppState>,
+    sse_state: web::Data<crate::realtime::state::AppState>,
     auth_user: AuthenticatedUser,
     params: web::Path<UsersPathParams>,
 ) -> Result<impl Responder, RemoveUserFromChatError> {

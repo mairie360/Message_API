@@ -12,8 +12,8 @@ use mairie360_api_lib::request_log::{hide_query, restore_query, RedactedRootSpan
 use mairie360_api_lib::security::{rate_limit_middleware, JwtMiddleware, RateLimiter};
 use mairie360_api_lib::state::AppState;
 
-use message_api::sse::event_manager::start_internal_event_listener;
-use message_api::sse::relay::RedisRelay;
+use message_api::realtime::event_manager::start_internal_event_listener;
+use message_api::realtime::relay::RedisRelay;
 
 /// Seconds startup waits for PostgreSQL before exiting, unless `DB_STARTUP_TIMEOUT` says otherwise.
 const DEFAULT_DB_STARTUP_TIMEOUT: u64 = 60;
@@ -60,9 +60,9 @@ async fn main() -> std::io::Result<()> {
         tokio::spawn(relay.clone().run(bus_tx.clone()));
     }
 
-    let app_state = Arc::new(message_api::sse::state::AppState::new(bus_tx, relay));
+    let app_state = Arc::new(message_api::realtime::state::AppState::new(bus_tx, relay));
 
-    // 2. SSE listener in the background, next to Actix
+    // 2. Real-time listener in the background, next to Actix
     tokio::spawn(start_internal_event_listener(
         app_state.clone(),
         state.get_smart_db().clone(),

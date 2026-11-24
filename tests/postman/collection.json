@@ -5242,10 +5242,16 @@
       "name": "Stream",
       "item": [
         {
-          "name": "SSE stream without JWT is rejected",
+          "name": "MAIR-662 the SSE stream is gone, even for a signed-in agent",
           "request": {
             "method": "GET",
-            "header": [],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_agent}}",
+                "type": "text"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/api/v1/stream",
               "host": [
@@ -5264,8 +5270,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"Status is 401\", function () {",
-                  "    pm.response.to.have.status(401);",
+                  "// MAIR-662: real time is the WebSocket only (GET /api/v1/ws).",
+                  "pm.test(\"Status is 404\", function () {",
+                  "    pm.response.to.have.status(404);",
+                  "});",
+                  "pm.test(\"No event stream is opened\", function () {",
+                  "    pm.expect(pm.response.headers.get('Content-Type') || '').to.not.include('text/event-stream');",
                   "});"
                 ]
               }
@@ -6631,7 +6641,7 @@
     },
     {
       "key": "openapi_coverage_exceptions",
-      "value": "{\n  \"GET /api/v1/stream 2xx\": \"newman cannot consume an SSE stream that never ends: the 200 and its first frame are tested in tests/endpoints/flows.rs (stream_opens_an_event_stream, MAIR-561), and by the k6 stream scenario\",\n  \"GET /api/v1/ws 2xx\": \"newman cannot open a WebSocket: the 101 upgrade and the frames are tested in tests/endpoints/mair_657_websocket.rs (MAIR-657) and by the k6 stream scenario\",\n  \"GET /api/v1/ws 404\": \"the stack has no token of an unknown or archived account: the 404 of every secured operation, this one included, is tested by tests/endpoints/token_refusals.rs (every_secured_operation_refuses_an_unknown_or_archived_account)\"\n}",
+      "value": "{\n  \"GET /api/v1/ws 2xx\": \"newman cannot open a WebSocket: the 101 upgrade and the frames are tested in tests/endpoints/mair_657_websocket.rs (MAIR-657), by tests/websocket/journey.mjs and by the k6 stream scenario\",\n  \"GET /api/v1/ws 404\": \"the stack has no token of an unknown or archived account: the 404 of every secured operation, this one included, is tested by tests/endpoints/token_refusals.rs (every_secured_operation_refuses_an_unknown_or_archived_account)\"\n}",
       "type": "string"
     }
   ]

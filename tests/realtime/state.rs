@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use actix_web::web::Bytes;
-use message_api::sse::state::{
+use message_api::realtime::state::{
     AppState, ChatEvent, ChatEventKind, ChatSignal, MAX_CONNECTIONS_PER_USER,
 };
 use tokio::sync::{broadcast, mpsc};
@@ -99,48 +99,6 @@ fn test_mair_524_signal_types() {
     }
 }
 
-/// MAIR-657: SSE and WebSocket connections share the limit; the oldest is evicted whatever its
-/// transport.
-#[tokio::test]
-async fn mair_657_the_limit_counts_sse_and_websocket_connections_together() {
-    use message_api::sse::state::Transport;
-    let (bus, _) = broadcast::channel(4);
-    let state = AppState::new(bus, None);
-
-    let oldest_sse = state.register(8, sender());
-    for _ in 1..MAX_CONNECTIONS_PER_USER {
-        state.register_as(8, sender(), Transport::WebSocket);
-    }
-    let newest = state.register_as(8, sender(), Transport::WebSocket);
-
-    let ids: Vec<u64> = state
-        .transports_of(8)
-        .iter()
-        .map(|(id, _, _)| *id)
-        .collect();
-    assert_eq!(ids.len(), MAX_CONNECTIONS_PER_USER);
-    assert!(
-        !ids.contains(&oldest_sse.id),
-        "the oldest (SSE) one is evicted"
-    );
-    assert!(ids.contains(&newest.id));
-    tokio::time::timeout(Duration::from_secs(1), oldest_sse.close.notified())
-        .await
-        .expect("the evicted stream is told to close");
-}
-
-/// MAIR-657: an SSE connection receives a whole `data:` event, a WebSocket the bare JSON.
-#[test]
-fn mair_657_each_transport_frames_the_signal_its_way() {
-    use message_api::sse::state::Transport;
-    let payload = r#"{"type":"NEW_MSG","chat_id":5,"message_id":118}"#;
-    assert_eq!(
-        Transport::Sse.frame(payload),
-        Bytes::from(format!("data: {payload}\n\n"))
-    );
-    assert_eq!(Transport::WebSocket.frame(payload), Bytes::from(payload));
-}
-
 #[test]
 fn test_mair_1155_recipients_cross_the_relay_and_default_to_none() {
     let changed = serde_json::to_value(ChatSignal::from_event(&ChatEvent::members_changed(
@@ -167,37 +125,39 @@ fn test_mair_1155_recipients_cross_the_relay_and_default_to_none() {
     );
 }
 
-/// MAIR-657 review: a WebSocket whose buffer is full is told to close (`1013`) instead of losing the
-/// signal silently; an SSE stream keeps dropping the frame; a closed channel is removed.
+/// MAIR-657 review: a connection whose buffer is full is told to close (`1013`) instead of losing
+/// the signal silently; a closed channel is removed.
 #[tokio::test]
-async fn mair_657_a_full_websocket_buffer_closes_the_socket_and_an_sse_one_drops() {
-    use message_api::sse::state::{Delivery, Transport};
+async fn mair_657_a_full_buffer_closes_the_socket() {
+    use message_api::realtime::state::Delivery;
     let (bus, _) = broadcast::channel(4);
     let state = AppState::new(bus, None);
-    // Channels of one frame, never read: the second signal finds them full.
+    // A channel of one frame, never read: the second signal finds it full.
     let (ws_tx, _ws_rx) = mpsc::channel(1);
-    let (sse_tx, _sse_rx) = mpsc::channel(1);
-    let ws = state.register_as(9, ws_tx, Transport::WebSocket);
-    let sse = state.register_as(9, sse_tx, Transport::Sse);
-    let dead = state.register_as(9, sender(), Transport::WebSocket); // receiver dropped
+    let ws = state.register(9, ws_tx);
+    let dead = state.register(9, sender()); // receiver dropped
 
     let first = state.deliver(9, r#"{"type":"NEW_MSG","chat_id":5}"#);
     assert!(first.contains(&(ws.id, Delivery::Queued)));
-    assert!(first.contains(&(sse.id, Delivery::Queued)));
     assert!(first.contains(&(dead.id, Delivery::Removed)));
 
     let second = state.deliver(9, r#"{"type":"NEW_MSG","chat_id":5}"#);
     assert!(second.contains(&(ws.id, Delivery::Overflowed)));
-    assert!(second.contains(&(sse.id, Delivery::Dropped)));
     assert!(ws.overflowed.load(std::sync::atomic::Ordering::Acquire));
     tokio::time::timeout(Duration::from_secs(1), ws.close.notified())
         .await
         .expect("the overflowing socket is told to close");
-    assert!(!sse.overflowed.load(std::sync::atomic::Ordering::Acquire));
-    assert!(
-        tokio::time::timeout(Duration::from_millis(100), sse.close.notified())
-            .await
-            .is_err(),
-        "the SSE stream stays open"
-    );
+}
+
+/// MAIR-662: with the SSE gone, a signal is queued as the bare `ChatSignal` JSON, the WebSocket
+/// text frame, never as an SSE `data:` event.
+#[tokio::test]
+async fn mair_662_a_signal_is_queued_as_the_bare_json_frame() {
+    let (bus, _) = broadcast::channel(4);
+    let state = AppState::new(bus, None);
+    let (tx, mut rx) = mpsc::channel(1);
+    state.register(3, tx);
+    let payload = r#"{"type":"NEW_MSG","chat_id":5,"message_id":118}"#;
+    state.deliver(3, payload);
+    assert_eq!(rx.recv().await.unwrap().unwrap(), Bytes::from(payload));
 }

@@ -41,7 +41,7 @@ Trames **texte** UTF-8, un objet JSON chacune. Un client **ignore** une trame il
 le `type` (de nouveaux types peuvent être ajoutés sans changer de version de contrat). On n'ajoute jamais que des
 champs.
 
-Entre l'API et le BFF, la trame est le `ChatSignal` de l'API (identique à la charge `data:` du SSE) ; le BFF la
+Entre l'API et le BFF, la trame est le `ChatSignal` de l'API ; le BFF la
 traduit dans les identifiants du front :
 
 | `type` | Quand | Trame API (`ChatSignal`) | Trame BFF/front (`MessageRealtimeEvent`) | Destinataires |
@@ -110,21 +110,18 @@ navigateur. Taille maximale de trame acceptée à chaque saut : **4 Kio** (`1009
   `1001` est relayée avec le même code et la même raison, toute fin anormale de l'amont (`1006`, erreur) devient
   `1013`.
 - Le **BFF** ferme avec `1001` après `MESSAGE_WS_MAX_MS` (**30 min** par défaut, ± 10 % d'aléa pour que les clients
-  ne se reconnectent pas tous en même temps), ce qui rééquilibre les connexions entre réplicas. Le
-  `MESSAGE_STREAM_MAX_MS` du SSE est inchangé.
+  ne se reconnectent pas tous en même temps), ce qui rééquilibre les connexions entre réplicas.
 - Les raisons de fermeture sont de courtes chaînes anglaises pour les journaux (`session expired`, `evicted`,
   `upstream unavailable`…) ; les clients n'agissent que sur le code.
 
 ## Limites
 
-- **5 connexions par utilisateur et par réplica d'API**, SSE et WebSocket comptés ensemble (un seul registre) : la
-  6e ferme la plus ancienne avec `4008` (WebSocket) ou termine son flux (SSE). Avec plusieurs réplicas, un
+- **5 connexions par utilisateur et par réplica d'API** : la 6e ferme la plus ancienne avec `4008`. Avec plusieurs réplicas, un
   utilisateur peut en tenir 5 sur chacun ; le relais Redis les sert toutes.
 - La poignée de main passe par la limite de débit habituelle de chaque couche (limiteur `/api` de l'API, limiteur
   par appelant du BFF) ; la connexion ouverte ne consomme pas la limite.
-- Tampon d'envoi par connexion côté API : **10 trames**, comme pour le SSE. Plein, un WebSocket est fermé avec
-  `1013` au lieu de perdre le signal en silence : le client se reconnecte et rattrape depuis ses curseurs à l'`open`.
-  (Le SSE continue d'abandonner la trame pour cette seule connexion.)
+- Tampon d'envoi par connexion côté API : **10 trames**. Plein, le WebSocket est fermé avec `1013` au lieu de perdre
+  le signal en silence : le client se reconnecte et rattrape depuis ses curseurs à l'`open`.
 
 ## Comportement du client (Messages_Web_Service)
 
@@ -150,14 +147,12 @@ navigateur. Taille maximale de trame acceptée à chaque saut : **4 Kio** (`1009
 5. Ne pas dédupliquer les signaux : deux `MSG_EDITED` du même message sont deux modifications. Chaque signal
    déclenche une lecture depuis le curseur, idempotente, donc un doublon ne coûte qu'une lecture ; les lectures d'une
    même conversation peuvent être regroupées pendant qu'une est en cours, tant qu'une lecture suit le dernier signal.
-6. Jusqu'à MAIR-662, le client SSE ne sert qu'à un navigateur sans l'API `WebSocket` ; un WebSocket en échec revient
-   au polling de 2 s (étape 3), jamais au flux SSE.
+6. Un navigateur sans l'API `WebSocket`, comme un WebSocket en échec, utilise le polling de 2 s (étape 3).
 
-## Coexistence et retrait
+## Retrait du SSE
 
-Jusqu'à la validation du WebSocket en dev puis en staging (CA11 de MAIR-655), `GET /api/v1/stream` et
-`GET /stream` du BFF restent disponibles et inchangés, et le front peut y revenir. MAIR-662 les retire, ainsi que
-leurs opérations OpenAPI et `MessageStreamEvent`, avec un `feat!` / `BREAKING CHANGE:` dans l'API et le BFF.
+Le WebSocket a remplacé le flux SSE : `GET /api/v1/stream`, `GET /stream` du BFF, leurs opérations
+OpenAPI et `MessageStreamEvent` sont retirés (`feat!` / `BREAKING CHANGE:` dans l'API et le BFF) et répondent `404`.
 
 ## Tests attendus par couche
 
@@ -176,11 +171,11 @@ leurs opérations OpenAPI et `MessageStreamEvent`, avec un `feat!` / `BREAKING C
   A et B membres, C extérieur ; A poste : seul B reçoit `NEW_MSG`, une fois ; la 6e connexion de B évince la plus
   ancienne avec `4008` et les 5 autres continuent de recevoir.
 - **ZAP** (`security_test.sh`) : `/api/v1/ws` est scanné comme toute route. ZAP ne sait pas faire l'upgrade, il voit le
-  `GET` simple (`401` sans jeton, `400` sans `Upgrade`, en texte brut, sans alerte). L'expression `OUTOFSCOPE` de la
-  règle `100001` garde `/api/v1/stream` : la réponse SSE ne se termine jamais et bloquerait le scan jusqu'au délai de
-  ZAP. Elle part avec le SSE.
+  `GET` simple (`401` sans jeton, `400` sans `Upgrade`, en texte brut, sans alerte). Seule l'interface Swagger reste hors du
+  périmètre de la règle `100001`.
 - **k6** (`performance_test.sh`) : le scénario `websocket` tient un socket par VU (20 en profil `ci`, 200 en `stress`)
   pendant que l'Admin poste dans le chat de chaque VU toutes les 2 s. Chaque message doit revenir en trame `NEW_MSG`
   (`ws_frames_lost == 0`), `ws_frame_delivery` (début du `POST` → trame) a un `p(95)` de 1 s et la poignée de main
   (`ws_connecting`) un `p(95)` de 500 ms, en plus des seuils stricts `checks`, `http_req_failed` et
-  `dropped_iterations`. Le scénario `stream` garde le SSE à 1 VU jusqu'à son retrait.
+  `dropped_iterations`. Le scénario `stream` ne compte que le `GET` simple de
+  `/api/v1/ws` (`400`) pour la couverture.

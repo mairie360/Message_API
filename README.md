@@ -1,6 +1,6 @@
 # Message API
 
-Chats (group and direct), messages, read acknowledgements and the Server-Sent-Events stream (`GET /api/v1/stream`) that notifies clients of new, edited or deleted messages. Consumed by `BFF_Message`.
+Chats (group and direct), messages, read acknowledgements and the real-time WebSocket (`GET /api/v1/ws`) that notifies clients of new, edited or deleted messages. Consumed by `BFF_Message`.
 
 - Crate `message_api`, image `ghcr.io/mairie360/message-api`, port **3003** (Actix-web, PostgreSQL, Redis).
 - Shared infrastructure (database access and cache, JWT middleware, env helpers, test containers) comes from [`mairie360_api_lib`](https://crates.io/crates/mairie360_api_lib).

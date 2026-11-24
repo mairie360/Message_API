@@ -5,7 +5,7 @@
 use actix_web::http::{Method, StatusCode};
 use mairie360_api_lib::database::db_interface::QueryParam;
 use mairie360_api_lib::smart_db::SmartDatabase;
-use message_api::sse::state::{ChatEvent, ChatEventKind};
+use message_api::realtime::state::{ChatEvent, ChatEventKind};
 use serde_json::{json, Value};
 use tokio::sync::broadcast;
 

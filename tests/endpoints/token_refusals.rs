@@ -210,16 +210,6 @@ async fn a_genuine_token_passes_the_authentication_of_every_operation() {
     let user = plain_user(&get_fixture_db().await).await;
 
     for (method, uri) in secured_operations(1) {
-        // The stream never ends: its status is read without waiting for the body.
-        if uri.ends_with("/stream") {
-            let response = actix_web::test::call_service(
-                &app,
-                request(method.clone(), &uri, Some(user)).to_request(),
-            )
-            .await;
-            assert_eq!(response.status(), StatusCode::OK, "{method} {uri}");
-            continue;
-        }
         let (status, _) = send!(
             app,
             request(method.clone(), &uri, Some(user)).set_json(serde_json::json!({}))

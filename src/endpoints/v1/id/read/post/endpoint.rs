@@ -10,7 +10,7 @@ use crate::endpoints::v1::id::access::{begin, commit, require_chat_access_in, Ac
 use crate::endpoints::v1::id::read::post::view::{AcknowledgeReadResultView, AcknowledgeReadView};
 use crate::endpoints::v1::id::ChatPathParams;
 use crate::endpoints::validation::ValidatedJson;
-use crate::sse::state::ChatEvent;
+use crate::realtime::state::ChatEvent;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AcknowledgeReadError {
@@ -92,7 +92,7 @@ async fn trigger_acknowledge_read(
                    from the JWT, and messages written by the caller themselves (and deleted messages) are never counted as \
                    unread.\n\n\
                    Once committed, a `CHAT_READ` `ChatSignal` (`message_id` = `readUntilMessageId`, `unread_count`) \
-                   is pushed on **the caller's own** SSE streams (other tabs and devices, the calling one included), \
+                   is pushed on **the caller's own** WebSockets (other tabs and devices, the calling one included), \
                    never to the other members.\n\n\
                    Only the members of the chat may call this route; administrators bypass the check (their count is \
                    always `0` when they are not members). A caller who is not a member gets the same `404` as for an \
@@ -146,7 +146,7 @@ async fn trigger_acknowledge_read(
 #[post("/")]
 pub async fn acknowledge_read(
     state: web::Data<AppState>,
-    sse_state: web::Data<crate::sse::state::AppState>,
+    sse_state: web::Data<crate::realtime::state::AppState>,
     auth_user: AuthenticatedUser,
     view: ValidatedJson<AcknowledgeReadView>,
     params: web::Path<ChatPathParams>,

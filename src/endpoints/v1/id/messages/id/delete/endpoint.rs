@@ -16,7 +16,7 @@ use crate::database::chats::message_tags::view::PurgeMessageExtrasQueryView;
 use crate::endpoints::error::{classify, unexpected, DbFailure};
 use crate::endpoints::v1::id::messages::id::patch::endpoint::SYSTEM_NOTE_MESSAGE;
 use crate::endpoints::v1::id::messages::id::MessagePathParams;
-use crate::sse::state::ChatEvent;
+use crate::realtime::state::ChatEvent;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DeleteMessageError {
@@ -111,7 +111,7 @@ async fn trigger_delete_message(
                    quote it, it cannot be edited, quoted nor deleted again (`404`), and the unread counters that \
                    still counted it are lowered. The incremental read `GET /api/v1/{chat_id}/?since=` returns it \
                    once as `deleted: true` so that the clients remove it.\n\n \
-                   Once committed, a `MSG_DELETED` `ChatSignal` (with `message_id`) is pushed on the SSE stream of \
+                   Once committed, a `MSG_DELETED` `ChatSignal` (with `message_id`) is pushed on the WebSocket of \
                    every other connected member.\n\n \
                    Only the author of the message may delete it (`403` for another member). Administrators may \
                    delete any message, even in a chat they are not a member of (moderation): the deletion of a \
@@ -170,7 +170,7 @@ async fn trigger_delete_message(
 #[delete("/")]
 pub async fn delete_message(
     state: web::Data<AppState>,
-    sse_state: web::Data<crate::sse::state::AppState>,
+    sse_state: web::Data<crate::realtime::state::AppState>,
     auth_user: AuthenticatedUser,
     params: web::Path<MessagePathParams>,
 ) -> Result<impl Responder, DeleteMessageError> {

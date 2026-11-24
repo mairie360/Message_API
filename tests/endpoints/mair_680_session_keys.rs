@@ -53,7 +53,7 @@ async fn mair_680_hs256_token_is_refused_without_jwt_secret() {
         b"b\"secret\"",
         b"any-secret-of-a-compromised-service-0123456789",
     ] {
-        for uri in ["/api/v1/", "/api/v1/stream"] {
+        for uri in ["/api/v1/", "/api/v1/ws"] {
             let (status, body) = send!(app, hs256(admin, secret).method(Method::GET).uri(uri));
             assert_eq!(status, StatusCode::UNAUTHORIZED, "HS256 on {uri}: {body}");
         }
