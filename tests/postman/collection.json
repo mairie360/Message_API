@@ -5287,7 +5287,10 @@
                   "});",
                   "pm.test(\"No event stream is opened\", function () {",
                   "    pm.expect(pm.response.headers.get('Content-Type') || '').to.not.include('text/event-stream');",
-                  "});"
+                  "});",
+                  "// Local variables last for the whole newman run: end the opt-out here, the request test",
+                  "// runs after the collection test that read it.",
+                  "pm.variables.unset('openapi_contract');"
                 ]
               }
             }
