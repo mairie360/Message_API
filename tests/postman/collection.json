@@ -5266,6 +5266,17 @@
           },
           "event": [
             {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The route was removed from the spec on purpose: the collection contract check would",
+                  "// fail on an undocumented operation, while this case proves the route is gone.",
+                  "pm.variables.set('openapi_contract', 'skip');"
+                ]
+              }
+            },
+            {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
