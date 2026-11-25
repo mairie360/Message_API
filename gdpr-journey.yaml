@@ -55,13 +55,13 @@ steps:
       path: "/api/v1/{{chat_id}}/messages/{{message_id}}/"
       headers: {Authorization: "Bearer {{env.ADMIN_JWT}}"}
       json: {content: "{{marker.last_name}} moved, new number {{marker.phone}}"}
-  - name: edit a message that does not exist (deliberate error, answered 400)
+  - name: edit a message that does not exist (deliberate error)
     request:
       method: PATCH
       path: "/api/v1/{{chat_id}}/messages/999999/"
       headers: {Authorization: "Bearer {{env.ADMIN_JWT}}"}
       json: {content: "{{marker.last_name}} moved, new number {{marker.phone}}"}
-    expect: [400]
+    expect: [404]
   - name: read the chat
     request: {method: GET, path: "/api/v1/{{chat_id}}/", headers: {Authorization: "Bearer {{env.ADMIN_JWT}}"}}
   - name: read the chat with a refused cursor (deliberate error, query string)
