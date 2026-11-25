@@ -42,3 +42,8 @@ risks:
       Audit trail of the accounts (users_audit_log): the database trigger copies the users row on every change, and only administrators read it. On erasure, anonymize_user() replaces the identity keys of the user's rows with a salted hash whose salt is never stored (the sha256: values of the findings). The 10-year retention declared in retention_policies is not applied by fn_apply_retention_policies yet, so the rows stay until then. Accepted for this release.
     date: 2026-11-25
     author: Quentintnrl
+  - fingerprint: 0ca79d00a74fc5cf7393c694  # messaging_moderation_log.content
+    reason: >-
+      Moderation evidence (messaging_moderation_log): when an administrator deletes the message of someone else, the database keeps a copy of its content, free text typed by an agent that can name a person. Erasure keeps these records on purpose (the keep class of anonymize_user()) and no retention rule covers them; only administrators read them. Accepted for this release.
+    date: 2026-11-25
+    author: Quentintnrl
