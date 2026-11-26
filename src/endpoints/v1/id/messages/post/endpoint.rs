@@ -9,9 +9,11 @@ use crate::endpoints::v1::id::access::{
 };
 
 use crate::database::chats::add_message_to_chat::view::PostMessageInChatQueryView;
+use crate::database::chats::get_chat::view::{GetMessageQueryView, Message};
 use crate::database::chats::reveal_direct_chat::view::RevealDirectChatQueryView;
 use crate::database::ids::bigint_from_sql;
 use crate::endpoints::error::{classify, unexpected, DbFailure};
+use crate::endpoints::v1::id::get::view::MessageView;
 use crate::endpoints::v1::id::messages::post::view::{PostMessageResultView, PostMessageView};
 use crate::endpoints::v1::id::messages::tags::{
     check_tags, mention_recipients, write_tags, TagsFailure,
@@ -112,8 +114,17 @@ async fn trigger_post_message(
     } else {
         Vec::new()
     };
+    // Read back in the same transaction: the author gets the message with its quote, tags and
+    // reactions exactly as the history will return it.
+    let message: Message = tx
+        .fetch_one(&GetMessageQueryView::new(chat_id, message_id))
+        .await
+        .map_err(|e| {
+            unexpected("read posted message", e);
+            PosteMessageError::DatabaseError
+        })?;
     Ok(Posted {
-        result: PostMessageResultView::new(message_id),
+        result: PostMessageResultView::new(MessageView::from(message)),
         mentioned,
     })
 }
@@ -129,7 +140,8 @@ async fn trigger_post_message(
                    same chat and not deleted (`400` otherwise) and is read back as `citation` by \
                    `GET /api/v1/{chat_id}/` (`null` once the quoted message is deleted).\n\n \
                    The signal is `NEW_MSG` with the new `message_id`, pushed once the message is committed.\n\n \
-                   The response only holds the id given to the message.\n\n \
+                   The response holds the id given to the message and the `message` itself as \
+                   `GET /api/v1/{chat_id}/` reads it (with the `quoted` message it answers).\n\n \
                    **Mentions and links** (MAIR-1155, optional): `mentions` (members of the chat), \
                    `mentions_everyone`, `group_mentions` (groups one of the members belongs to, see \
                    `GET /api/v1/{chat_id}/mention-groups/`) and `links` (`{kind: project | task | event, id}` the \
@@ -144,9 +156,29 @@ async fn trigger_post_message(
     responses(
         (
             status = 200,
-            description = "Message posted. The body holds its id.",
+            description = "Message posted. The body holds its id and the message as the history reads it.",
             body = PostMessageResultView,
-            example = json!({ "id": 101 })
+            example = json!({
+                "id": 101,
+                "message": {
+                    "id": 101,
+                    "content": "The meeting is moved to 3 pm.",
+                    "sender_id": 42,
+                    "created_at": "2026-09-16T09:12:00Z",
+                    "citation": 118,
+                    "quoted": { "id": 118, "sender_id": 51, "excerpt": "Any news about the building permit for rue Pasteur?", "deleted": false },
+                    "edited_at": null,
+                    "updated_at": "2026-09-16T09:12:00.331207Z",
+                    "deleted": false,
+                    "kind": "user",
+                    "system_event": null,
+                    "mentions": [42],
+                    "mentions_everyone": false,
+                    "group_mentions": [],
+                    "links": [],
+                    "reactions": []
+                }
+            })
         ),
         (
             status = 400,

@@ -87,18 +87,20 @@ impl ApiRequestDto for GetChatQueryView {
         // page even when it is older than the page (`reply_to_id`'s composite foreign key keeps it
         // in the same chat).
         //
-        // Tombstones (MAIR-524, `deleted_at`) are not part of the history, and the excerpt of a
-        // deleted quoted message is hidden (`citation` reads `NULL` as before the soft delete).
+        // Tombstones (MAIR-524, `deleted_at`) are not part of the history. A reply to a deleted
+        // message keeps its `citation`, flagged `reply_deleted`, without the author nor an excerpt
+        // of the deleted message.
         concat!(
             "SELECT to_jsonb(t) FROM ( \
              SELECT m.id, m.owner_id, m.content, m.created_at, \
                     CASE WHEN q.id IS NOT NULL THEN m.reply_to_id END AS reply_to_id, \
-                    q.owner_id AS reply_owner_id, left(q.content, 100) AS reply_excerpt, \
+                    CASE WHEN q.deleted_at IS NULL THEN q.owner_id END AS reply_owner_id, \
+                    CASE WHEN q.deleted_at IS NULL THEN left(q.content, 100) END AS reply_excerpt, \
+                    q.deleted_at IS NOT NULL AS reply_deleted, \
                     m.updated_at, m.edited_at, FALSE AS deleted, ",
             message_v2_columns!(),
             " FROM messages m \
              LEFT JOIN messages q ON q.id = m.reply_to_id AND q.conversation_id = m.conversation_id \
-                 AND q.deleted_at IS NULL \
              WHERE m.conversation_id = $1 AND m.deleted_at IS NULL \
                AND ($2::bigint = 0 OR m.id < $2::bigint) \
              ORDER BY m.id DESC \
@@ -119,13 +121,16 @@ pub struct Message {
     pub owner_id: Option<i32>,
     pub content: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
-    /// The quoted message, `NULL` when none or once it is deleted.
+    /// The quoted message, `NULL` when none (kept once the quoted message is deleted).
     pub reply_to_id: Option<i64>,
-    /// Author of the quoted message: `NULL` when none is quoted or once its author's account is
-    /// deleted.
+    /// Author of the quoted message: `NULL` when none is quoted, once the quoted message is deleted
+    /// or once its author's account is deleted.
     pub reply_owner_id: Option<i32>,
-    /// First 100 characters of the quoted message, `NULL` when none is quoted.
+    /// First 100 characters of the quoted message, `NULL` when none is quoted or once it is deleted.
     pub reply_excerpt: Option<String>,
+    /// The quoted message is deleted (tombstone): only its id is kept.
+    #[serde(default)]
+    pub reply_deleted: bool,
     /// Last change of the message (posted, edited, deleted): the cursor of the reads since.
     pub updated_at: chrono::DateTime<chrono::Utc>,
     /// Last edit of the content, `NULL` when never edited.
@@ -239,18 +244,20 @@ impl Display for GetChatChangesQueryView {
 
 impl ApiRequestDto for GetChatChangesQueryView {
     fn query_sql(&self) -> &'static str {
-        // A tombstone carries no content nor quote; a live message quoting a deleted one loses
-        // its quote like in the history.
+        // A tombstone carries no content nor quote; a live message quoting a deleted one keeps its
+        // citation, flagged `reply_deleted`, like in the history.
         concat!(
             "SELECT to_jsonb(t) FROM ( \
              SELECT m.id, m.owner_id, m.content, m.created_at, \
                     CASE WHEN q.id IS NOT NULL THEN m.reply_to_id END AS reply_to_id, \
-                    q.owner_id AS reply_owner_id, left(q.content, 100) AS reply_excerpt, \
+                    CASE WHEN q.deleted_at IS NULL THEN q.owner_id END AS reply_owner_id, \
+                    CASE WHEN q.deleted_at IS NULL THEN left(q.content, 100) END AS reply_excerpt, \
+                    q.deleted_at IS NOT NULL AS reply_deleted, \
                     m.updated_at, m.edited_at, m.deleted_at IS NOT NULL AS deleted, ",
             message_v2_columns!(),
             " FROM messages m \
              LEFT JOIN messages q ON q.id = m.reply_to_id AND q.conversation_id = m.conversation_id \
-                 AND q.deleted_at IS NULL AND m.deleted_at IS NULL \
+                 AND m.deleted_at IS NULL \
              WHERE m.conversation_id = $1 \
                AND (m.updated_at, m.id) > ($2::timestamptz, $3::bigint) \
              ORDER BY m.updated_at, m.id \
@@ -402,12 +409,14 @@ impl ApiRequestDto for GetMessageQueryView {
             "SELECT to_jsonb(t) FROM ( \
              SELECT m.id, m.owner_id, m.content, m.created_at, \
                     CASE WHEN q.id IS NOT NULL THEN m.reply_to_id END AS reply_to_id, \
-                    q.owner_id AS reply_owner_id, left(q.content, 100) AS reply_excerpt, \
+                    CASE WHEN q.deleted_at IS NULL THEN q.owner_id END AS reply_owner_id, \
+                    CASE WHEN q.deleted_at IS NULL THEN left(q.content, 100) END AS reply_excerpt, \
+                    q.deleted_at IS NOT NULL AS reply_deleted, \
                     m.updated_at, m.edited_at, m.deleted_at IS NOT NULL AS deleted, ",
             message_v2_columns!(),
             " FROM messages m \
              LEFT JOIN messages q ON q.id = m.reply_to_id AND q.conversation_id = m.conversation_id \
-                 AND q.deleted_at IS NULL AND m.deleted_at IS NULL \
+                 AND m.deleted_at IS NULL \
              WHERE m.conversation_id = $1 AND m.id = $2 \
          ) t"
         )

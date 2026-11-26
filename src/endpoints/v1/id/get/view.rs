@@ -102,18 +102,44 @@ impl Validate for GetChatQuery {
 }
 
 /// The message another one answers, with what is needed to display the quote without reading it.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, ToSchema)]
+/// Once the quoted message is deleted, only its `id` and `deleted: true` are given: neither its
+/// author nor its content are exposed any more.
+#[derive(Debug, Clone, PartialEq, ToSchema)]
 pub struct QuotedMessageView {
     /// Id of the quoted message (the `citation` of the message that quotes it).
     #[schema(example = 117)]
     id: u64,
     /// Core API id of the author of the quoted message; `null` once the author's account is
-    /// deleted.
-    #[schema(example = 51, nullable = true)]
+    /// deleted. Absent when the quoted message is deleted.
+    #[schema(example = 51, nullable = true, required = false)]
     sender_id: Option<u64>,
-    /// First 100 characters of the quoted message.
-    #[schema(example = "Any news about the building permit for rue Pasteur?")]
-    excerpt: String,
+    /// First 100 characters of the quoted message. Absent when the quoted message is deleted.
+    #[schema(
+        example = "Any news about the building permit for rue Pasteur?",
+        required = false
+    )]
+    excerpt: Option<String>,
+    /// `true` once the quoted message is deleted: show the quote as deleted.
+    #[schema(example = false)]
+    deleted: bool,
+}
+
+impl serde::Serialize for QuotedMessageView {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        if self.deleted {
+            let mut quote = serializer.serialize_struct("QuotedMessageView", 2)?;
+            quote.serialize_field("id", &self.id)?;
+            quote.serialize_field("deleted", &true)?;
+            return quote.end();
+        }
+        let mut quote = serializer.serialize_struct("QuotedMessageView", 4)?;
+        quote.serialize_field("id", &self.id)?;
+        quote.serialize_field("sender_id", &self.sender_id)?;
+        quote.serialize_field("excerpt", self.excerpt.as_deref().unwrap_or_default())?;
+        quote.serialize_field("deleted", &false)?;
+        quote.end()
+    }
 }
 
 impl QuotedMessageView {
@@ -121,7 +147,18 @@ impl QuotedMessageView {
         Self {
             id,
             sender_id,
-            excerpt: excerpt.to_string(),
+            excerpt: Some(excerpt.to_string()),
+            deleted: false,
+        }
+    }
+
+    /// The quote of a deleted message: its id only.
+    pub fn deleted(id: u64) -> Self {
+        Self {
+            id,
+            sender_id: None,
+            excerpt: None,
+            deleted: true,
         }
     }
 
@@ -133,8 +170,12 @@ impl QuotedMessageView {
         self.sender_id
     }
 
-    pub fn excerpt(&self) -> &str {
-        &self.excerpt
+    pub fn excerpt(&self) -> Option<&str> {
+        self.excerpt.as_deref()
+    }
+
+    pub fn is_deleted(&self) -> bool {
+        self.deleted
     }
 }
 
@@ -371,12 +412,12 @@ pub struct MessageView {
     /// Date the message was posted.
     #[schema(value_type = String, format = DateTime, example = "2026-09-16T09:12:00Z")]
     created_at: DateTime<Utc>,
-    /// Id of the message this one answers (same chat); `null` when it answers none or once the
-    /// quoted message is deleted.
+    /// Id of the message this one answers (same chat), kept once the quoted message is deleted;
+    /// `null` when it answers none.
     #[schema(example = 117, nullable = true)]
     citation: Option<u64>,
     /// The message `citation` points to (author and excerpt), also when it is older than this page;
-    /// `null` exactly when `citation` is.
+    /// `{ id, deleted: true }` once it is deleted; `null` exactly when `citation` is.
     quoted: Option<QuotedMessageView>,
     /// Date of the last edit of the content; `null` when the message was never edited.
     #[schema(value_type = Option<String>, format = DateTime, example = "2026-09-16T09:14:30.105822Z", nullable = true, required = true)]
@@ -531,6 +572,9 @@ impl From<Message> for MessageView {
             message.reply_to_id.filter(|_| !message.deleted),
             message.reply_excerpt.as_deref(),
         ) {
+            (Some(id), _) if message.reply_deleted => {
+                Some(QuotedMessageView::deleted(bigint_from_sql(id)))
+            }
             (Some(id), Some(excerpt)) => Some(QuotedMessageView::new(
                 bigint_from_sql(id),
                 message.reply_owner_id.map(id_from_sql),
@@ -728,6 +772,7 @@ mod tests {
             reply_to_id: None,
             reply_owner_id: None,
             reply_excerpt: None,
+            reply_deleted: false,
             updated_at: Utc::now(),
             edited_at: None,
             deleted: false,
@@ -782,9 +827,55 @@ mod tests {
         let quoted = view.quoted().expect("quoted message");
         assert_eq!(
             (quoted.id(), quoted.sender_id(), quoted.excerpt()),
-            (3, Some(51), "Le permis ?")
+            (3, Some(51), Some("Le permis ?"))
         );
+        assert!(!quoted.is_deleted());
         assert!(MessageView::from(message(8)).quoted().is_none());
+    }
+
+    #[test]
+    fn mair_1219_a_reply_to_a_deleted_message_keeps_its_citation_without_the_content() {
+        let mut quoting = message(7);
+        quoting.reply_to_id = Some(3);
+        quoting.reply_deleted = true;
+        let view = MessageView::from(quoting);
+        assert_eq!(view.citation(), Some(3));
+        let quoted = view.quoted().expect("quote of a deleted message");
+        assert!(quoted.is_deleted());
+        assert_eq!(
+            (quoted.id(), quoted.sender_id(), quoted.excerpt()),
+            (3, None, None)
+        );
+        let json = serde_json::to_value(&view).unwrap();
+        assert_eq!(json["citation"], serde_json::json!(3));
+        assert_eq!(
+            json["quoted"],
+            serde_json::json!({ "id": 3, "deleted": true })
+        );
+    }
+
+    #[test]
+    fn mair_1219_a_live_quote_is_serialized_with_its_author_excerpt_and_deleted_false() {
+        let mut quoting = message(7);
+        quoting.reply_to_id = Some(3);
+        quoting.reply_owner_id = None;
+        quoting.reply_excerpt = Some("Le permis ?".to_string());
+        let json = serde_json::to_value(MessageView::from(quoting)).unwrap();
+        assert_eq!(
+            json["quoted"],
+            serde_json::json!({ "id": 3, "sender_id": null, "excerpt": "Le permis ?", "deleted": false })
+        );
+    }
+
+    #[test]
+    fn mair_1219_a_deleted_message_itself_still_has_no_citation() {
+        let mut tombstone = message(7);
+        tombstone.reply_to_id = Some(3);
+        tombstone.reply_deleted = true;
+        tombstone.deleted = true;
+        let view = MessageView::from(tombstone);
+        assert_eq!(view.citation(), None);
+        assert!(view.quoted().is_none());
     }
 
     #[test]

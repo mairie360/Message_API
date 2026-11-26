@@ -1,4 +1,4 @@
-use crate::endpoints::v1::id::get::view::MessageLinkView;
+use crate::endpoints::v1::id::get::view::{MessageLinkView, MessageView};
 use crate::endpoints::v1::id::messages::tags::MessageTags;
 use crate::endpoints::validation::{
     check_description, Validate, ValidationError, MAX_MESSAGE_ID, MAX_MESSAGE_LENGTH,
@@ -77,15 +77,25 @@ pub struct PostMessageResultView {
     /// Id given to the message.
     #[schema(example = 101)]
     id: u64,
+    /// The message as `GET /api/v1/{chat_id}/` reads it, with the `quoted` message it answers, so the
+    /// author can show it at once.
+    message: MessageView,
 }
 
 impl PostMessageResultView {
-    pub fn new(id: u64) -> Self {
-        Self { id }
+    pub fn new(message: MessageView) -> Self {
+        Self {
+            id: message.id(),
+            message,
+        }
     }
 
     pub fn id(&self) -> u64 {
         self.id
+    }
+
+    pub fn message(&self) -> &MessageView {
+        &self.message
     }
 }
 
