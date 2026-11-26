@@ -138,7 +138,8 @@ async fn trigger_post_message(
                    member. The author is taken from the JWT, never from the body.\n\n \
                    `citation` is optional: the id of the message this one answers. It must be a message of the \
                    same chat and not deleted (`400` otherwise) and is read back as `citation` by \
-                   `GET /api/v1/{chat_id}/` (`null` once the quoted message is deleted).\n\n \
+                   `GET /api/v1/{chat_id}/`, also once the quoted message is deleted (`quoted` is then \
+                   `{ id, deleted: true }`).\n\n \
                    The signal is `NEW_MSG` with the new `message_id`, pushed once the message is committed.\n\n \
                    The response holds the id given to the message and the `message` itself as \
                    `GET /api/v1/{chat_id}/` reads it (with the `quoted` message it answers).\n\n \
