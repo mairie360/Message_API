@@ -47,6 +47,11 @@ operations:
   POST /api/v1/direct/:
     access: authenticated
     roles: [Admin, Maire, Responsable, User, Guest]
+  GET /api/v1/search:
+    access: authenticated
+    roles: [Admin, Maire, Responsable, User, Guest]
+    personal: [items.title, items.excerpt]
+    note: "global search: only the chats the caller is a non-excluded member of and their messages"
   GET /api/v1/unread/:
     access: authenticated
     roles: [Admin, Maire, Responsable, User, Guest]

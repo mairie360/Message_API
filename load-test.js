@@ -218,6 +218,12 @@ const readHandlers = {
     });
   },
   // The unread badge (MAIR-1106): one aggregate over the agent's 16 group chats.
+  // Global search of the shared header: the chats and messages of the agent.
+  'GET /api/v1/search': ({ request }) =>
+    check(request({ query: { q: 'perf', limit: 8 }, headers: randomAgentRank().headers }), {
+      'search 200': (r) => r.status === 200,
+      'search answers a list': (r) => r.status === 200 && Array.isArray(r.json('items')),
+    }),
   'GET /api/v1/unread/': ({ request }) =>
     check(request({ headers: randomAgent().headers }), {
       'unread total 200': (r) => r.status === 200,
