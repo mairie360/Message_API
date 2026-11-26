@@ -237,17 +237,32 @@ async fn test_mair_524_history_skips_tombstones_and_their_quotes() {
         "the tombstone is not in the history"
     );
     let reply_row = &history[0];
+    // MAIR-1219: the reply keeps its citation, flagged deleted, without the author nor the content.
     assert_eq!(
-        reply_row.reply_to_id, None,
-        "the quote of a deleted message is hidden"
+        reply_row.reply_to_id,
+        Some(quoted),
+        "a reply to a deleted message keeps its citation"
     );
-    assert_eq!(reply_row.reply_excerpt, None);
+    assert!(reply_row.reply_deleted);
+    assert_eq!(
+        reply_row.reply_excerpt, None,
+        "the deleted content is hidden"
+    );
+    assert_eq!(
+        reply_row.reply_owner_id, None,
+        "the deleted author is hidden"
+    );
     assert!(!reply_row.deleted);
 
-    // The incremental read hides the quote too.
+    // The incremental read keeps the citation the same way; the tombstone itself quotes nothing.
     let rows = changes(&db, chat_id, Utc::now() - Duration::hours(1), 0).await;
     let reply_change = rows.iter().find(|m| m.id == reply).unwrap();
+    assert_eq!(reply_change.reply_to_id, Some(quoted));
+    assert!(reply_change.reply_deleted);
     assert_eq!(reply_change.reply_excerpt, None);
+    let tombstone = rows.iter().find(|m| m.id == quoted).unwrap();
+    assert!(tombstone.deleted);
+    assert!(!tombstone.reply_deleted);
 }
 
 #[tokio::test]

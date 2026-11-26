@@ -1104,6 +1104,16 @@
                   "});",
                   "pm.test(\"Body carries the reply id\", function () {",
                   "    pm.environment.set(\"reply_id\", String(pm.response.json().id));",
+                  "});",
+                  "pm.test(\"MAIR-1219 The answer carries the posted reply with its quote\", function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.message, 'message').to.be.an('object');",
+                  "    pm.expect(body.message.id).to.eql(body.id);",
+                  "    pm.expect(body.message.content).to.eql('Bien noté, je préviens le service.');",
+                  "    pm.expect(body.message.sender_id).to.eql(Number(pm.environment.get('agent_user_id')));",
+                  "    pm.expect(body.message.citation).to.eql(Number(pm.environment.get('message_id')));",
+                  "    pm.expect(body.message.quoted).to.eql({ id: Number(pm.environment.get('message_id')), sender_id: Number(pm.environment.get('admin_user_id')), excerpt: 'La réunion est décalée à 15h.', deleted: false });",
+                  "    pm.expect(body.message.deleted).to.be.false;",
                   "});"
                 ]
               }
@@ -2026,6 +2036,287 @@
               ]
             }
           },
+          "response": []
+        },
+        {
+          "name": "MAIR-1219 Post a message that will be deleted",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_admin}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/{{chat_id}}/messages/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "{{chat_id}}",
+                "messages",
+                ""
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"Le permis de la rue Pasteur ?\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.environment.set(\"quoted_1219_id\", String(pm.response.json().id));"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "MAIR-1219 Reply to it",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_agent}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/{{chat_id}}/messages/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "{{chat_id}}",
+                "messages",
+                ""
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"Accordé hier.\",\n  \"citation\": \"{{quoted_1219_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.request.body.raw = JSON.stringify({ content: 'Accordé hier.', citation: Number(pm.environment.get('quoted_1219_id')) });"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"The reply shows its quote at once\", function () {",
+                  "    const message = pm.response.json().message;",
+                  "    pm.expect(message.citation).to.eql(Number(pm.environment.get('quoted_1219_id')));",
+                  "    pm.expect(message.quoted.deleted).to.be.false;",
+                  "    pm.expect(message.quoted.excerpt).to.eql('Le permis de la rue Pasteur ?');",
+                  "});",
+                  "pm.environment.set(\"reply_1219_id\", String(pm.response.json().id));"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "MAIR-1219 Delete the quoted message",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_admin}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/{{chat_id}}/messages/{{quoted_1219_id}}/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "{{chat_id}}",
+                "messages",
+                "{{quoted_1219_id}}",
+                ""
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 204\", function () {",
+                  "    pm.response.to.have.status(204);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "MAIR-1219 After a reload the reply keeps its citation, marked deleted",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_agent}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/{{chat_id}}/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "{{chat_id}}",
+                ""
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"The reply keeps its citation and a deleted quote without its content\", function () {",
+                  "    const quoted = Number(pm.environment.get('quoted_1219_id'));",
+                  "    const messages = pm.response.json().messages;",
+                  "    pm.expect(messages.map(m => m.id)).to.not.include(quoted);",
+                  "    const reply = messages.find(m => m.id === Number(pm.environment.get('reply_1219_id')));",
+                  "    pm.expect(reply, 'reply').to.exist;",
+                  "    pm.expect(reply.citation).to.eql(quoted);",
+                  "    pm.expect(reply.quoted).to.eql({ id: quoted, deleted: true });",
+                  "    pm.expect(pm.response.text()).to.not.include('Le permis de la rue Pasteur');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "MAIR-1219 A deleted message still cannot be quoted",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_agent}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/{{chat_id}}/messages/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "{{chat_id}}",
+                "messages",
+                ""
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"Je cite\",\n  \"citation\": \"{{quoted_1219_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.request.body.raw = JSON.stringify({ content: 'Je cite', citation: Number(pm.environment.get('quoted_1219_id')) });"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "pm.test(\"The refusal names the citation\", function () {",
+                  "    pm.expect(pm.response.text()).to.include('citation');",
+                  "});"
+                ]
+              }
+            }
+          ],
           "response": []
         }
       ]

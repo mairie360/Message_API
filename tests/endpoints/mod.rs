@@ -13,6 +13,7 @@ mod flows;
 mod lists;
 mod mair_1106_unread_total;
 mod mair_1155_messaging_v2;
+mod mair_1219_deleted_quotes;
 mod mair_534_before;
 mod mair_657_websocket;
 mod mair_680_session_keys;

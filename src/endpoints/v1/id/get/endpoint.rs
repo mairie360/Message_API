@@ -123,14 +123,15 @@ async fn trigger_get_chat(
                    that is needed to open a chat. For an administrator who is not a participant of a direct chat, \
                    `name` holds both names and `contact_id` is `null`.\n\n\
                    **Quotes:** a message that answers another has its `citation` id and a `quoted` object (author and \
-                   first 100 characters), also when the quoted message is older than the page. Once the quoted \
-                   message is deleted, both are `null`.\n\n\
+                   first 100 characters, `deleted: false`), also when the quoted message is older than the page. Once \
+                   the quoted message is deleted, `citation` stays and `quoted` is `{ id, deleted: true }`, \
+                   without its author nor its content.\n\n\
                    **Deleted messages** are tombstones: the history (without `since`) never returns them.\n\n\
                    **Incremental read** (MAIR-524, replaces reloading the open chat): `since=<next_since>&since_id=<next_since_id>` \
                    returns only the messages **posted, edited or deleted** after that cursor, in change order \
                    (`updated_at`, then `id`), at most `limit`. A deleted message comes as a tombstone \
-                   (`deleted: true`, empty `content`, `citation` and `quoted` `null`): remove it, and drop the \
-                   `quoted` of the messages that cite it. An edited one comes again with its new `content` and \
+                   (`deleted: true`, empty `content`, `citation` and `quoted` `null`): remove it, and show the \
+                   `quoted` of the messages that cite it as deleted. An edited one comes again with its new `content` and \
                    `edited_at`. Every response carries the next cursor (`next_since`, `next_since_id`): the last \
                    row returned, or the cursor received when nothing changed (`messages` empty). When `has_more` \
                    is `true`, call again at once with it. Start from the `next_since` / `next_since_id` of the \
@@ -164,7 +165,7 @@ async fn trigger_get_chat(
                         "sender_id": 42,
                         "created_at": "2026-09-16T09:12:00Z",
                         "citation": 117,
-                        "quoted": { "id": 117, "sender_id": 51, "excerpt": "Any news about the building permit for rue Pasteur?" },
+                        "quoted": { "id": 117, "sender_id": 51, "excerpt": "Any news about the building permit for rue Pasteur?", "deleted": false },
                         "edited_at": "2026-09-16T09:14:30.105822Z",
                         "updated_at": "2026-09-16T09:14:30.105822Z",
                         "deleted": false
